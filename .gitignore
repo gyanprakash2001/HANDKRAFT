@@ -1,0 +1,33 @@
+## Dependencies
+node_modules/
+**/node_modules/
+
+## Environment files
+.env
+**/.env
+!.env.example
+
+## Build and cache outputs
+dist/
+build/
+**/build/
+.expo/
+**/.expo/
+.expo-shared/
+
+## Native/local machine files
+*.iml
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+**/local.properties
+
+## Runtime artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+## Uploaded/generated app data
+server/uploads/
