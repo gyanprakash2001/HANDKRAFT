@@ -4,16 +4,25 @@ const cors = require('cors');
 const compression = require('compression');
 const path = require('path');
 const { env } = require('./config/env');
+const { startPayoutScheduler } = require('./services/payoutScheduler');
+const { startShipmentTrackingScheduler } = require('./services/shipmentTrackingScheduler');
 
 console.log('\n' + '='.repeat(60));
 console.log('BACKEND STARTING - NEW CODE WITH IMPROVED ERROR HANDLING');
 console.log('='.repeat(60) + '\n');
-console.log(`[ENV] Shiprocket enabled: ${env.shiprocket.enabled ? 'yes' : 'no'}`);
+console.log(`[ENV] Razorpay enabled: ${env.razorpay?.enabled ? 'yes' : 'no'}`);
+console.log(`[ENV] NimbusPost enabled: ${env.nimbuspost?.enabled ? 'yes' : 'no'} (mode: ${env.nimbuspost?.mode || 'auto'})`);
 
 const app = express();
 app.use(cors());
 app.use(compression());
-app.use(express.json({ limit: '12mb' }));
+app.use(express.json({
+  limit: '12mb',
+  verify: (req, res, buf) => {
+    // Preserve raw JSON body for webhook signature verification.
+    req.rawBody = buf && buf.length ? buf.toString('utf8') : '';
+  },
+}));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // health check
@@ -28,6 +37,12 @@ const productsRouter = require('./routes/products');
 app.use('/api/products', productsRouter);
 const ordersRouter = require('./routes/orders');
 app.use('/api/orders', ordersRouter);
+const payoutsRouter = require('./routes/payouts');
+app.use('/api/payouts', payoutsRouter);
+
+// Debug routes (protected) for dry-run Nimbus calls
+const debugRouter = require('./routes/debug');
+app.use('/api/debug', debugRouter);
 
 const chatRouter = require('./routes/chat');
 app.use('/api/chat', chatRouter);
@@ -67,8 +82,12 @@ mongoose
     serverSelectionTimeoutMS: 15000,
     connectTimeoutMS: 15000,
   })
-  .then(() => console.log('MongoDB connected'))
+  .then(() => {
+    console.log('MongoDB connected');
+    startPayoutScheduler();
+    startShipmentTrackingScheduler();
+  })
   .catch(err => console.error('MongoDB connection error', err));
 
 const port = env.port;
-app.listen(port, () => console.log(`Server running on ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`Server running on ${port}`));

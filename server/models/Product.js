@@ -12,6 +12,10 @@ const productSchema = new mongoose.Schema({
   customCategory: { type: String, default: '', trim: true },
   material: { type: String, default: '' },
   stock: { type: Number, default: 0, min: 0 },
+  packageWeightGrams: { type: Number, default: 0, min: 0 },
+  packageLengthCm: { type: Number, default: 0, min: 0 },
+  packageBreadthCm: { type: Number, default: 0, min: 0 },
+  packageHeightCm: { type: Number, default: 0, min: 0 },
   imageAspectRatio: { type: Number, default: 1, min: 0.5, max: 2 },
   media: [{
     type: {
@@ -26,6 +30,8 @@ const productSchema = new mongoose.Schema({
   customizable: { type: Boolean, default: false },
   seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   sellerName: { type: String, default: 'Handmade Artisan' },
+  ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
+  reviewCount: { type: Number, default: 0, min: 0 },
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
 });
