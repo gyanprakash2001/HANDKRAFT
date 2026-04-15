@@ -21,7 +21,7 @@ gradle.beforeProject { project ->
         androidComponents.finalizeDsl { androidExt ->
             def releaseSigning = androidExt.signingConfigs.findByName('release')
             if (releaseSigning == null) {
-                throw new RuntimeException('Release signingConfig not found. Expected Expo prebuild Android config to define signingConfigs.release.')
+                releaseSigning = androidExt.signingConfigs.create('release')
             }
 
             releaseSigning.storeFile = project.file(storeFilePath)
