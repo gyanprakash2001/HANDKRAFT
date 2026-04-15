@@ -1,6 +1,6 @@
 # HANDKRAFT Project Progress Tracker
 
-Last updated: 2026-03-22
+Last updated: 2026-04-07
 
 How to use:
 - Checked box `[x]` means completed.
@@ -42,8 +42,17 @@ How to use:
 - [x] Cart backend endpoints (add/remove/view via profile dashboard).
 - [x] Cart UI in mobile app (profile tab + add to cart from product details).
 - [x] Checkout flow (order creation, payment processing, order confirmation).
-- [ ] Order history/tracking endpoint.
+- [x] Order history/tracking endpoint.
 - [ ] Invoice generation.
+
+## Phase 4.5 - Delivery Partner Integration
+- [x] NimbusPost service module added (V1 API key and V2 bearer token modes).
+- [x] Order schema extended with seller shipment and carrier metadata (AWB, courier, label, manifest, timeline).
+- [x] Auto-book NimbusPost shipments after payment success for ready seller shipments.
+- [x] NimbusPost webhook endpoint added for status updates.
+- [x] Seller manual tracking sync endpoint added using AWB.
+- [ ] Live credentials configured and production booking tested end-to-end.
+- [ ] Nimbus dashboard setup completed (KYC approval, wallet recharge, webhook URL/secret).
 
 ## Phase 5 - Seller Flow
 - [x] Seller listing create API.
@@ -70,6 +79,16 @@ How to use:
 - [ ] Basic automated tests.
 - [ ] Deployment configuration for backend + apps.
 
+## Phase 7.5 - APK Distribution Launch (Week 1)
+- [x] GitHub Pages landing site scaffolded for APK downloads (`docs/`).
+- [x] GitHub Pages deploy workflow added (`.github/workflows/deploy-pages.yml`).
+- [x] Android release signing injection added for CI builds via Gradle init script (`.github/scripts/android-signing.init.gradle`).
+- [x] Tag-based APK release workflow added (`.github/workflows/android-release.yml`).
+- [x] Week 1 launch plan and release checklist documented (`docs/WEEK1_LAUNCH_PLAN.md`, `docs/RELEASE_CHECKLIST.md`).
+- [ ] Student Pack offers activated in GitHub account.
+- [ ] Repository secrets added for Android keystore signing.
+- [ ] First tagged beta release executed and validated end-to-end.
+
 ## Phase 8 - Buyer View Modernization
 - [x] Feed spacing tightened for denser visual browsing.
 - [x] Personalized discovery strip added on buyer feed.
@@ -95,7 +114,11 @@ How to use:
 - [x] Order model created with status tracking and payment info.
 - [x] Checkout endpoints implemented (POST /api/orders, POST /api/orders/:id/pay, GET /api/orders/:id).
 - [x] Checkout screen completed with 4-step flow (cart summary → shipping → payment → confirmation).
-- [x] Payment form validation and processing (Stripe token simulation for demo).
+- [x] Razorpay sandbox checkout integrated (server order creation + signature verification + mobile checkout).
+- [x] Razorpay webhook reconciliation endpoint added (`POST /api/orders/webhooks/razorpay`).
+- [x] Checkout payment endpoints made idempotent (safe retries on already-paid orders).
+- [x] Checkout runtime detection fixed for native Razorpay module on mobile.
+- [x] Integration readiness endpoint and smoke-test script added (`GET /api/debug/integrations/readiness`, `npm run verify:checkout-flow`).
 - [x] Order confirmation screen with order ID and details display.
 - [x] Cart notification popup component (minimal, bottom-fixed, shows last added item).
 - [x] Replaced full cart drawer with lightweight notification UX.
@@ -104,3 +127,5 @@ How to use:
 - [ ] Sync notification quantity changes to backend when navigating to checkout.
 - [x] Feed personalization started (discovery strip + category chips).
 - [ ] Next: offer strip in cart/checkout with savings summary.
+- [x] NimbusPost backend integration completed in server codebase.
+- [ ] Next: complete Nimbus + Razorpay dashboard webhook setup on deployed HTTPS backend and run first live booking test.

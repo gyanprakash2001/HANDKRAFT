@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HANDKRAFT APK Downloads</title>
+    <meta
+      name="description"
+      content="Download the latest HANDKRAFT Android APK release and view release notes."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <main class="layout">
+      <section class="hero card">
+        <p class="eyebrow">Student Launch Track</p>
+        <h1>HANDKRAFT Android Beta</h1>
+        <p class="subtitle">
+          Discover and shop handmade products. Download the latest APK build and test new features before Play Store launch.
+        </p>
+
+        <div class="actions">
+          <a id="downloadApk" class="btn btn-primary" href="#" aria-disabled="true">Preparing latest build...</a>
+          <a id="releaseNotes" class="btn btn-ghost" href="#" target="_blank" rel="noreferrer">Release Notes</a>
+        </div>
+
+        <div class="release-meta" id="releaseMeta">Fetching latest release metadata...</div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Install in 3 steps</h2>
+          <ol>
+            <li>Download the APK from the button above.</li>
+            <li>Allow installation from your browser source when prompted.</li>
+            <li>Open HANDKRAFT and sign in to start testing.</li>
+          </ol>
+        </article>
+
+        <article class="card">
+          <h2>Release quality checks</h2>
+          <ul>
+            <li>Each release is built from a Git tag.</li>
+            <li>APK is signed using your private upload key.</li>
+            <li>Release notes are generated for every build.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>Report feedback</h2>
+          <p>
+            Share bugs and UX feedback in GitHub Issues with screenshots and steps to reproduce.
+          </p>
+          <a class="inline-link" id="issuesLink" href="#" target="_blank" rel="noreferrer">Open HANDKRAFT issues</a>
+        </article>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span id="repoInfo">HANDKRAFT</span>
+      <span>Built with GitHub Pages + GitHub Releases</span>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+gradle.projectsEvaluated {
+    rootProject.allprojects { project ->
+        if (project.path != ':app' || !project.plugins.hasPlugin('com.android.application')) {
+            return
+        }
+
+        def storeFilePath = System.getenv('HANDKRAFT_UPLOAD_STORE_FILE')
+        def storePass = System.getenv('HANDKRAFT_UPLOAD_STORE_PASSWORD')
+        def aliasName = System.getenv('HANDKRAFT_UPLOAD_KEY_ALIAS')
+        def keyPass = System.getenv('HANDKRAFT_UPLOAD_KEY_PASSWORD')
+
+        if (!storeFilePath || !storePass || !aliasName || !keyPass) {
+            throw new RuntimeException('Missing HANDKRAFT_UPLOAD_* signing environment variables.')
+        }
+
+        if (project.android.signingConfigs.findByName('handkraftRelease') == null) {
+            project.android.signingConfigs.create('handkraftRelease')
+        }
+
+        def handkraftSigning = project.android.signingConfigs.getByName('handkraftRelease')
+        handkraftSigning.storeFile = project.file(storeFilePath)
+        handkraftSigning.storePassword = storePass
+        handkraftSigning.keyAlias = aliasName
+        handkraftSigning.keyPassword = keyPass
+
+        project.android.buildTypes.getByName('release').signingConfig = handkraftSigning
+    }
+}
