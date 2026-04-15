@@ -68,10 +68,10 @@ How to use:
 - [x] Product details actions for Like and Add to Cart.
 
 ## Phase 6 - Web Client
-- [ ] Replace default Vite starter UI.
-- [ ] Build web product feed page.
-- [ ] Build web product details page.
-- [ ] Connect web app to backend APIs.
+- [x] Replace default Vite starter UI.
+- [x] Build web product feed page.
+- [x] Build web product details page.
+- [x] Connect web app to backend APIs.
 
 ## Phase 7 - Quality and Deployment
 - [ ] Backend validation and consistent error handling.
