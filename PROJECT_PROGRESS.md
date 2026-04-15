@@ -1,6 +1,6 @@
 # HANDKRAFT Project Progress Tracker
 
-Last updated: 2026-04-07
+Last updated: 2026-04-16
 
 How to use:
 - Checked box `[x]` means completed.
@@ -86,8 +86,8 @@ How to use:
 - [x] Tag-based APK release workflow added (`.github/workflows/android-release.yml`).
 - [x] Week 1 launch plan and release checklist documented (`docs/WEEK1_LAUNCH_PLAN.md`, `docs/RELEASE_CHECKLIST.md`).
 - [ ] Student Pack offers activated in GitHub account.
-- [ ] Repository secrets added for Android keystore signing.
-- [ ] First tagged beta release executed and validated end-to-end.
+- [x] Repository secrets added for Android keystore signing.
+- [x] First tagged beta release executed and validated end-to-end.
 
 ## Phase 8 - Buyer View Modernization
 - [x] Feed spacing tightened for denser visual browsing.
