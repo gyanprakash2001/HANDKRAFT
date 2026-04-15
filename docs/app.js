@@ -26,6 +26,49 @@
     return (assets || []).find((asset) => /\.apk$/i.test(asset.name || ""));
   }
 
+  async function fetchJson(url) {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+    });
+
+    return { response, data: response.ok ? await response.json() : null };
+  }
+
+  async function fetchBestRelease(owner, repo) {
+    const latestApi = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+    const listApi = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=20`;
+
+    const latest = await fetchJson(latestApi);
+    if (latest.response.ok && latest.data) {
+      return latest.data;
+    }
+
+    // GitHub returns 404 on /releases/latest if only pre-releases exist.
+    if (latest.response.status !== 404) {
+      throw new Error(`GitHub API returned ${latest.response.status}`);
+    }
+
+    const list = await fetchJson(listApi);
+    if (!list.response.ok || !Array.isArray(list.data)) {
+      throw new Error(`GitHub API returned ${list.response.status}`);
+    }
+
+    const published = list.data.filter((release) => !release.draft);
+    const withApk = published.find((release) => pickApkAsset(release.assets));
+
+    if (withApk) {
+      return withApk;
+    }
+
+    if (published.length > 0) {
+      return published[0];
+    }
+
+    throw new Error("No published releases found.");
+  }
+
   async function loadLatestRelease() {
     const { owner, repo } = inferRepo();
 
@@ -33,7 +76,6 @@
       throw new Error("Could not infer repository owner and name.");
     }
 
-    const releaseApi = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
     const releasesPage = `https://github.com/${owner}/${repo}/releases`;
     const issuesPage = `https://github.com/${owner}/${repo}/issues`;
 
@@ -41,17 +83,7 @@
     issuesLink.href = issuesPage;
     repoInfo.textContent = `${owner}/${repo}`;
 
-    const response = await fetch(releaseApi, {
-      headers: {
-        Accept: "application/vnd.github+json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`GitHub API returned ${response.status}`);
-    }
-
-    const latest = await response.json();
+    const latest = await fetchBestRelease(owner, repo);
     const apk = pickApkAsset(latest.assets);
 
     if (!apk) {
@@ -69,7 +101,8 @@
 
     const sizeMb = (apk.size / (1024 * 1024)).toFixed(2);
     const published = latest.published_at ? new Date(latest.published_at).toLocaleString() : "Unknown date";
-    releaseMeta.textContent = `Latest ${latest.tag_name} | ${sizeMb} MB | Published ${published}`;
+    const label = latest.prerelease ? `Latest pre-release ${latest.tag_name}` : `Latest ${latest.tag_name}`;
+    releaseMeta.textContent = `${label} | ${sizeMb} MB | Published ${published}`;
   }
 
   loadLatestRelease().catch((error) => {
