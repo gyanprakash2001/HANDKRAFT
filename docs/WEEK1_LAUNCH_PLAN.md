@@ -52,6 +52,8 @@ Ship a reliable public download flow for Android APK releases while preparing fo
 - ANDROID_KEY_ALIAS
 - ANDROID_KEY_PASSWORD
 - EXPO_PUBLIC_API_URL (example: https://<your-app-name>.azurewebsites.net/api)
+- EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+- EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
 
 ## Week 1 Done Criteria
 - A user can open the Pages URL and install latest APK in less than 3 steps.

@@ -36,11 +36,20 @@ In GitHub repository settings, add:
 - ANDROID_KEY_ALIAS
 - ANDROID_KEY_PASSWORD
 - EXPO_PUBLIC_API_URL
+- EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+- EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
 
 Set `EXPO_PUBLIC_API_URL` to your production backend API URL, for example:
 
 ```text
 https://<your-app-name>.azurewebsites.net/api
+```
+
+Set Google IDs to values from the same Google Cloud project used by your app:
+
+```text
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=<android-client-id>.apps.googleusercontent.com
 ```
 
 ## 2) Update app version

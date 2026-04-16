@@ -56,6 +56,8 @@ jobs:
         working-directory: mobile
         env:
           EXPO_PUBLIC_API_URL: ${{ secrets['EXPO_PUBLIC_API_URL'] }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID'] }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'] }}
         run: CI=1 npx expo prebuild --platform android --no-install
 
       - name: Validate required signing secrets
@@ -66,8 +68,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           EXPO_PUBLIC_API_URL: ${{ secrets['EXPO_PUBLIC_API_URL'] }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID'] }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'] }}
         run: |
-          required=(ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD EXPO_PUBLIC_API_URL)
+          required=(ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD EXPO_PUBLIC_API_URL EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID)
           for key in "${required[@]}"; do
             if [ -z "${!key}" ]; then
               echo "Missing required secret: ${key}"
@@ -90,6 +94,9 @@ jobs:
           HANDKRAFT_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           HANDKRAFT_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           HANDKRAFT_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPO_PUBLIC_API_URL: ${{ secrets['EXPO_PUBLIC_API_URL'] }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID'] }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'] }}
         run: |
           chmod +x ./gradlew
           ./gradlew :app:assembleRelease --no-daemon \
