@@ -1,0 +1,63 @@
+name: Deploy Backend to Azure App Service
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - server/**
+      - .github/workflows/deploy-backend-azure.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend-azure
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Validate required Azure secrets
+        shell: bash
+        env:
+          AZURE_WEBAPP_NAME: ${{ secrets['AZURE_WEBAPP_NAME'] }}
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets['AZURE_WEBAPP_PUBLISH_PROFILE'] }}
+        run: |
+          if [ -z "${AZURE_WEBAPP_NAME}" ]; then
+            echo "Missing GitHub secret: AZURE_WEBAPP_NAME"
+            exit 1
+          fi
+
+          if [ -z "${AZURE_WEBAPP_PUBLISH_PROFILE}" ]; then
+            echo "Missing GitHub secret: AZURE_WEBAPP_PUBLISH_PROFILE"
+            exit 1
+          fi
+
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Verify dependency tree
+        working-directory: server
+        run: npm ls --depth=0
+
+      - name: Deploy backend to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets['AZURE_WEBAPP_NAME'] }}
+          publish-profile: ${{ secrets['AZURE_WEBAPP_PUBLISH_PROFILE'] }}
+          package: server
