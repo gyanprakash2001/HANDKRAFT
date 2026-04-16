@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "handkraft",
+    "newArchEnabled": false,
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true

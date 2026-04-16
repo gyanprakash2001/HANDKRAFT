@@ -60,6 +60,12 @@ jobs:
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'] }}
         run: CI=1 npx expo prebuild --platform android --no-install
 
+      - name: Normalize Android build properties for CI release
+        shell: bash
+        run: |
+          sed -i 's/^newArchEnabled=.*/newArchEnabled=false/' mobile/android/gradle.properties
+          sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=armeabi-v7a,arm64-v8a/' mobile/android/gradle.properties
+
       - name: Validate required signing secrets
         shell: bash
         env:
