@@ -35,6 +35,13 @@ In GitHub repository settings, add:
 - ANDROID_KEYSTORE_PASSWORD
 - ANDROID_KEY_ALIAS
 - ANDROID_KEY_PASSWORD
+- EXPO_PUBLIC_API_URL
+
+Set `EXPO_PUBLIC_API_URL` to your production backend API URL, for example:
+
+```text
+https://<your-app-name>.azurewebsites.net/api
+```
 
 ## 2) Update app version
 
