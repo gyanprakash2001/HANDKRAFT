@@ -8,6 +8,9 @@ const auth = require('../middleware/auth');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Product = require('../models/Product');
+const Order = require('../models/Order');
+const Review = require('../models/Review');
+const { getPayoutPolicy, maskBankDetails } = require('../services/payouts');
 
 const AVATAR_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
 const DATA_URI_IMAGE_REGEX = /^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i;
@@ -110,6 +113,7 @@ async function getDashboardPayload(user) {
       avatarUrl: user.avatarUrl || '',
       phoneNumber: user.phoneNumber || '',
       locale: user.locale || '',
+      isAdmin: Boolean(user.isAdmin),
       createdAt: user.createdAt,
       stats: {
         listedCount: listedItems.length,
@@ -122,6 +126,469 @@ async function getDashboardPayload(user) {
     cartItems,
   };
 }
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeTextField(value, maxLength = 240) {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  return value.trim().slice(0, maxLength);
+}
+
+function normalizeSellerWebsite(value) {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim().slice(0, 240);
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `https://${trimmed}`;
+}
+
+function mapAddressToSellerPickup(addressDoc = {}, overrides = {}) {
+  return {
+    addressId: String(overrides.addressId || addressDoc?._id || '').trim(),
+    label: String(overrides.label || addressDoc?.label || 'Pickup').trim().slice(0, 60),
+    fullName: String(overrides.fullName || addressDoc?.fullName || '').trim().slice(0, 120),
+    phoneNumber: String(overrides.phoneNumber || addressDoc?.phoneNumber || '').trim().slice(0, 40),
+    email: String(overrides.email || addressDoc?.email || '').trim().slice(0, 140),
+    street: String(overrides.street || addressDoc?.street || '').trim().slice(0, 240),
+    city: String(overrides.city || addressDoc?.city || '').trim().slice(0, 120),
+    state: String(overrides.state || addressDoc?.state || '').trim().slice(0, 120),
+    postalCode: String(overrides.postalCode || addressDoc?.postalCode || '').trim().slice(0, 20),
+    country: String(overrides.country || addressDoc?.country || 'India').trim().slice(0, 80) || 'India',
+  };
+}
+
+function sanitizeSellerPickupAddress(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const next = mapAddressToSellerPickup(raw, {
+    addressId: typeof raw.addressId === 'string' ? raw.addressId : '',
+  });
+
+  if (!next.fullName || !next.phoneNumber || !next.street || !next.city || !next.state || !next.postalCode) {
+    return null;
+  }
+
+  return next;
+}
+
+function toNonNegativeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+async function resolveSellerUser({ sellerId, sellerName, productId }) {
+  const normalizedSellerId = String(sellerId || '').trim();
+  const normalizedSellerName = String(sellerName || '').trim();
+  const normalizedProductId = String(productId || '').trim();
+
+  if (mongoose.Types.ObjectId.isValid(normalizedSellerId)) {
+    const userById = await User.findById(normalizedSellerId)
+      .select('-password -likedProducts -cartItems -addresses');
+    if (userById) {
+      return userById;
+    }
+  }
+
+  if (normalizedSellerName) {
+    const sellerRegex = new RegExp(`^${escapeRegex(normalizedSellerName)}$`, 'i');
+    const userByName = await User.findOne({ name: { $regex: sellerRegex } })
+      .select('-password -likedProducts -cartItems -addresses');
+    if (userByName) {
+      return userByName;
+    }
+  }
+
+  if (mongoose.Types.ObjectId.isValid(normalizedProductId)) {
+    const product = await Product.findOne({ _id: normalizedProductId, isActive: true }).select('seller sellerName');
+    if (product?.seller) {
+      const sellerByProductId = await User.findById(product.seller)
+        .select('-password -likedProducts -cartItems -addresses');
+      if (sellerByProductId) {
+        return sellerByProductId;
+      }
+    }
+
+    if (product?.sellerName) {
+      const sellerRegex = new RegExp(`^${escapeRegex(product.sellerName)}$`, 'i');
+      const sellerByProductName = await User.findOne({ name: { $regex: sellerRegex } })
+        .select('-password -likedProducts -cartItems -addresses');
+      if (sellerByProductName) {
+        return sellerByProductName;
+      }
+    }
+  }
+
+  return null;
+}
+
+// GET /api/users/seller-public?sellerId=...&sellerName=...&productId=...
+router.get('/seller-public', async (req, res) => {
+  try {
+    const seller = await resolveSellerUser({
+      sellerId: req.query.sellerId,
+      sellerName: req.query.sellerName,
+      productId: req.query.productId,
+    });
+
+    if (!seller) {
+      return res.status(404).json({ message: 'Seller not found' });
+    }
+
+    const sellerNameVariants = [seller.name, seller.sellerDisplayName]
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+
+    const listedItems = await Product.find({
+      isActive: true,
+      $or: [
+        { seller: seller._id },
+        ...sellerNameVariants.map((entry) => ({ sellerName: entry })),
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const productIds = listedItems.map((entry) => entry._id).filter(Boolean);
+    const [soldAgg, reviewAgg] = productIds.length > 0
+      ? await Promise.all([
+          Order.aggregate([
+            { $match: { status: { $ne: 'cancelled' } } },
+            { $unwind: '$items' },
+            { $match: { 'items.product': { $in: productIds } } },
+            { $group: { _id: null, totalSold: { $sum: '$items.quantity' } } },
+          ]),
+          Review.aggregate([
+            { $match: { product: { $in: productIds }, isActive: true } },
+            {
+              $group: {
+                _id: null,
+                averageRating: { $avg: '$rating' },
+                totalReviews: { $sum: 1 },
+              },
+            },
+          ]),
+        ])
+      : [[], []];
+
+    const totalSold = Number(soldAgg?.[0]?.totalSold || 0);
+    const averageRating = Number(Number(reviewAgg?.[0]?.averageRating || 0).toFixed(1));
+    const totalReviews = Number(reviewAgg?.[0]?.totalReviews || 0);
+
+    return res.json({
+      seller: {
+        id: String(seller._id),
+        name: String(seller.name || ''),
+        displayName: String(seller.sellerDisplayName || seller.name || ''),
+        avatarUrl: String(seller.avatarUrl || ''),
+        tagline: String(seller.sellerTagline || ''),
+        story: String(seller.sellerStory || ''),
+        storyVideoUrl: String(seller.sellerStoryVideoUrl || ''),
+        instagram: String(seller.sellerInstagram || ''),
+        contactEmail: String(seller.sellerContactEmail || seller.email || ''),
+        contactPhone: String(seller.sellerContactPhone || seller.phoneNumber || ''),
+        website: String(seller.sellerWebsite || ''),
+        location: String(seller.sellerLocation || ''),
+      },
+      stats: {
+        totalListings: listedItems.length,
+        totalSold,
+        averageRating,
+        totalReviews,
+      },
+      items: listedItems,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT /api/users/me/seller-profile
+router.put('/me/seller-profile', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('name sellerDisplayName sellerTagline sellerStory sellerStoryVideoUrl sellerInstagram sellerContactEmail sellerContactPhone sellerWebsite sellerLocation sellerPickupAddress addresses updatedAt');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const updates = {};
+
+    const sellerDisplayName = sanitizeTextField(req.body?.sellerDisplayName, 80);
+    const sellerTagline = sanitizeTextField(req.body?.sellerTagline, 120);
+    const sellerStory = sanitizeTextField(req.body?.sellerStory, 2000);
+    const sellerStoryVideoUrl = sanitizeTextField(req.body?.sellerStoryVideoUrl, 600);
+    const sellerInstagram = sanitizeTextField(req.body?.sellerInstagram, 140);
+    const sellerContactEmail = sanitizeTextField(req.body?.sellerContactEmail, 140);
+    const sellerContactPhone = sanitizeTextField(req.body?.sellerContactPhone, 40);
+    const sellerWebsite = normalizeSellerWebsite(req.body?.sellerWebsite);
+    const sellerLocation = sanitizeTextField(req.body?.sellerLocation, 140);
+
+    if (sellerDisplayName !== undefined) updates.sellerDisplayName = sellerDisplayName;
+    if (sellerTagline !== undefined) updates.sellerTagline = sellerTagline;
+    if (sellerStory !== undefined) updates.sellerStory = sellerStory;
+    if (sellerStoryVideoUrl !== undefined) updates.sellerStoryVideoUrl = sellerStoryVideoUrl;
+    if (sellerInstagram !== undefined) updates.sellerInstagram = sellerInstagram;
+    if (sellerContactEmail !== undefined) updates.sellerContactEmail = sellerContactEmail;
+    if (sellerContactPhone !== undefined) updates.sellerContactPhone = sellerContactPhone;
+    if (sellerWebsite !== undefined) updates.sellerWebsite = sellerWebsite;
+    if (sellerLocation !== undefined) updates.sellerLocation = sellerLocation;
+
+    const pickupAddressId = typeof req.body?.sellerPickupAddressId === 'string'
+      ? req.body.sellerPickupAddressId.trim()
+      : '';
+    const pickupAddressPayload = sanitizeSellerPickupAddress(req.body?.sellerPickupAddress);
+
+    if (pickupAddressId) {
+      if (!mongoose.Types.ObjectId.isValid(pickupAddressId)) {
+        return res.status(400).json({ message: 'Invalid sellerPickupAddressId value' });
+      }
+
+      const selectedAddress = (user.addresses || []).find(
+        (entry) => String(entry?._id || '') === pickupAddressId
+      );
+
+      if (!selectedAddress) {
+        return res.status(400).json({ message: 'Selected pickup address was not found in your saved addresses.' });
+      }
+
+      if (!String(selectedAddress?.state || '').trim()) {
+        return res.status(400).json({ message: 'Selected pickup address is missing state. Please edit the address and add state.' });
+      }
+
+      updates.sellerPickupAddress = {
+        ...mapAddressToSellerPickup(selectedAddress, {
+          addressId: pickupAddressId,
+          label: selectedAddress.label || 'Pickup',
+        }),
+        updatedAt: new Date(),
+      };
+    } else if (pickupAddressPayload) {
+      updates.sellerPickupAddress = {
+        ...pickupAddressPayload,
+        updatedAt: new Date(),
+      };
+    }
+
+    Object.entries(updates).forEach(([key, value]) => {
+      user[key] = value;
+    });
+    user.updatedAt = new Date();
+    await user.save();
+
+    const persistedUser = await User.findById(req.user._id)
+      .select('-password -likedProducts -cartItems -addresses');
+
+    if (!persistedUser) {
+      return res.status(404).json({ message: 'User not found after update' });
+    }
+
+    if (sellerDisplayName !== undefined) {
+      const listingDisplayName = String(sellerDisplayName || user.name || '').trim();
+      if (listingDisplayName) {
+        await Product.updateMany(
+          { seller: persistedUser._id },
+          { sellerName: listingDisplayName }
+        );
+      }
+    }
+
+    return res.json({
+      message: 'Seller profile updated successfully',
+      sellerProfile: {
+        id: String(persistedUser._id),
+        displayName: String(persistedUser.sellerDisplayName || persistedUser.name || ''),
+        tagline: String(persistedUser.sellerTagline || ''),
+        story: String(persistedUser.sellerStory || ''),
+        storyVideoUrl: String(persistedUser.sellerStoryVideoUrl || ''),
+        instagram: String(persistedUser.sellerInstagram || ''),
+        contactEmail: String(persistedUser.sellerContactEmail || persistedUser.email || ''),
+        contactPhone: String(persistedUser.sellerContactPhone || persistedUser.phoneNumber || ''),
+        website: String(persistedUser.sellerWebsite || ''),
+        location: String(persistedUser.sellerLocation || ''),
+        sellerPickupAddress: {
+          addressId: String(persistedUser?.sellerPickupAddress?.addressId || ''),
+          label: String(persistedUser?.sellerPickupAddress?.label || ''),
+          fullName: String(persistedUser?.sellerPickupAddress?.fullName || ''),
+          phoneNumber: String(persistedUser?.sellerPickupAddress?.phoneNumber || ''),
+          email: String(persistedUser?.sellerPickupAddress?.email || ''),
+          street: String(persistedUser?.sellerPickupAddress?.street || ''),
+          city: String(persistedUser?.sellerPickupAddress?.city || ''),
+          state: String(persistedUser?.sellerPickupAddress?.state || ''),
+          postalCode: String(persistedUser?.sellerPickupAddress?.postalCode || ''),
+          country: String(persistedUser?.sellerPickupAddress?.country || 'India'),
+          updatedAt: persistedUser?.sellerPickupAddress?.updatedAt || null,
+        },
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /api/users/me/seller-payout-profile
+router.get('/me/seller-payout-profile', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('sellerPayoutProfile sellerPayoutSettings sellerTrust');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({
+      payoutProfile: {
+        kycStatus: String(user?.sellerPayoutProfile?.kycStatus || 'pending'),
+        kycVerifiedAt: user?.sellerPayoutProfile?.kycVerifiedAt || null,
+        bankDetails: maskBankDetails(user?.sellerPayoutProfile?.bankDetails || {}),
+      },
+      payoutSettings: {
+        autoPayoutEnabled: user?.sellerPayoutSettings?.autoPayoutEnabled !== false,
+        minimumPayoutAmount: Number(user?.sellerPayoutSettings?.minimumPayoutAmount || 0),
+        reservePercent: Number(user?.sellerPayoutSettings?.reservePercent || 10),
+        overrideCoolingDays: user?.sellerPayoutSettings?.overrideCoolingDays ?? null,
+      },
+      trust: {
+        deliveredOrderCount: Number(user?.sellerTrust?.deliveredOrderCount || 0),
+        isTrusted: Boolean(user?.sellerTrust?.isTrusted),
+        trustedSince: user?.sellerTrust?.trustedSince || null,
+      },
+      policy: getPayoutPolicy(),
+    });
+  } catch (err) {
+    console.error('[USERS][SELLER_PAYOUT_PROFILE][GET] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT /api/users/me/seller-payout-profile
+router.put('/me/seller-payout-profile', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.sellerPayoutProfile = user.sellerPayoutProfile || {};
+    user.sellerPayoutProfile.bankDetails = user.sellerPayoutProfile.bankDetails || {};
+    user.sellerPayoutSettings = user.sellerPayoutSettings || {};
+
+    const kycStatus = typeof req.body?.kycStatus === 'string' ? req.body.kycStatus.trim().toLowerCase() : null;
+    if (kycStatus && !['pending', 'verified', 'rejected'].includes(kycStatus)) {
+      return res.status(400).json({ message: 'Invalid kycStatus value' });
+    }
+
+    if (kycStatus) {
+      user.sellerPayoutProfile.kycStatus = kycStatus;
+      user.sellerPayoutProfile.kycVerifiedAt = kycStatus === 'verified' ? new Date() : null;
+    }
+
+    const bankPayload = req.body?.bankDetails || {};
+    const accountType = typeof bankPayload?.accountType === 'string'
+      ? bankPayload.accountType.trim().toLowerCase()
+      : null;
+
+    if (accountType && !['bank', 'upi'].includes(accountType)) {
+      return res.status(400).json({ message: 'Invalid bankDetails.accountType value' });
+    }
+
+    if (accountType) user.sellerPayoutProfile.bankDetails.accountType = accountType;
+    if (typeof bankPayload?.accountHolderName === 'string') user.sellerPayoutProfile.bankDetails.accountHolderName = bankPayload.accountHolderName.trim().slice(0, 120);
+    if (typeof bankPayload?.accountNumber === 'string') user.sellerPayoutProfile.bankDetails.accountNumber = bankPayload.accountNumber.replace(/\s+/g, '').slice(0, 32);
+    if (typeof bankPayload?.ifsc === 'string') user.sellerPayoutProfile.bankDetails.ifsc = bankPayload.ifsc.trim().toUpperCase().slice(0, 20);
+    if (typeof bankPayload?.bankName === 'string') user.sellerPayoutProfile.bankDetails.bankName = bankPayload.bankName.trim().slice(0, 120);
+    if (typeof bankPayload?.branch === 'string') user.sellerPayoutProfile.bankDetails.branch = bankPayload.branch.trim().slice(0, 120);
+    if (typeof bankPayload?.upiId === 'string') user.sellerPayoutProfile.bankDetails.upiId = bankPayload.upiId.trim().slice(0, 140);
+    if (typeof bankPayload?.razorpayLinkedAccountId === 'string') {
+      user.sellerPayoutProfile.bankDetails.razorpayLinkedAccountId = bankPayload.razorpayLinkedAccountId.trim().slice(0, 80);
+    }
+
+    if (typeof bankPayload?.isVerified === 'boolean') {
+      user.sellerPayoutProfile.bankDetails.isVerified = bankPayload.isVerified;
+      user.sellerPayoutProfile.bankDetails.verifiedAt = bankPayload.isVerified ? new Date() : null;
+    }
+
+    const finalAccountType = String(user?.sellerPayoutProfile?.bankDetails?.accountType || 'bank').toLowerCase();
+    if (finalAccountType === 'bank') {
+      const hasAccount = Boolean(String(user?.sellerPayoutProfile?.bankDetails?.accountNumber || '').trim());
+      const hasIfsc = Boolean(String(user?.sellerPayoutProfile?.bankDetails?.ifsc || '').trim());
+      if ((hasAccount && !hasIfsc) || (!hasAccount && hasIfsc)) {
+        return res.status(400).json({ message: 'Both account number and IFSC are required for bank payouts.' });
+      }
+    }
+
+    const settingsPayload = req.body?.payoutSettings || {};
+    if (typeof settingsPayload?.autoPayoutEnabled === 'boolean') {
+      user.sellerPayoutSettings.autoPayoutEnabled = settingsPayload.autoPayoutEnabled;
+    }
+
+    if (settingsPayload?.minimumPayoutAmount !== undefined) {
+      user.sellerPayoutSettings.minimumPayoutAmount = toNonNegativeNumber(settingsPayload.minimumPayoutAmount, 0);
+    }
+
+    if (settingsPayload?.reservePercent !== undefined) {
+      const reservePercent = toNonNegativeNumber(settingsPayload.reservePercent, 10);
+      if (reservePercent > 100) {
+        return res.status(400).json({ message: 'reservePercent cannot be greater than 100' });
+      }
+      user.sellerPayoutSettings.reservePercent = reservePercent;
+    }
+
+    if (settingsPayload?.overrideCoolingDays !== undefined) {
+      if (settingsPayload.overrideCoolingDays === null || settingsPayload.overrideCoolingDays === '') {
+        user.sellerPayoutSettings.overrideCoolingDays = null;
+      } else {
+        const coolingDays = toNonNegativeNumber(settingsPayload.overrideCoolingDays, 0);
+        if (coolingDays > 60) {
+          return res.status(400).json({ message: 'overrideCoolingDays cannot exceed 60 days' });
+        }
+        user.sellerPayoutSettings.overrideCoolingDays = Math.floor(coolingDays);
+      }
+    }
+
+    user.updatedAt = new Date();
+    await user.save();
+
+    return res.json({
+      message: 'Seller payout profile updated successfully',
+      payoutProfile: {
+        kycStatus: String(user?.sellerPayoutProfile?.kycStatus || 'pending'),
+        kycVerifiedAt: user?.sellerPayoutProfile?.kycVerifiedAt || null,
+        bankDetails: maskBankDetails(user?.sellerPayoutProfile?.bankDetails || {}),
+      },
+      payoutSettings: {
+        autoPayoutEnabled: user?.sellerPayoutSettings?.autoPayoutEnabled !== false,
+        minimumPayoutAmount: Number(user?.sellerPayoutSettings?.minimumPayoutAmount || 0),
+        reservePercent: Number(user?.sellerPayoutSettings?.reservePercent || 10),
+        overrideCoolingDays: user?.sellerPayoutSettings?.overrideCoolingDays ?? null,
+      },
+    });
+  } catch (err) {
+    console.error('[USERS][SELLER_PAYOUT_PROFILE][PUT] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // GET /api/users/me
 router.get('/me', auth, async (req, res) => {

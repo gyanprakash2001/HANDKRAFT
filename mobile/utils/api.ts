@@ -2,7 +2,6 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 // Use legacy API to preserve `uploadAsync` and `FileSystemUploadType` enums
 import * as FileSystem from 'expo-file-system/legacy';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -10,16 +9,16 @@ function isIpv4Host(host: string) {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 }
 
-function resolveBaseUrl() {
-  if (ENV_BASE_URL) {
-    return ENV_BASE_URL;
-  }
+function normalizeBaseUrl(url: string) {
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}
 
+function resolveAutoBaseUrl() {
   // Expo hostUri is usually like 192.168.1.10:8081 on a physical device.
   const hostUri = Constants.expoConfig?.hostUri || (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
   const host = hostUri ? hostUri.split(':')[0] : null;
 
-  // Only use direct LAN IPv4 host. Tunnel hosts are not valid for local backend calls.
+  // Use direct LAN IPv4 host for local backend calls from a physical device.
   if (host && isIpv4Host(host)) {
     return `http://${host}:5000/api`;
   }
@@ -31,62 +30,47 @@ function resolveBaseUrl() {
   return 'http://localhost:5000/api';
 }
 
-const BASE_URL = resolveBaseUrl();
+function getCandidateBaseUrls() {
+  const candidates: string[] = [];
 
-function normalizeUrl(url: string) {
-  return url.endsWith('/') ? url.slice(0, -1) : url;
-}
-
-function isNgrokHost(baseUrl: string) {
-  try {
-    const host = new URL(baseUrl).hostname.toLowerCase();
-    return host.includes('ngrok');
-  } catch {
-    return false;
+  if (typeof ENV_BASE_URL === 'string' && ENV_BASE_URL.trim()) {
+    candidates.push(normalizeBaseUrl(ENV_BASE_URL.trim()));
   }
+
+  const autoBase = resolveAutoBaseUrl();
+  if (autoBase) {
+    candidates.push(normalizeBaseUrl(autoBase));
+  }
+
+  if (Platform.OS === 'android') {
+    candidates.push('http://10.0.2.2:5000/api');
+  }
+
+  candidates.push('http://localhost:5000/api');
+  return Array.from(new Set(candidates));
 }
 
-const API_BASE_URL = normalizeUrl(BASE_URL);
+const API_BASE_URLS = getCandidateBaseUrls();
+const API_BASE_URL = API_BASE_URLS[0] || 'http://localhost:5000/api';
+const FETCH_BASE_URLS = API_BASE_URLS.length ? API_BASE_URLS : [API_BASE_URL];
 
-console.log(`[API] Default base URL: ${API_BASE_URL}`);
+console.log(`[API] Base URL candidates: ${API_BASE_URLS.join(' -> ')}`);
 
 async function safeFetch(path: string, opts: RequestInit = {}) {
-  try {
-    // Runtime overrides (dev): 'auto' | 'adb' | 'tunnel' | 'custom'
-    const mode = (await AsyncStorage.getItem('API_DEV_MODE')) || 'auto';
-    let base = API_BASE_URL;
+  let lastError: any = null;
 
-    if (mode === 'adb') {
-      base = 'http://localhost:5000/api';
-    } else if (mode === 'tunnel') {
-      const tunnel = (await AsyncStorage.getItem('API_TUNNEL_URL')) || '';
-      if (tunnel) {
-        const normalized = normalizeUrl(String(tunnel || '').replace(/\/api\/?$/i, '')) + '/api';
-        base = normalized;
-      }
-    } else if (mode === 'custom') {
-      const custom = (await AsyncStorage.getItem('API_CUSTOM_URL')) || '';
-      if (custom) base = normalizeUrl(custom);
-    } else {
-      // allow one-off override
-      const override = (await AsyncStorage.getItem('API_OVERRIDE_URL')) || '';
-      if (override) base = normalizeUrl(override as string);
+  for (const baseUrl of FETCH_BASE_URLS) {
+    try {
+      return await fetch(`${baseUrl}${path}`, opts);
+    } catch (err: any) {
+      lastError = err;
     }
-
-    const headers = new Headers(opts.headers || {});
-
-    // Free ngrok shows a browser warning page unless this header is present.
-    if (isNgrokHost(base) && !headers.has('ngrok-skip-browser-warning')) {
-      headers.set('ngrok-skip-browser-warning', '1');
-    }
-
-    return await fetch(`${base}${path}`, { ...opts, headers });
-  } catch (err: any) {
-    const original = err?.message ? ` Original: ${err.message}` : '';
-    throw new Error(
-      `Network request failed. Verify backend is running and reachable. ${original}`
-    );
   }
+
+  const original = lastError?.message ? ` Original: ${lastError.message}` : '';
+  throw new Error(
+    `Network request failed. Tried: ${FETCH_BASE_URLS.join(', ')}. Verify backend is running and reachable.${original}`
+  );
 }
 
 export interface AppUser {
@@ -101,6 +85,31 @@ export interface AppUser {
   avatarUrl?: string;
   phoneNumber?: string;
   locale?: string;
+  isAdmin?: boolean;
+  sellerDisplayName?: string;
+  sellerTagline?: string;
+  sellerStory?: string;
+  sellerStoryVideoUrl?: string;
+  sellerInstagram?: string;
+  sellerContactEmail?: string;
+  sellerContactPhone?: string;
+  sellerWebsite?: string;
+  sellerLocation?: string;
+  sellerPickupAddress?: SellerPickupAddress;
+}
+
+export interface SellerPickupAddress {
+  addressId?: string;
+  label: string;
+  fullName: string;
+  phoneNumber: string;
+  email: string;
+  street: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  updatedAt?: string | null;
 }
 
 interface AuthResponse {
@@ -127,15 +136,21 @@ export interface ProductItem {
   category: string;
   material: string;
   stock: number;
+  packageWeightGrams?: number;
+  packageLengthCm?: number;
+  packageBreadthCm?: number;
+  packageHeightCm?: number;
   imageAspectRatio?: number;
   media?: ProductMediaItem[];
   customizable?: boolean;
   isCustomizable?: boolean;
   sellerName: string;
-  seller?: string;
+  seller?: string | { _id: string; name?: string };
   isActive?: boolean;
   monthlySaves?: number;
   monthlySold?: number;
+  ratingAverage?: number;
+  reviewCount?: number;
   createdAt?: string;
 }
 
@@ -188,11 +203,17 @@ export interface CreateProductPayload {
   customCategory?: string;
   material?: string;
   stock?: number;
+  packageWeightGrams?: number;
+  packageLengthCm?: number;
+  packageBreadthCm?: number;
+  packageHeightCm?: number;
   imageAspectRatio?: number;
   media?: ProductMediaItem[];
   customizable?: boolean;
   isCustomizable?: boolean;
   images?: string[];
+  pickupAddressId?: string;
+  pickupAddress?: UserAddress;
 }
 
 interface ProductsResponse {
@@ -262,12 +283,188 @@ export async function fetchWithAuth(path: string, opts: RequestInit = {}) {
   return safeFetch(path, { ...opts, headers });
 }
 
+interface ApiErrorResponse {
+  message: string;
+  status: number;
+  code?: string;
+  retryable?: boolean;
+}
+
+function extractApiErrorMessage(payload: any, fallbackMessage: string) {
+  if (payload && typeof payload === 'object') {
+    const candidates = [
+      payload.message,
+      payload.reason,
+      payload.error,
+      payload?.shippingQuote?.reason,
+    ];
+
+    for (const candidate of candidates) {
+      const normalized = String(candidate || '').trim();
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+
+  if (typeof payload === 'string') {
+    const cleaned = payload.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (
+      cleaned
+      && !/^<!doctype/i.test(payload)
+      && !/cannot\s+(get|post|put|patch|delete)/i.test(cleaned)
+    ) {
+      return cleaned.slice(0, 240);
+    }
+  }
+
+  return fallbackMessage;
+}
+
+async function parseApiErrorResponse(res: Response, fallbackMessage: string): Promise<ApiErrorResponse> {
+  const status = Number(res?.status || 0);
+  const rawText = await res.text().catch(() => '');
+
+  if (!rawText) {
+    return {
+      message: fallbackMessage,
+      status,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(rawText);
+    const message = extractApiErrorMessage(parsed, fallbackMessage);
+    return {
+      message,
+      status,
+      code: typeof parsed?.code === 'string' ? parsed.code : undefined,
+      retryable: typeof parsed?.retryable === 'boolean' ? parsed.retryable : undefined,
+    };
+  } catch {
+    return {
+      message: extractApiErrorMessage(rawText, fallbackMessage),
+      status,
+    };
+  }
+}
+
+function toApiError(payload: ApiErrorResponse) {
+  const err = new Error(payload.message) as Error & {
+    status?: number;
+    code?: string;
+    retryable?: boolean;
+  };
+
+  err.status = payload.status;
+  if (payload.code) {
+    err.code = payload.code;
+  }
+  if (typeof payload.retryable === 'boolean') {
+    err.retryable = payload.retryable;
+  }
+
+  return err;
+}
+
 export async function getProfile() {
   const res = await fetchWithAuth('/users/me');
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to fetch profile');
   }
+  return res.json();
+}
+
+export interface SellerPublicProfile {
+  id: string;
+  name: string;
+  displayName: string;
+  avatarUrl?: string;
+  tagline?: string;
+  story?: string;
+  storyVideoUrl?: string;
+  instagram?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  website?: string;
+  location?: string;
+}
+
+export interface SellerPublicStats {
+  totalListings: number;
+  totalSold: number;
+  averageRating: number;
+  totalReviews: number;
+}
+
+export interface SellerPublicProfileResponse {
+  seller: SellerPublicProfile;
+  stats: SellerPublicStats;
+  items: ProductItem[];
+}
+
+export interface UpdateSellerProfilePayload {
+  sellerDisplayName?: string;
+  sellerTagline?: string;
+  sellerStory?: string;
+  sellerStoryVideoUrl?: string;
+  sellerInstagram?: string;
+  sellerContactEmail?: string;
+  sellerContactPhone?: string;
+  sellerWebsite?: string;
+  sellerLocation?: string;
+  sellerPickupAddressId?: string;
+  sellerPickupAddress?: SellerPickupAddress;
+}
+
+export async function getSellerPublicProfile(params: {
+  sellerId?: string;
+  sellerName?: string;
+  productId?: string;
+}): Promise<SellerPublicProfileResponse> {
+  const query = new URLSearchParams();
+  if (params.sellerId) query.set('sellerId', params.sellerId);
+  if (params.sellerName) query.set('sellerName', params.sellerName);
+  if (params.productId) query.set('productId', params.productId);
+
+  const qs = query.toString();
+  const res = await safeFetch(`/users/seller-public${qs ? `?${qs}` : ''}`);
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch seller profile');
+  }
+
+  return res.json();
+}
+
+export async function updateSellerProfile(payload: UpdateSellerProfilePayload): Promise<{
+  message: string;
+  sellerProfile: {
+    id: string;
+    displayName: string;
+    tagline: string;
+    story: string;
+    storyVideoUrl: string;
+    instagram: string;
+    contactEmail: string;
+    contactPhone: string;
+    website: string;
+    location: string;
+    sellerPickupAddress: SellerPickupAddress;
+  };
+}> {
+  const res = await fetchWithAuth('/users/me/seller-profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update seller profile');
+  }
+
   return res.json();
 }
 
@@ -405,6 +602,145 @@ export async function getProductById(productId: string): Promise<ProductItem> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to fetch product details');
+  }
+
+  return res.json();
+}
+
+export type ProductReviewSort = 'top' | 'latest' | 'media' | 'rating_high' | 'rating_low';
+
+export interface ProductReviewMediaItem {
+  type: 'image' | 'video';
+  url: string;
+  thumbnailUrl?: string;
+}
+
+export interface ProductReviewGalleryItem extends ProductReviewMediaItem {
+  id: string;
+  reviewId: string;
+  rating: number;
+  createdAt: string;
+}
+
+export interface ProductReviewItem {
+  id: string;
+  rating: number;
+  title: string;
+  comment: string;
+  media: ProductReviewMediaItem[];
+  verifiedPurchase: boolean;
+  helpfulCount: number;
+  isHelpfulByMe?: boolean;
+  isMine?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  user: {
+    id: string;
+    name: string;
+    avatarUrl?: string;
+  };
+}
+
+export interface ProductReviewSummary {
+  averageRating: number;
+  totalReviews: number;
+  mediaCount: number;
+  verifiedCount: number;
+  ratingBreakdown: {
+    1: number;
+    2: number;
+    3: number;
+    4: number;
+    5: number;
+  };
+}
+
+export interface ProductReviewsResponse {
+  reviews: ProductReviewItem[];
+  summary: ProductReviewSummary;
+  mediaGallery?: ProductReviewGalleryItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface ProductReviewEligibility {
+  canReview: boolean;
+  hasReviewed: boolean;
+  reviewId: string | null;
+  message: string;
+}
+
+export interface CreateProductReviewPayload {
+  rating: number;
+  title?: string;
+  comment?: string;
+  media?: ProductReviewMediaItem[];
+}
+
+export async function getProductReviews(
+  productId: string,
+  params: { page?: number; limit?: number; sort?: ProductReviewSort; rating?: 1 | 2 | 3 | 4 | 5 } = {}
+): Promise<ProductReviewsResponse> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.sort) query.set('sort', params.sort);
+  if (params.rating) query.set('rating', String(params.rating));
+  const qs = query.toString();
+
+  const res = await safeFetch(`/products/${productId}/reviews${qs ? `?${qs}` : ''}`);
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch product reviews');
+  }
+
+  return res.json();
+}
+
+export async function getProductReviewEligibility(productId: string): Promise<ProductReviewEligibility> {
+  const res = await fetchWithAuth(`/products/${productId}/reviews/eligibility`);
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to check review eligibility');
+  }
+
+  return res.json();
+}
+
+export async function submitProductReview(
+  productId: string,
+  payload: CreateProductReviewPayload
+): Promise<{ message: string; review: ProductReviewItem; summary: ProductReviewSummary }> {
+  const res = await fetchWithAuth(`/products/${productId}/reviews`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to submit review');
+  }
+
+  return res.json();
+}
+
+export async function toggleProductReviewHelpful(
+  productId: string,
+  reviewId: string
+): Promise<{ message: string; helpfulCount: number; isHelpfulByMe: boolean }> {
+  const res = await fetchWithAuth(`/products/${productId}/reviews/${reviewId}/helpful`, {
+    method: 'POST',
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update helpful vote');
   }
 
   return res.json();
@@ -633,6 +969,83 @@ export interface SellerOrder {
 export interface CreateOrderPayload {
   shippingAddress: ShippingAddress;
   notes?: string;
+  selectedShippingQuotes?: {
+    sellerId?: string;
+    shipmentRef?: string;
+    courierId: string;
+  }[];
+}
+
+export interface OrderShippingEstimateResponse {
+  subtotal: number;
+  shippingCost: number;
+  tax: number;
+  totalAmount: number;
+  currency: string;
+  shippingQuote: {
+    source: 'nimbus_serviceability' | string;
+    shippingCost: number;
+    details: {
+      sellerId: string;
+      shipmentRef: string;
+      origin: string;
+      destination: string;
+      weight: number;
+      options: {
+        courierId: string;
+        courierName: string;
+        totalCharges: number;
+        freightCharges: number;
+        codCharges: number;
+        etd: string;
+        chargeableWeight: number;
+      }[];
+      selectedCourierId: string;
+      selectedCourierName: string;
+      selectedTotalCharges: number;
+      selectedEtd: string;
+    }[];
+    reason?: string;
+  };
+}
+
+export async function estimateOrderShipping(payload: CreateOrderPayload): Promise<OrderShippingEstimateResponse> {
+  const res = await fetchWithAuth('/orders/estimate-shipping', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const parsed = await parseApiErrorResponse(
+      res,
+      'Live shipping quote is currently unavailable. Please retry in a few seconds.'
+    );
+    throw toApiError(parsed);
+  }
+
+  return res.json();
+}
+
+export interface RazorpayPaymentOrder {
+  keyId: string;
+  gatewayOrderId: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  prefill: {
+    name: string;
+    email: string;
+    contact: string;
+  };
+}
+
+export interface ProcessOrderPaymentPayload {
+  paymentProvider?: 'razorpay' | 'card';
+  stripeToken?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
 }
 
 export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
@@ -642,23 +1055,46 @@ export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to create order');
+    const parsed = await parseApiErrorResponse(
+      res,
+      'Unable to create order right now. Please retry.'
+    );
+    throw toApiError(parsed);
   }
 
   const data = await res.json();
   return data.order;
 }
 
-export async function processOrderPayment(orderId: string, stripeToken: string): Promise<{ order: Order; transactionId: string }> {
-  const res = await fetchWithAuth(`/orders/${orderId}/pay`, {
+export async function createRazorpayPaymentOrder(orderId: string): Promise<RazorpayPaymentOrder> {
+  const res = await fetchWithAuth(`/orders/${orderId}/pay/razorpay-order`, {
     method: 'POST',
-    body: JSON.stringify({ stripeToken }),
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Payment failed');
+    const parsed = await parseApiErrorResponse(
+      res,
+      'Failed to initialize Razorpay checkout.'
+    );
+    throw toApiError(parsed);
+  }
+
+  const data = await res.json();
+  return data.paymentOrder;
+}
+
+export async function processOrderPayment(
+  orderId: string,
+  paymentPayload: ProcessOrderPaymentPayload
+): Promise<{ order: Order; transactionId: string }> {
+  const res = await fetchWithAuth(`/orders/${orderId}/pay`, {
+    method: 'POST',
+    body: JSON.stringify(paymentPayload || {}),
+  });
+
+  if (!res.ok) {
+    const parsed = await parseApiErrorResponse(res, 'Payment failed. Please try again.');
+    throw toApiError(parsed);
   }
 
   return res.json();
@@ -697,6 +1133,455 @@ export async function updateSellerOrderItemStatus(
 
   const data = await res.json();
   return data.order;
+}
+
+export type SellerPayoutStatus =
+  | 'awaiting_delivery'
+  | 'on_hold'
+  | 'ready_for_payout'
+  | 'paid'
+  | 'failed'
+  | 'reversed'
+  | 'cancelled';
+
+export interface SellerPayoutSplit {
+  itemSubtotal: number;
+  shippingShare: number;
+  shippingDeduction?: number;
+  grossAmount: number;
+  platformFeePercent?: number;
+  platformFeeAmount?: number;
+  deductionsTotal?: number;
+  basePayoutAmount?: number;
+  reservePercent: number;
+  reserveAmount: number;
+  netPayoutAmount: number;
+  refundedAmount: number;
+}
+
+export interface SellerPayoutEntry {
+  id: string;
+  orderId: string;
+  sellerShipmentRef: string;
+  status: SellerPayoutStatus;
+  currency: string;
+  split: SellerPayoutSplit;
+  trustSnapshot: {
+    deliveredOrderCount: number;
+    trustedThreshold: number;
+    isTrusted: boolean;
+    coolingDays: number;
+  } | null;
+  deliveredAt: string | null;
+  holdStartedAt: string | null;
+  holdUntil: string | null;
+  payout: {
+    mode: 'auto' | 'manual';
+    provider: 'internal' | 'razorpay_route';
+    referenceId: string;
+    initiatedAt: string | null;
+    paidAt: string | null;
+    failureReason: string;
+  };
+  order: {
+    subtotal: number;
+    shippingCost: number;
+    totalAmount: number;
+    paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
+    createdAt: string | null;
+  };
+  timeline: {
+    status: SellerPayoutStatus;
+    note: string;
+    source: 'system' | 'seller' | 'admin' | 'scheduler';
+    at: string | null;
+  }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SellerPayoutDashboardResponse {
+  summary: {
+    totalPayouts: number;
+    awaitingDeliveryAmount: number;
+    onHoldAmount: number;
+    readyAmount: number;
+    claimableAmount: number;
+    paidAmount: number;
+    reserveHeldAmount: number;
+    nextReleaseAt: string | null;
+  };
+  payouts: SellerPayoutEntry[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  seller: {
+    id: string;
+    name: string;
+    trust: {
+      deliveredOrderCount: number;
+      isTrusted: boolean;
+      trustedSince: string | null;
+    };
+    payoutProfile: {
+      kycStatus: 'pending' | 'verified' | 'rejected';
+      kycVerifiedAt: string | null;
+      bankDetails: {
+        accountHolderName: string;
+        accountNumberMasked: string;
+        ifsc: string;
+        bankName: string;
+        branch: string;
+        upiId: string;
+        accountType: 'bank' | 'upi';
+        razorpayLinkedAccountId: string;
+        isVerified: boolean;
+        verifiedAt: string | null;
+      };
+    };
+    payoutSettings: {
+      autoPayoutEnabled: boolean;
+      minimumPayoutAmount: number;
+      reservePercent: number;
+      overrideCoolingDays: number | null;
+    };
+    wallet: {
+      availableToClaim: number;
+      pendingOnHold: number;
+      totalPaid: number;
+      reserveHeld: number;
+    };
+    policy: {
+      holdDaysAfterDelivery: number;
+      claimMode: 'manual';
+      defaultReservePercent: number;
+      defaultMinimumPayoutAmount: number;
+      trustedOrderThreshold?: number;
+      defaultCoolingDays?: number;
+      trustedCoolingDays?: number;
+    };
+  };
+}
+
+export interface PayoutPolicyResponse {
+  holdDaysAfterDelivery: number;
+  claimMode: 'manual';
+  defaultPlatformFeePercent?: number;
+  defaultReservePercent: number;
+  defaultMinimumPayoutAmount: number;
+  trustedOrderThreshold?: number;
+  defaultCoolingDays?: number;
+  trustedCoolingDays?: number;
+}
+
+export interface PayoutReleaseResponse {
+  message: string;
+  schedulerResult: {
+    scanned: number;
+    releasedCount?: number;
+    paidCount?: number;
+    pendingActionCount?: number;
+    failedCount: number;
+  };
+  dashboard: SellerPayoutDashboardResponse;
+}
+
+export interface SellerWalletClaimResponse {
+  message: string;
+  releaseResult: {
+    scanned: number;
+    releasedCount?: number;
+    paidCount?: number;
+    pendingActionCount?: number;
+    failedCount: number;
+  };
+  claimResult: {
+    scanned: number;
+    claimedCount: number;
+    claimedAmount: number;
+    blockedCount: number;
+    blocked: { payoutId: string; orderId: string; reason: string }[];
+  };
+  dashboard: SellerPayoutDashboardResponse;
+}
+
+export interface AdminPayoutDashboardResponse {
+  summary: SellerPayoutDashboardResponse['summary'];
+  payouts: {
+    id: string;
+    orderId: string;
+    seller: {
+      id: string;
+      name: string;
+      email: string;
+      kycStatus: 'pending' | 'verified' | 'rejected' | string;
+    };
+    status: SellerPayoutStatus;
+    holdUntil: string | null;
+    deliveredAt: string | null;
+    split: {
+      grossAmount: number;
+      reserveAmount: number;
+      netPayoutAmount: number;
+    };
+    payout: {
+      referenceId: string;
+      paidAt: string | null;
+      failureReason: string;
+    };
+    order: {
+      paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded' | string;
+      createdAt: string | null;
+      totalAmount: number;
+    };
+    createdAt: string;
+    updatedAt: string;
+  }[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  policy: PayoutPolicyResponse;
+}
+
+export interface AdminWalletClaimResponse {
+  message: string;
+  releaseResult: {
+    scanned: number;
+    releasedCount?: number;
+    paidCount?: number;
+    pendingActionCount?: number;
+    failedCount: number;
+  };
+  claimResult: {
+    scanned: number;
+    claimedCount: number;
+    claimedAmount: number;
+    blockedCount: number;
+    blocked: { payoutId: string; orderId: string; reason: string }[];
+  };
+  dashboard: AdminPayoutDashboardResponse;
+}
+
+export interface SellerPayoutProfileResponse {
+  payoutProfile: {
+    kycStatus: 'pending' | 'verified' | 'rejected';
+    kycVerifiedAt: string | null;
+    bankDetails: {
+      accountHolderName: string;
+      accountNumberMasked: string;
+      ifsc: string;
+      bankName: string;
+      branch: string;
+      upiId: string;
+      accountType: 'bank' | 'upi';
+      razorpayLinkedAccountId: string;
+      isVerified: boolean;
+      verifiedAt: string | null;
+    };
+  };
+  payoutSettings: {
+    autoPayoutEnabled: boolean;
+    minimumPayoutAmount: number;
+    reservePercent: number;
+    overrideCoolingDays: number | null;
+  };
+  trust: {
+    deliveredOrderCount: number;
+    isTrusted: boolean;
+    trustedSince: string | null;
+  };
+  policy: {
+    holdDaysAfterDelivery: number;
+    claimMode: 'manual';
+    defaultPlatformFeePercent?: number;
+    defaultReservePercent: number;
+    defaultMinimumPayoutAmount: number;
+    trustedOrderThreshold?: number;
+    defaultCoolingDays?: number;
+    trustedCoolingDays?: number;
+  };
+}
+
+export interface UpdateSellerPayoutProfilePayload {
+  kycStatus?: 'pending' | 'verified' | 'rejected';
+  bankDetails?: {
+    accountHolderName?: string;
+    accountNumber?: string;
+    ifsc?: string;
+    bankName?: string;
+    branch?: string;
+    upiId?: string;
+    accountType?: 'bank' | 'upi';
+    razorpayLinkedAccountId?: string;
+    isVerified?: boolean;
+  };
+  payoutSettings?: {
+    autoPayoutEnabled?: boolean;
+    minimumPayoutAmount?: number;
+    reservePercent?: number;
+    overrideCoolingDays?: number | null;
+  };
+}
+
+export async function getSellerPayoutDashboard(params: {
+  page?: number;
+  limit?: number;
+  status?: SellerPayoutStatus;
+} = {}): Promise<SellerPayoutDashboardResponse> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.status) query.set('status', params.status);
+
+  const res = await fetchWithAuth(`/payouts/seller/me${query.toString() ? `?${query.toString()}` : ''}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch seller payout dashboard');
+  }
+
+  return res.json();
+}
+
+export async function releaseSellerDuePayouts(limit = 25): Promise<PayoutReleaseResponse> {
+  const res = await fetchWithAuth('/payouts/seller/me/process-due', {
+    method: 'POST',
+    body: JSON.stringify({ limit }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to process due seller payouts');
+  }
+
+  return res.json();
+}
+
+// Backward-compatible alias for existing callers.
+export async function triggerSellerPayoutProcessing(limit = 25): Promise<PayoutReleaseResponse> {
+  return releaseSellerDuePayouts(limit);
+}
+
+export async function claimSellerWallet(params: {
+  payoutIds?: string[];
+  claimAll?: boolean;
+  limit?: number;
+} = {}): Promise<SellerWalletClaimResponse> {
+  const res = await fetchWithAuth('/payouts/seller/me/claim', {
+    method: 'POST',
+    body: JSON.stringify({
+      payoutIds: params.payoutIds || [],
+      claimAll: params.claimAll !== false,
+      limit: params.limit || 50,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to claim seller wallet payouts');
+  }
+
+  return res.json();
+}
+
+export async function getAdminPayoutDashboard(params: {
+  page?: number;
+  limit?: number;
+  status?: SellerPayoutStatus;
+  sellerId?: string;
+} = {}): Promise<AdminPayoutDashboardResponse> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.status) query.set('status', params.status);
+  if (params.sellerId) query.set('sellerId', params.sellerId);
+
+  const res = await fetchWithAuth(`/payouts/admin/dashboard${query.toString() ? `?${query.toString()}` : ''}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch admin payout dashboard');
+  }
+
+  return res.json();
+}
+
+export async function releaseAdminDuePayouts(limit = 100): Promise<{
+  message: string;
+  result: {
+    scanned: number;
+    releasedCount?: number;
+    paidCount?: number;
+    pendingActionCount?: number;
+    failedCount: number;
+  };
+}> {
+  const res = await fetchWithAuth('/payouts/admin/process-due', {
+    method: 'POST',
+    body: JSON.stringify({ limit }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to process admin payout release');
+  }
+
+  return res.json();
+}
+
+export async function claimAdminReadyPayouts(params: {
+  sellerId?: string;
+  payoutIds?: string[];
+  claimAll?: boolean;
+  limit?: number;
+} = {}): Promise<AdminWalletClaimResponse> {
+  const res = await fetchWithAuth('/payouts/admin/claim', {
+    method: 'POST',
+    body: JSON.stringify({
+      sellerId: params.sellerId || '',
+      payoutIds: params.payoutIds || [],
+      claimAll: params.claimAll === true,
+      limit: params.limit || 100,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to process admin payout claim');
+  }
+
+  return res.json();
+}
+
+export async function getSellerPayoutProfile(): Promise<SellerPayoutProfileResponse> {
+  const res = await fetchWithAuth('/users/me/seller-payout-profile');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch seller payout profile');
+  }
+  return res.json();
+}
+
+export async function updateSellerPayoutProfile(payload: UpdateSellerPayoutProfilePayload): Promise<{
+  message: string;
+  payoutProfile: SellerPayoutProfileResponse['payoutProfile'];
+  payoutSettings: SellerPayoutProfileResponse['payoutSettings'];
+}> {
+  const res = await fetchWithAuth('/users/me/seller-payout-profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload || {}),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update seller payout profile');
+  }
+
+  return res.json();
 }
 
 export async function getOrder(orderId: string): Promise<Order> {
@@ -749,11 +1634,22 @@ export interface UserProfile {
   phoneNumber: string;
   locale?: string;
   bio: string;
+  sellerDisplayName?: string;
+  sellerTagline?: string;
+  sellerStory?: string;
+  sellerStoryVideoUrl?: string;
+  sellerInstagram?: string;
+  sellerContactEmail?: string;
+  sellerContactPhone?: string;
+  sellerWebsite?: string;
+  sellerLocation?: string;
+  sellerPickupAddress?: SellerPickupAddress;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface UserAddress {
+  _id?: string;
   label: string;
   fullName: string;
   phoneNumber: string;

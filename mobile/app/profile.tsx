@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { StyleSheet, View, Pressable, ActivityIndicator, FlatList, Switch, ScrollView, Alert, Modal, TextInput, useWindowDimensions, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import AvatarEditor from '@/components/AvatarEditor';
 import { Image } from 'expo-image';
@@ -65,7 +65,7 @@ function getAvatarUri(filename: any) {
     const idx = match ? Number(match[1]) : 1;
     const seed = `handkraft-${String(idx).padStart(2, '0')}`;
     return { uri: `https://avatars.dicebear.com/api/identicon/${encodeURIComponent(seed)}.png?background=%23eaf6ff` };
-  } catch (e) {
+  } catch {
     return { uri: 'https://placehold.co/180x180?text=Avatar' };
   }
 }
@@ -79,7 +79,7 @@ function cacheBustUrl(url: any) {
     if (asStr.includes('v=')) return asStr;
     const sep = asStr.includes('?') ? '&' : '?';
     return `${asStr}${sep}v=${Date.now()}`;
-  } catch (e) {
+  } catch {
     return url;
   }
 }
@@ -207,11 +207,11 @@ export default function ProfileScreen() {
   const [editorUri, setEditorUri] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editorUploadMode, setEditorUploadMode] = useState(false);
-  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [, setIsUploadingAvatar] = useState(false);
 
   // Avatar modal state and handler (moved inside component to comply with Hooks rules)
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
-  const [avatarUpdating, setAvatarUpdating] = useState(false);
+  const [, setAvatarUpdating] = useState(false);
   const [avatarActionsVisible, setAvatarActionsVisible] = useState(false);
   const defaultAvatars = useMemo(() => {
     // Keep up to 30 local defaults, but always show any uploaded server avatars too.
@@ -252,7 +252,7 @@ export default function ProfileScreen() {
             return [busted, ...filtered].slice(0, 30);
           });
           const updatedUser = { ...res.user, avatarUrl: busted };
-          setDashboard((d) => (d ? { ...d, user: updatedUser } : d));
+          setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updatedUser } } : d));
           currentUser.setProfile(updatedUser);
         } else {
           await loadDashboard();
@@ -260,7 +260,7 @@ export default function ProfileScreen() {
       } else if (typeof filename === 'string' && filename.startsWith('local:')) {
         // local in-app avatar selection (no upload required)
         const updated = await updateUserProfile({ avatarUrl: filename });
-        setDashboard((d) => (d ? { ...d, user: updated } : d));
+        setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updated } } : d));
         currentUser.setProfile(updated);
       } else if (typeof filename === 'string' && (filename.startsWith('http') || filename.startsWith('https'))) {
         const updated = await updateUserProfile({ avatarUrl: filename });
@@ -272,7 +272,7 @@ export default function ProfileScreen() {
           return [busted, ...filtered].slice(0, 30);
         });
         const updatedUser = { ...updated, avatarUrl: busted };
-        setDashboard((d) => (d ? { ...d, user: updatedUser } : d));
+        setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updatedUser } } : d));
         currentUser.setProfile(updatedUser);
       } else if (typeof filename === 'string') {
         const avatarUrl = `/assets/profile-avatars/${filename}`;
@@ -281,7 +281,7 @@ export default function ProfileScreen() {
           const filtered = (prev || []).filter((p) => String(p).split('?')[0] !== avatarUrl);
           return [avatarUrl, ...filtered].slice(0, 30);
         });
-        setDashboard((d) => (d ? { ...d, user: updated } : d));
+        setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updated } } : d));
         currentUser.setProfile(updated);
       }
 
@@ -303,7 +303,7 @@ export default function ProfileScreen() {
           const busted = list.map((u) => cacheBustUrl(u));
           setServerAvatars(busted);
         }
-      } catch (e) {
+      } catch {
         // ignore
       }
     })();
@@ -341,7 +341,7 @@ export default function ProfileScreen() {
           const isPng = String(uri).toLowerCase().endsWith('.png');
           const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
           dataUri = `data:${isPng ? 'image/png' : 'image/jpeg'};base64,${fileBase64}`;
-        } catch (readErr) {
+        } catch {
           // If reading as base64 fails (some Android content:// URIs), fall back to alerting the user.
           dataUri = undefined;
         }
@@ -361,7 +361,7 @@ export default function ProfileScreen() {
           // If server returned updated user (setOnProfile=true), update local profile.
           if (setOnProfile && res?.user) {
             const updatedUser = { ...res.user, avatarUrl: cacheBustUrl(res.user.avatarUrl) };
-            setDashboard((d) => (d ? { ...d, user: updatedUser } : d));
+            setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updatedUser } } : d));
             currentUser.setProfile(updatedUser);
           }
         } else {
@@ -407,8 +407,8 @@ export default function ProfileScreen() {
       setError(null);
       if (mode === 'buyer') {
         const data = await getProfileDashboard();
-        const userWithBust = data?.user ? { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) } : null;
-        setDashboard(data ? { ...data, user: userWithBust } : data);
+        const userWithBust = { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) };
+        setDashboard({ ...data, user: userWithBust });
         currentUser.setProfile(userWithBust);
 
         Promise.allSettled([getUserOrderHistory(), getUserAddresses()])
@@ -425,8 +425,8 @@ export default function ProfileScreen() {
           });
       } else {
         const data = await getProfileDashboard();
-        const userWithBust = data?.user ? { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) } : null;
-        setDashboard(data ? { ...data, user: userWithBust } : data);
+        const userWithBust = { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) };
+        setDashboard({ ...data, user: userWithBust });
         currentUser.setProfile(userWithBust);
 
         getSellerOrders()
@@ -742,8 +742,9 @@ export default function ProfileScreen() {
   ), [clearNewOrderNotification, showNewOrdersTabBadge, restockCardWidth, restockSnapInterval, router, sellerInsights, sellerOrderStats.delivered, sellerOrderStats.inShipment, sellerOrderStats.newOrders]);
 
   const sellerScrollableHeader = useMemo(() => (
-    <View>
-      <View style={styles.profileTop}>
+    <View style={styles.sellerScrollableHeaderWrap}>
+      <View style={styles.sellerIdentityCard}>
+        <View style={styles.profileTop}>
           <View style={styles.avatarColumn}>
             {dashboard?.user?.avatarUrl && String(dashboard.user.avatarUrl).startsWith('local:') ? (
               <LocalAvatar id={dashboard.user.avatarUrl} size={72} style={styles.avatar} />
@@ -763,35 +764,62 @@ export default function ProfileScreen() {
               <ThemedText style={styles.changeProfileText}>Change profile</ThemedText>
             </Pressable>
           </View>
-        <View style={styles.profileInfo}>
-          <ThemedText style={styles.nameText}>{dashboard?.user.name || 'User'}</ThemedText>
-          <ThemedText style={styles.subtleText}>{dashboard?.user.email || ''}</ThemedText>
-          <ThemedText style={styles.subtleText}>Seller account</ThemedText>
+          <View style={styles.profileInfo}>
+            <ThemedText style={styles.nameText}>{dashboard?.user.name || 'User'}</ThemedText>
+            <ThemedText style={styles.subtleText}>{dashboard?.user.email || ''}</ThemedText>
+            <ThemedText style={styles.subtleText}>Seller account</ThemedText>
+          </View>
         </View>
-      </View>
 
-      <View style={styles.profileTabs}>
-        <Pressable
-          style={[styles.profileTabButton, styles.profileTabButtonActive]}
-          onPress={() => router.push('/seller-analytics')}>
-          <View style={styles.profileTabTitleRow}>
-            <Ionicons name="stats-chart-outline" size={16} color="#9fd1ff" />
-            <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Analytics</ThemedText>
-          </View>
-        </Pressable>
-        <Pressable
-          style={[styles.profileTabButton, styles.profileTabButtonActive]}
-          onPress={() => router.push('/seller-posts')}>
-          <View style={styles.profileTabTitleRow}>
-            <Ionicons name="grid-outline" size={16} color="#ffcf85" />
-            <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>My Posts</ThemedText>
-          </View>
-        </Pressable>
+        <View style={styles.profileTabs}>
+          <Pressable
+            style={[styles.profileTabButton, styles.profileTabButtonActive]}
+            onPress={() => router.push('/seller-analytics')}>
+            <View style={styles.profileTabTitleRow}>
+              <Ionicons name="stats-chart-outline" size={16} color="#9fd1ff" />
+              <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Analytics</ThemedText>
+            </View>
+          </Pressable>
+          <Pressable
+            style={[styles.profileTabButton, styles.profileTabButtonActive]}
+            onPress={() => router.push('/seller-posts')}>
+            <View style={styles.profileTabTitleRow}>
+              <Ionicons name="grid-outline" size={16} color="#ffcf85" />
+              <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>My Posts</ThemedText>
+            </View>
+          </Pressable>
+          <Pressable
+            style={[styles.profileTabButton, styles.profileTabButtonActive]}
+            onPress={() => router.push('/edit-seller-profile')}>
+            <View style={styles.profileTabTitleRow}>
+              <Ionicons name="storefront-outline" size={16} color="#9df0a2" />
+              <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Storefront</ThemedText>
+            </View>
+          </Pressable>
+          <Pressable
+            style={[styles.profileTabButton, styles.profileTabButtonActive]}
+            onPress={() => router.push('/seller-payouts')}>
+            <View style={styles.profileTabTitleRow}>
+              <Ionicons name="wallet-outline" size={16} color="#a9d6ff" />
+              <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Wallet</ThemedText>
+            </View>
+          </Pressable>
+          {dashboard?.user?.isAdmin ? (
+            <Pressable
+              style={[styles.profileTabButton, styles.profileTabButtonActive]}
+              onPress={() => router.push('/admin-payouts')}>
+              <View style={styles.profileTabTitleRow}>
+                <Ionicons name="shield-checkmark-outline" size={16} color="#ffd995" />
+                <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Admin Ops</ThemedText>
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       {sellerListHeader}
     </View>
-  ), [dashboard?.user.avatarUrl, dashboard?.user.email, dashboard?.user.name, router, sellerListHeader]);
+  ), [dashboard?.user.avatarUrl, dashboard?.user.email, dashboard?.user.isAdmin, dashboard?.user.name, router, sellerListHeader]);
 
   const savedBoards = useMemo<SavedBoard[]>(() => {
     // Build dynamic boards from saved items by category so all liked categories are represented
@@ -880,7 +908,7 @@ export default function ProfileScreen() {
 
   const renderProductCard = (item: ProductItem, sellerModeCard = false) => (
     <Pressable
-      style={styles.card}
+      style={sellerModeCard ? styles.card : styles.buyerSavedCard}
       onPress={() =>
         router.push({
           pathname: sellerModeCard ? '/seller-product/[id]' : '/product/[id]',
@@ -889,13 +917,17 @@ export default function ProfileScreen() {
       }>
       <Image
         source={{ uri: item.images?.[0] || 'https://placehold.co/600x400?text=Handmade' }}
-        style={styles.cardImage}
+        style={sellerModeCard ? styles.cardImage : styles.buyerSavedCardImage}
         contentFit="cover"
       />
-      <View style={styles.cardBody}>
-        <ThemedText numberOfLines={2} style={styles.cardTitle}>{item.title}</ThemedText>
-        <ThemedText style={styles.priceText}>₹{item.price}</ThemedText>
-        <ThemedText style={styles.subtleText}>{item.category}</ThemedText>
+      <View style={sellerModeCard ? styles.cardBody : styles.buyerSavedCardBody}>
+        <ThemedText numberOfLines={2} style={sellerModeCard ? styles.cardTitle : styles.buyerSavedCardTitle}>{item.title}</ThemedText>
+        <ThemedText style={sellerModeCard ? styles.priceText : styles.buyerSavedCardPrice}>₹{Number(item.price || 0).toLocaleString('en-IN')}</ThemedText>
+        <ThemedText style={sellerModeCard ? styles.subtleText : styles.buyerSavedCardMeta}>
+          {sellerModeCard
+            ? item.category
+            : `${item.category} • ${item.stock > 0 ? `Stock ${item.stock}` : 'Out of stock'}`}
+        </ThemedText>
         {sellerModeCard ? (
           <View style={styles.sellerStockRow}>
             <ThemedText style={styles.subtleText}>{item.stock > 0 ? `Stock: ${item.stock}` : 'Out of stock'}</ThemedText>
@@ -910,9 +942,7 @@ export default function ProfileScreen() {
               )}
             </Pressable>
           </View>
-        ) : (
-          <ThemedText style={styles.subtleText}>{item.stock > 0 ? `Stock: ${item.stock}` : 'Out of stock'}</ThemedText>
-        )}
+        ) : null}
       </View>
     </Pressable>
   );
@@ -1223,8 +1253,8 @@ export default function ProfileScreen() {
       </View>
 
       {/* Profile Card */}
-      {mode !== 'seller' && (
-        <View style={styles.profileTop}>
+      {mode === 'buyer' && (
+        <View style={styles.buyerProfileCard}>
           <View style={styles.avatarColumn}>
             {dashboard?.user?.avatarUrl && String(dashboard.user.avatarUrl).startsWith('local:') ? (
               <LocalAvatar id={dashboard.user.avatarUrl} size={72} style={styles.avatar} />
@@ -1241,14 +1271,16 @@ export default function ProfileScreen() {
               accessibilityRole="button"
               accessibilityLabel="Change Avatar"
             >
-              <ThemedText style={styles.changeProfileText}>Change profile</ThemedText>
+              <ThemedText style={[styles.changeProfileText, styles.buyerChangeProfileText]}>Change profile</ThemedText>
             </Pressable>
           </View>
-        <View style={styles.profileInfo}>
-          <ThemedText style={styles.nameText}>{dashboard?.user.name || 'User'}</ThemedText>
-          <ThemedText style={styles.subtleText}>{dashboard?.user.email || ''}</ThemedText>
-          <ThemedText style={styles.subtleText}>Buyer account</ThemedText>
-        </View>
+          <View style={[styles.profileInfo, styles.buyerProfileInfo]}>
+            <ThemedText style={[styles.nameText, styles.buyerNameText]}>{dashboard?.user.name || 'User'}</ThemedText>
+            <ThemedText style={styles.buyerEmailText}>{dashboard?.user.email || ''}</ThemedText>
+            <View style={styles.buyerAccountPill}>
+              <ThemedText style={styles.buyerAccountPillText}>Buyer account</ThemedText>
+            </View>
+          </View>
         </View>
       )}
 
@@ -1258,22 +1290,34 @@ export default function ProfileScreen() {
           <Pressable
             style={[styles.tab, buyerTab === 'saved' && styles.tabActive]}
             onPress={() => setBuyerTab('saved')}>
-            <ThemedText style={[styles.tabText, buyerTab === 'saved' && styles.tabTextActive]}>Saved</ThemedText>
+            <View style={styles.tabInner}>
+              <Ionicons name="heart-outline" size={13} color={buyerTab === 'saved' ? '#e9f4ff' : '#8ea3bd'} />
+              <ThemedText style={[styles.tabText, buyerTab === 'saved' && styles.tabTextActive]}>Saved</ThemedText>
+            </View>
           </Pressable>
           <Pressable
             style={[styles.tab, buyerTab === 'orders' && styles.tabActive]}
             onPress={() => setBuyerTab('orders')}>
-            <ThemedText style={[styles.tabText, buyerTab === 'orders' && styles.tabTextActive]}>Orders</ThemedText>
+            <View style={styles.tabInner}>
+              <Ionicons name="bag-handle-outline" size={13} color={buyerTab === 'orders' ? '#e9f4ff' : '#8ea3bd'} />
+              <ThemedText style={[styles.tabText, buyerTab === 'orders' && styles.tabTextActive]}>Orders</ThemedText>
+            </View>
           </Pressable>
           <Pressable
             style={[styles.tab, buyerTab === 'addresses' && styles.tabActive]}
             onPress={() => setBuyerTab('addresses')}>
-            <ThemedText style={[styles.tabText, buyerTab === 'addresses' && styles.tabTextActive]}>Addresses</ThemedText>
+            <View style={styles.tabInner}>
+              <Ionicons name="location-outline" size={13} color={buyerTab === 'addresses' ? '#e9f4ff' : '#8ea3bd'} />
+              <ThemedText style={[styles.tabText, buyerTab === 'addresses' && styles.tabTextActive]}>Addresses</ThemedText>
+            </View>
           </Pressable>
           <Pressable
             style={[styles.tab, buyerTab === 'account' && styles.tabActive]}
             onPress={() => setBuyerTab('account')}>
-            <ThemedText style={[styles.tabText, buyerTab === 'account' && styles.tabTextActive]}>Account</ThemedText>
+            <View style={styles.tabInner}>
+              <Ionicons name="person-outline" size={13} color={buyerTab === 'account' ? '#e9f4ff' : '#8ea3bd'} />
+              <ThemedText style={[styles.tabText, buyerTab === 'account' && styles.tabTextActive]}>Account</ThemedText>
+            </View>
           </Pressable>
         </View>
       )}
@@ -1296,7 +1340,7 @@ export default function ProfileScreen() {
               renderItem={renderRow}
               refreshing={refreshing}
               onRefresh={() => loadDashboard(true)}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={styles.savedListContent}
               ListHeaderComponent={
                 savedItems.length > 0 && savedBoards.length > 0 ? (
                   <View style={styles.savedBoardsHeader}>
@@ -1314,6 +1358,7 @@ export default function ProfileScreen() {
                             onPress={() => setActiveSavedBoard(board.id)}
                             style={({ pressed }) => [
                               styles.savedBoardSelectorBtn,
+                              activeSavedBoard === board.id && styles.savedBoardSelectorBtnActive,
                               pressed && styles.savedBoardSelectorBtnPressed,
                             ]}
                           >
@@ -1455,7 +1500,7 @@ export default function ProfileScreen() {
           renderItem={renderSellerOrderRow}
           refreshing={refreshing}
           onRefresh={() => loadDashboard(true)}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={styles.sellerListContent}
           ListHeaderComponent={sellerScrollableHeader}
         />
       )}
@@ -1558,27 +1603,29 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 64,
-    paddingBottom: 10,
+    paddingTop: 58,
+    paddingBottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a2432',
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 29,
     fontWeight: '700',
     color: '#fff',
   },
   switchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    padding: 0,
+    gap: 7,
+    paddingHorizontal: 2,
   },
   switchLabel: {
     color: '#8e9bb2',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11,
   },
   switchLabelActive: {
     color: '#ffffff',
@@ -1615,36 +1662,81 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   profileTop: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 2,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 8,
+    marginBottom: 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#223346',
+    backgroundColor: '#0f1824',
+  },
+  buyerProfileCard: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#223346',
+    backgroundColor: '#0f1824',
   },
   avatar: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     borderWidth: 2,
-    borderColor: '#2d2d2d',
+    borderColor: '#2b3f57',
   },
   profileInfo: {
     flex: 1,
     justifyContent: 'center',
-    marginTop: -28,
+    marginTop: 0,
+  },
+  buyerProfileInfo: {
+    gap: 1,
   },
   nameText: {
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: '700',
     color: '#fff',
     marginBottom: 4,
   },
+  buyerNameText: {
+    marginBottom: 1,
+  },
+  buyerEmailText: {
+    fontSize: 12,
+    color: '#9eb2ca',
+    marginBottom: 7,
+  },
+  buyerAccountPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#30455e',
+    backgroundColor: '#152536',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  buyerAccountPillText: {
+    color: '#dbe9f9',
+    fontSize: 10,
+    fontWeight: '700',
+  },
   profileTabs: {
     flexDirection: 'row',
-    marginTop: 6,
-    marginBottom: 14,
-    marginHorizontal: 16,
-    gap: 10,
+    marginTop: 9,
+    marginBottom: 4,
+    marginHorizontal: 2,
+    gap: 8,
     backgroundColor: 'transparent',
     borderRadius: 0,
     padding: 0,
@@ -1653,24 +1745,25 @@ const styles = StyleSheet.create({
   profileTabButton: {
     flex: 1,
     borderWidth: 0,
-    borderRadius: 14,
-    paddingVertical: 11,
+    borderRadius: 12,
+    paddingVertical: 10,
     alignItems: 'center',
     backgroundColor: 'transparent',
   },
   profileTabButtonActive: {
-    backgroundColor: '#192334',
+    backgroundColor: '#122031',
     borderWidth: 1,
-    borderColor: '#2a3a4f',
+    borderColor: '#26384c',
   },
   profileTabText: {
-    color: '#bfc8d7',
+    color: '#becbde',
     fontWeight: '600',
+    fontSize: 12,
   },
   profileTabTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   profileTabCount: {
     marginTop: 2,
@@ -1683,40 +1776,57 @@ const styles = StyleSheet.create({
   // Tabs Navigation
   tabsRow: {
     flexDirection: 'row',
-    marginHorizontal: 0,
-    marginBottom: 0,
+    marginHorizontal: 12,
+    marginTop: 0,
+    marginBottom: 10,
+    padding: 3,
+    gap: 4,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: '#223346',
+    backgroundColor: '#0f1824',
   },
   tab: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderBottomWidth: 0,
   },
   tabActive: {
-    borderBottomColor: '#9df0a2',
+    borderBottomColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#37516f',
+    backgroundColor: '#162739',
+  },
+  tabInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   tabText: {
-    color: '#8e9bb2',
-    fontWeight: '600',
-    fontSize: 14,
+    color: '#95abc4',
+    fontWeight: '700',
+    fontSize: 11,
   },
   tabTextActive: {
-    color: '#fff',
+    color: '#e9f4ff',
   },
   buyerContent: {
     flex: 1,
+    paddingTop: 2,
   },
   // Order Styles
   orderCard: {
-    marginHorizontal: 16,
+    marginHorizontal: 0,
     marginBottom: 12,
-    padding: 14,
-    backgroundColor: '#141922',
-    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#101a27',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#272f3d',
+    borderColor: '#24364a',
   },
   orderHeader: {
     flexDirection: 'row',
@@ -1725,36 +1835,36 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   orderIdText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
+    color: '#edf5ff',
   },
   statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
-    backgroundColor: '#2a3340',
+    backgroundColor: '#223245',
   },
   statusDelivered: {
-    backgroundColor: '#1a4d2e',
+    backgroundColor: '#1f3f2a',
   },
   statusShipped: {
-    backgroundColor: '#2d3d5c',
+    backgroundColor: '#1e334a',
   },
   statusPending: {
-    backgroundColor: '#4d3d1a',
+    backgroundColor: '#473a1f',
   },
   statusCancelled: {
-    backgroundColor: '#4d1a1a',
+    backgroundColor: '#4a2121',
   },
   statusText: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#9df0a2',
+    color: '#deebfc',
   },
   orderDateText: {
     fontSize: 12,
-    color: '#8e9bb2',
+    color: '#8da4be',
     marginBottom: 8,
   },
   orderItemsPreview: {
@@ -1764,17 +1874,17 @@ const styles = StyleSheet.create({
   },
   orderItemCount: {
     fontSize: 12,
-    color: '#b4b4b4',
+    color: '#9fb1c6',
   },
   orderTotalText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#9df0a2',
+    color: '#9fd7b0',
   },
   // Address Styles
   addressesContainer: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingTop: 0,
     paddingBottom: 92,
   },
@@ -1783,25 +1893,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginBottom: 14,
-    backgroundColor: '#141922',
-    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: '#101a27',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#272f3d',
+    borderColor: '#24364a',
     gap: 10,
   },
   addAddressText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#9df0a2',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#d7e7fb',
   },
   addressCard: {
-    marginBottom: 12,
-    padding: 14,
-    backgroundColor: '#141922',
-    borderRadius: 12,
+    marginBottom: 10,
+    padding: 12,
+    backgroundColor: '#101a27',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#272f3d',
+    borderColor: '#24364a',
   },
   addressHeader: {
     flexDirection: 'row',
@@ -1810,37 +1920,37 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   addressLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#fff',
+    color: '#edf5ff',
   },
   defaultBadge: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#9df0a2',
-    backgroundColor: '#1a4d2e',
+    color: '#d7e7fb',
+    backgroundColor: '#24364d',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
   },
   addressName: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#fff',
+    color: '#e7f0fc',
     marginBottom: 4,
   },
   addressText: {
     fontSize: 12,
-    color: '#b4b4b4',
+    color: '#99adc3',
     marginBottom: 2,
   },
   // Account Settings Styles
   accountContainer: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#0a0f16',
   },
   accountContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingTop: 0,
     paddingVertical: 0,
     paddingBottom: 92,
@@ -1978,34 +2088,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#8e9bb2',
-    marginTop: 20,
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: '#95a9bf',
+    marginTop: 16,
+    marginBottom: 10,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   sectionTitleFirst: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#8e9bb2',
+    color: '#95a9bf',
     marginTop: 0,
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginBottom: 10,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 12,
-    marginBottom: 8,
-    backgroundColor: '#141922',
-    borderRadius: 12,
+    marginBottom: 10,
+    backgroundColor: '#101a27',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#272f3d',
+    borderColor: '#24364a',
   },
   settingItemLeft: {
     flex: 1,
@@ -2014,62 +2124,62 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   settingLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#edf5ff',
   },
   settingValue: {
     fontSize: 12,
-    color: '#8e9bb2',
+    color: '#8fa6bf',
     marginTop: 2,
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 8,
+    gap: 8,
+    marginBottom: 10,
   },
   statCard: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
-    backgroundColor: '#141922',
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    backgroundColor: '#101a27',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#272f3d',
+    borderColor: '#24364a',
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#9df0a2',
+    color: '#eef6ff',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 11,
-    color: '#8e9bb2',
+    color: '#8fa6bf',
     fontWeight: '600',
   },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     marginBottom: 8,
-    backgroundColor: '#4d1a1a',
-    borderRadius: 12,
+    backgroundColor: '#301b1e',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#703030',
+    borderColor: '#5a3238',
   },
   logoutText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ff6b6b',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffb4b4',
   },
   emptyState: {
-    paddingTop: 30,
+    paddingTop: 36,
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
   },
   emptyTitle: {
     fontSize: 16,
@@ -2089,13 +2199,23 @@ const styles = StyleSheet.create({
     color: '#ff6b6b',
   },
   listContent: {
-    paddingHorizontal: 10,
-    paddingTop: 0,
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    paddingBottom: 100,
+  },
+  sellerListContent: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
     paddingBottom: 92,
   },
+  savedListContent: {
+    paddingHorizontal: 12,
+    paddingTop: 0,
+    paddingBottom: 102,
+  },
   savedBoardsHeader: {
-    marginTop: 10,
-    marginBottom: 12,
+    marginTop: 2,
+    marginBottom: 8,
   },
   savedBoardRowPlain: {
     paddingHorizontal: 8,
@@ -2155,36 +2275,51 @@ const styles = StyleSheet.create({
   },
   // Selector for saved boards (text-only, minimal)
   savedBoardSelectorRow: {
-    paddingHorizontal: 6,
-    paddingBottom: 6,
+    paddingHorizontal: 0,
+    paddingBottom: 2,
     alignItems: 'center',
-    gap: 12,
+    gap: 7,
   },
   savedBoardSelectorBtn: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#2a3e54',
+    backgroundColor: '#101b29',
   },
   savedBoardSelectorBtnPressed: {
     opacity: 0.8,
   },
-  savedBoardSelectorBtnActive: {},
+  savedBoardSelectorBtnActive: {
+    borderColor: '#4d729a',
+    backgroundColor: '#16273a',
+  },
   savedBoardSelectorText: {
-    color: '#9fb0c6',
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#9eb4cc',
+    fontSize: 11,
+    fontWeight: '700',
   },
   savedBoardSelectorTextActive: {
-    color: '#ffffff',
+    color: '#edf5ff',
     fontWeight: '800',
-    fontSize: 18,
+    fontSize: 11,
   },
   savedBoardHeaderSingle: {
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  sellerScrollableHeaderWrap: {
+    gap: 12,
+    marginBottom: 2,
+  },
+  sellerIdentityCard: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
   sellerHeaderWrap: {
-    marginBottom: 10,
-    gap: 10,
+    marginBottom: 12,
+    gap: 12,
   },
   sellerMetricRow: {
     flexDirection: 'row',
@@ -2214,35 +2349,35 @@ const styles = StyleSheet.create({
   },
   sellerStageTabsRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginHorizontal: 2,
+    gap: 10,
+    marginHorizontal: 0,
   },
   sellerStageTabBtn: {
     flex: 1,
     position: 'relative',
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2b3a4f',
-    backgroundColor: '#141f2e',
-    paddingVertical: 9,
+    borderColor: '#28394d',
+    backgroundColor: '#101a28',
+    paddingVertical: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sellerStageTabTitle: {
-    color: '#d9e6f8',
-    fontSize: 11,
+    color: '#a8bdd7',
+    fontSize: 10,
     fontWeight: '700',
   },
   sellerStageTabCount: {
-    marginTop: 2,
-    color: '#9df0a2',
-    fontSize: 12,
+    marginTop: 4,
+    color: '#eef6ff',
+    fontSize: 14,
     fontWeight: '800',
   },
   sellerQuickActionsRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginHorizontal: 2,
+    gap: 10,
+    marginHorizontal: 0,
   },
   sellerQuickActionBtn: {
     flex: 1,
@@ -2250,74 +2385,74 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2b3a4f',
-    backgroundColor: '#141f2e',
+    borderColor: '#28394d',
+    backgroundColor: '#101a28',
     paddingVertical: 10,
   },
   sellerQuickActionBtnPressed: {
     opacity: 0.86,
-    transform: [{ scale: 0.98 }],
   },
   sellerQuickActionText: {
-    color: '#d9e6f8',
+    color: '#dce8f8',
     fontSize: 12,
     fontWeight: '700',
   },
   sellerInsightCard: {
-    marginHorizontal: 2,
-    borderRadius: 12,
+    marginHorizontal: 0,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#243248',
-    backgroundColor: '#111a28',
+    borderColor: '#223346',
+    backgroundColor: '#101a27',
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 6,
+    paddingVertical: 12,
+    gap: 7,
   },
   sellerInsightHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   sellerInsightTitle: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
   },
   sellerInsightMeta: {
-    color: '#8fa0b8',
-    fontSize: 11,
+    color: '#94abc5',
+    fontSize: 10,
     fontWeight: '600',
   },
   sellerInsightRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 1,
   },
   sellerInsightLabel: {
-    color: '#a7b6cb',
+    color: '#a8bbd0',
     fontSize: 12,
   },
   sellerInsightValue: {
-    color: '#d7fce2',
+    color: '#edf5ff',
     fontSize: 12,
     fontWeight: '700',
   },
   sellerAlertWrap: {
-    marginHorizontal: 2,
-    borderRadius: 14,
+    marginHorizontal: 0,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#33455d',
-    paddingVertical: 10,
+    borderColor: '#2a3f56',
+    paddingVertical: 12,
   },
   sellerAlertHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    marginBottom: 8,
+    paddingHorizontal: 14,
+    marginBottom: 10,
   },
   sellerAlertTitleRow: {
     flexDirection: 'row',
@@ -2332,27 +2467,27 @@ const styles = StyleSheet.create({
   sellerAlertCountPill: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#3c506a',
-    backgroundColor: '#152334',
+    borderColor: '#31475f',
+    backgroundColor: '#0f1a28',
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
   sellerAlertCount: {
-    color: '#c9d9ee',
-    fontSize: 11,
+    color: '#cad9ec',
+    fontSize: 10,
     fontWeight: '700',
   },
   sellerAlertCarousel: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingRight: 4,
   },
   sellerAlertSlideCard: {
-    borderRadius: 12,
+    borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#3a4b62',
-    paddingHorizontal: 9,
-    paddingVertical: 9,
-    marginRight: 8,
+    borderColor: '#2b4158',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginRight: 10,
   },
   sellerAlertTopRow: {
     flexDirection: 'row',
@@ -2374,7 +2509,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sellerAlertSlideStock: {
-    color: '#b6c9e2',
+    color: '#b8cae0',
     fontSize: 10,
     fontWeight: '700',
   },
@@ -2385,12 +2520,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   sellerAlertStatusLow: {
-    backgroundColor: '#24372a',
-    borderColor: '#4e9561',
+    backgroundColor: '#203227',
+    borderColor: '#548f66',
   },
   sellerAlertStatusOut: {
-    backgroundColor: '#472028',
-    borderColor: '#b85d76',
+    backgroundColor: '#402028',
+    borderColor: '#a76174',
   },
   sellerAlertStatusText: {
     color: '#eff7ff',
@@ -2403,8 +2538,8 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#4c617d',
-    backgroundColor: '#1c2b40',
+    borderColor: '#3f5977',
+    backgroundColor: '#132438',
   },
   sellerAlertActionPressed: {
     opacity: 0.85,
@@ -2598,15 +2733,54 @@ const styles = StyleSheet.create({
   },
   row: {
     justifyContent: 'space-between',
+    gap: 7,
+  },
+  buyerSavedCard: {
+    flex: 1,
+    marginBottom: 10,
+    borderColor: '#24364a',
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: '#101a27',
+    overflow: 'hidden',
+  },
+  buyerSavedCardImage: {
+    width: '100%',
+    height: 110,
+  },
+  buyerSavedCardBody: {
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    minHeight: 76,
+  },
+  buyerSavedCardTitle: {
+    color: '#edf5ff',
+    fontWeight: '700',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  buyerSavedCardPrice: {
+    color: '#9fd7b0',
+    marginTop: 3,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  buyerSavedCardMeta: {
+    fontSize: 10,
+    color: '#91a8c2',
+    marginTop: 4,
+  },
+  buyerChangeProfileText: {
+    fontSize: 10,
   },
   card: {
     flex: 1,
     marginHorizontal: 4,
     marginBottom: 10,
-    borderColor: '#2a2a2a',
+    borderColor: '#24364a',
     borderWidth: 1,
-    borderRadius: 12,
-    backgroundColor: '#101010',
+    borderRadius: 13,
+    backgroundColor: '#101a27',
     overflow: 'hidden',
   },
   cardImage: {
@@ -2740,11 +2914,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   cardTitle: {
-    color: '#fff',
+    color: '#edf5ff',
     fontWeight: '600',
   },
   priceText: {
-    color: '#fff',
+    color: '#9fd7b0',
     marginTop: 6,
     fontWeight: '700',
     fontSize: 15,
@@ -2777,13 +2951,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: '#2196F3',
+    backgroundColor: '#8cc4ff',
     borderRadius: 10,
   },
   exploreButtonText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#fff',
+    color: '#08111a',
   },
   sellerPostsSection: {
     paddingHorizontal: 8,

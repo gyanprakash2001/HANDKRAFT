@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
-import { StyleSheet, View, ScrollView, ActivityIndicator, Pressable, TextInput, Alert } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, View, ScrollView, ActivityIndicator, Pressable, TextInput, Alert, NativeModules } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import Constants from 'expo-constants';
+import RazorpayCheckout from 'react-native-razorpay';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -10,6 +12,7 @@ import { useCartNotification } from '@/contexts/cart-notification-context';
 import {
   getProfileDashboard,
   createOrder,
+  createRazorpayPaymentOrder,
   processOrderPayment,
   ShippingAddress,
   Order,
@@ -19,10 +22,109 @@ import {
   addUserAddress,
   UserAddress,
   getProductById,
+  estimateOrderShipping,
+  OrderShippingEstimateResponse,
 } from '@/utils/api';
 import { getToken } from '@/utils/auth';
 
 type CheckoutStep = 'cart' | 'shipping' | 'payment' | 'confirmation';
+
+function getEffectiveProductPrice(product: CartItem['product']) {
+  const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
+  const discountedPrice = Number(product?.discountedPrice);
+  const hasDiscount = Number.isFinite(discountedPrice)
+    && discountedPrice >= 0
+    && discountedPrice < realPrice;
+
+  return hasDiscount ? discountedPrice : realPrice;
+}
+
+function getRazorpayRuntime() {
+  const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
+  if (appOwnership === 'expo') {
+    return {
+      open: null as ((options: any) => Promise<any>) | null,
+      reason: 'Razorpay is not supported in Expo Go. Install and open the app from a development build.',
+    };
+  }
+
+  const nativeCheckout = (NativeModules as any)?.RNRazorpayCheckout;
+
+  if (!nativeCheckout || typeof nativeCheckout?.open !== 'function') {
+    return {
+      open: null as ((options: any) => Promise<any>) | null,
+      reason: 'Razorpay native module is missing in this app build. Rebuild the app and reinstall it.',
+    };
+  }
+
+  const razorpayClient = (RazorpayCheckout as any)?.default ?? RazorpayCheckout;
+  if (typeof razorpayClient?.open === 'function') {
+    return {
+      open: razorpayClient.open.bind(razorpayClient) as (options: any) => Promise<any>,
+      reason: '',
+    };
+  }
+
+  return {
+    open: null as ((options: any) => Promise<any>) | null,
+    reason: 'Razorpay SDK is installed but checkout.open is unavailable.',
+  };
+}
+
+function resolveNimbusQuoteErrorMessage(params: {
+  estimate?: OrderShippingEstimateResponse | null;
+  shippingEstimateError?: string | null;
+}) {
+  const reasonFromEstimate = String(params.estimate?.shippingQuote?.reason || '').trim();
+  if (reasonFromEstimate) {
+    return reasonFromEstimate;
+  }
+
+  const fallbackError = String(params.shippingEstimateError || '').trim();
+  if (!fallbackError) {
+    return 'Live shipping quote could not be fetched from Nimbus. Please try again.';
+  }
+
+  const normalized = fallbackError.toLowerCase();
+
+  if (normalized.includes('wallet balance is low')) {
+    return 'Shipping partner wallet balance is low. Please recharge Nimbus wallet and try again.';
+  }
+
+  if (
+    normalized.includes('support email and phone number')
+    || normalized.includes('otp-verified')
+    || normalized.includes('otp verified')
+  ) {
+    return 'Nimbus support email and phone must be OTP-verified in Label Settings before booking shipments.';
+  }
+
+  if (
+    normalized.includes('network error')
+    || normalized.includes('network request failed')
+    || normalized.includes('fetch failed')
+    || normalized.includes('timed out')
+  ) {
+    return 'Nimbus is temporarily unreachable. Please retry in a few seconds.';
+  }
+
+  if (
+    normalized.includes('failed to estimate shipping')
+    || normalized.includes('live shipping quote is currently unavailable')
+  ) {
+    return 'Could not fetch live shipping charges right now. Please retry in a few seconds.';
+  }
+
+  if (
+    normalized.includes('cannot post')
+    || normalized.includes('/orders/estimate-shipping')
+    || normalized.includes('not found')
+  ) {
+    return 'Checkout API endpoint is unreachable from the app. Please restart backend and retry.';
+  }
+
+  return fallbackError;
+}
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -36,6 +138,11 @@ export default function CheckoutScreen() {
   const [useNewAddressForm, setUseNewAddressForm] = useState(false);
   const [setAsDefaultAddress, setSetAsDefaultAddress] = useState(false);
   const [shippingAddressForOrder, setShippingAddressForOrder] = useState<ShippingAddress | null>(null);
+  const [shippingEstimate, setShippingEstimate] = useState<OrderShippingEstimateResponse | null>(null);
+  const [estimatingShipping, setEstimatingShipping] = useState(false);
+  const [shippingEstimateError, setShippingEstimateError] = useState<string | null>(null);
+  const latestShippingEstimateErrorRef = useRef<string | null>(null);
+  const [selectedQuotesMap, setSelectedQuotesMap] = useState<Record<string, string>>({});
   const {
     cartItems: sharedCartItems,
     changeNotificationQuantity,
@@ -51,11 +158,6 @@ export default function CheckoutScreen() {
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [postalCode, setPostalCode] = useState('');
-
-  // Simulated payment details (for demo purposes, in real app use Stripe)
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvc, setCardCvc] = useState('');
 
   // Load cart items from profile
   useEffect(() => {
@@ -110,11 +212,40 @@ export default function CheckoutScreen() {
     product: entry.product,
     quantity: entry.quantity,
   }));
+  const razorpayRuntime = useMemo(() => getRazorpayRuntime(), []);
 
-  const subtotal = cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const shippingCost = subtotal > 500 ? 0 : 50;
-  const tax = Number((subtotal * 0.05).toFixed(2));
-  const totalAmount = subtotal + shippingCost + tax;
+  const subtotal = cartItems.reduce((sum, item) => sum + getEffectiveProductPrice(item.product) * item.quantity, 0);
+  const quoteDetails = shippingEstimate?.shippingQuote?.details || [];
+  const hasLiveNimbusQuote = shippingEstimate?.shippingQuote?.source === 'nimbus_serviceability' && quoteDetails.length > 0;
+
+  const resolveSelectedOption = (detail: OrderShippingEstimateResponse['shippingQuote']['details'][number]) => {
+    const key = String(detail.shipmentRef || detail.sellerId || '');
+    const selectedCourierId = selectedQuotesMap[key] || detail.selectedCourierId;
+    const options = Array.isArray(detail.options) ? detail.options : [];
+    const matched = options.find((option) => String(option.courierId || '') === String(selectedCourierId || ''));
+    return matched || options[0] || null;
+  };
+
+  const selectedShippingCost = hasLiveNimbusQuote
+    ? quoteDetails.reduce((sum, detail) => {
+        const selected = resolveSelectedOption(detail);
+        return sum + Number(selected?.totalCharges || 0);
+      }, 0)
+    : 0;
+
+  const displaySubtotal = Number(shippingEstimate?.subtotal ?? subtotal);
+  const shippingCost = Number(hasLiveNimbusQuote ? selectedShippingCost : 0);
+  const tax = Number(shippingEstimate?.tax ?? 0);
+  const totalAmount = Number(displaySubtotal + shippingCost + tax);
+  const shippingDisplayText = hasLiveNimbusQuote
+    ? (shippingCost === 0 ? 'Free' : `₹${shippingCost.toFixed(2)}`)
+    : 'Quote pending';
+
+  const shippingSourceText = hasLiveNimbusQuote
+    ? 'Live Nimbus quote based on destination pincode and package weight/dimensions.'
+    : (shippingEstimateError
+      ? `Live shipping quote unavailable: ${shippingEstimateError}`
+      : 'Select address to fetch live Nimbus shipping charge.');
 
   const persistCart = async (items: { productId: string; quantity: number }[]) => {
     try {
@@ -208,6 +339,9 @@ export default function CheckoutScreen() {
     );
 
     changeNotificationQuantity(productId, newQuantity);
+    setShippingEstimate(null);
+    setSelectedQuotesMap({});
+    setShippingEstimateError(null);
     void persistCart(nextItems);
   };
 
@@ -217,10 +351,13 @@ export default function CheckoutScreen() {
       .map((entry) => ({ productId: entry.product._id, quantity: entry.quantity }));
 
     removeNotificationItem(productId);
+    setShippingEstimate(null);
+    setSelectedQuotesMap({});
+    setShippingEstimateError(null);
     void persistCart(nextItems);
   };
 
-  const handleContinueToShipping = async () => {
+  const handleContinueToShippingStep = async () => {
     if (cartItems.length === 0) {
       Alert.alert('Error', 'Your cart is empty');
       return;
@@ -230,11 +367,11 @@ export default function CheckoutScreen() {
       const stockCheck = await reconcileCartStock();
       if (!stockCheck.isValid) {
         setError(stockCheck.message);
-        setStep('cart');
         return;
       }
 
       await syncCartToBackend();
+      setError(null);
       setStep('shipping');
     } catch (err: any) {
       setError(err?.message || 'Failed to sync cart before checkout');
@@ -361,51 +498,80 @@ export default function CheckoutScreen() {
     }
   };
 
-  const handleContinueToPayment = async () => {
+  const fetchShippingEstimateForAddress = async (shippingAddress: ShippingAddress) => {
+    try {
+      setEstimatingShipping(true);
+      setShippingEstimateError(null);
+      latestShippingEstimateErrorRef.current = null;
+
+      const estimate = await estimateOrderShipping({ shippingAddress });
+      setShippingEstimate(estimate);
+      latestShippingEstimateErrorRef.current = null;
+      setError(null);
+
+      const defaults: Record<string, string> = {};
+      const details = estimate?.shippingQuote?.details || [];
+      details.forEach((detail) => {
+        const key = String(detail.shipmentRef || detail.sellerId || '');
+        const defaultCourierId = String(detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+        if (key && defaultCourierId) {
+          defaults[key] = defaultCourierId;
+        }
+      });
+      setSelectedQuotesMap(defaults);
+
+      return estimate;
+    } catch (err: any) {
+      setShippingEstimate(null);
+      setSelectedQuotesMap({});
+      const resolvedMessage = resolveNimbusQuoteErrorMessage({
+        estimate: null,
+        shippingEstimateError: err?.message || 'Failed to fetch shipping estimate',
+      });
+      latestShippingEstimateErrorRef.current = resolvedMessage;
+      setShippingEstimateError(resolvedMessage);
+      setError(resolvedMessage);
+      return null;
+    } finally {
+      setEstimatingShipping(false);
+    }
+  };
+
+  const buildSelectedShippingQuotesPayload = () => {
+    const details = shippingEstimate?.shippingQuote?.details || [];
+    return details
+      .map((detail) => {
+        const key = String(detail.shipmentRef || detail.sellerId || '');
+        const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+        return {
+          sellerId: String(detail.sellerId || ''),
+          shipmentRef: String(detail.shipmentRef || ''),
+          courierId: selectedCourierId,
+        };
+      })
+      .filter((entry) => entry.courierId);
+  };
+
+  const handleContinueToReview = async () => {
     const selected = await ensureAddressSelectedForCheckout();
     if (!selected) {
       return;
     }
 
     setShippingAddressForOrder(selected);
+    const estimate = await fetchShippingEstimateForAddress(selected);
+    if (!estimate || estimate?.shippingQuote?.source !== 'nimbus_serviceability' || !Array.isArray(estimate?.shippingQuote?.details) || estimate.shippingQuote.details.length === 0) {
+      setError(resolveNimbusQuoteErrorMessage({
+        estimate,
+        shippingEstimateError: latestShippingEstimateErrorRef.current || shippingEstimateError,
+      }));
+      return;
+    }
+    setError(null);
     setStep('payment');
   };
 
-  const validatePaymentForm = () => {
-    const digits = cardNumber.replace(/\D/g, '');
-    const cvcDigits = cardCvc.replace(/\D/g, '');
-
-    // Demo-mode validation: allow fake test numbers, only require minimum input.
-    if (digits.length < 4) {
-      setError('Enter at least 4 digits for card number');
-      return false;
-    }
-    if (!cardExpiry.trim() || cardExpiry.trim().length < 3) {
-      setError('Enter a valid expiry (for example 12/30)');
-      return false;
-    }
-    if (cvcDigits.length < 3) {
-      setError('Enter at least 3 digits for CVC');
-      return false;
-    }
-
-    setError(null);
-    return true;
-  };
-
-  const formatCardExpiry = (input: string) => {
-    const digits = String(input || '').replace(/\D/g, '').slice(0, 4);
-    if (digits.length <= 2) {
-      return digits;
-    }
-    return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  };
-
   const handleProcessPayment = async () => {
-    if (!validatePaymentForm()) {
-      return;
-    }
-
     try {
       setProcessing(true);
       setError(null);
@@ -442,16 +608,70 @@ export default function CheckoutScreen() {
       }
       console.log('[CHECKOUT] Shipping address confirmed');
 
+      if (!hasLiveNimbusQuote) {
+        setError('Live Nimbus shipping quote is required before payment.');
+        setStep('shipping');
+        return;
+      }
+
+      const razorpayOpen = razorpayRuntime.open;
+      if (!razorpayOpen) {
+        const sdkMissingMessage = razorpayRuntime.reason
+          ? `${razorpayRuntime.reason} Use npm run android (or npm run ios) and open the newly installed app.`
+          : 'Razorpay checkout is unavailable in this app build. Use an Expo development build (not Expo Go), then rebuild with npm run android (or npm run ios).';
+        setError(sdkMissingMessage);
+        Alert.alert('Razorpay unavailable', sdkMissingMessage);
+        return;
+      }
+
       // Create order
       console.log('[CHECKOUT] Creating order...');
-      const newOrder = await createOrder({ shippingAddress });
+      const selectedShippingQuotes = buildSelectedShippingQuotesPayload();
+      if (selectedShippingQuotes.length === 0) {
+        setError('Please select a shipping option before placing order.');
+        return;
+      }
+
+      const newOrder = await createOrder({
+        shippingAddress,
+        selectedShippingQuotes,
+      });
       console.log('[CHECKOUT] Order created:', newOrder._id);
       setOrder(newOrder);
 
-      // Process payment (demo: use masked card number as token)
-      const stripeToken = `tok_${cardNumber.slice(-4)}_demo`;
-      console.log('[CHECKOUT] Processing payment with token:', stripeToken);
-      await processOrderPayment(newOrder._id, stripeToken);
+      // Create gateway order and open Razorpay checkout.
+      const paymentOrder = await createRazorpayPaymentOrder(newOrder._id);
+      console.log('[CHECKOUT] Razorpay order created:', paymentOrder.gatewayOrderId);
+
+      let razorpayResult: any;
+      try {
+        razorpayResult = await razorpayOpen({
+          key: paymentOrder.keyId,
+          amount: paymentOrder.amount,
+          currency: paymentOrder.currency,
+          order_id: paymentOrder.gatewayOrderId,
+          name: paymentOrder.name,
+          description: paymentOrder.description,
+          prefill: paymentOrder.prefill,
+          theme: { color: '#4caf50' },
+        });
+      } catch (checkoutError: any) {
+        const checkoutMessage = checkoutError?.description || checkoutError?.message || 'Payment cancelled';
+        const normalizedMessage = String(checkoutMessage).toLowerCase();
+        if (normalizedMessage.includes('cancel') || normalizedMessage.includes('dismiss')) {
+          setError('Payment was cancelled. You can retry from checkout.');
+          return;
+        }
+
+        throw new Error(checkoutMessage);
+      }
+
+      await processOrderPayment(newOrder._id, {
+        paymentProvider: 'razorpay',
+        razorpayOrderId: String(razorpayResult?.razorpay_order_id || ''),
+        razorpayPaymentId: String(razorpayResult?.razorpay_payment_id || ''),
+        razorpaySignature: String(razorpayResult?.razorpay_signature || ''),
+      });
       console.log('[CHECKOUT] Payment successful');
 
       // Clear local cart badge state immediately after successful payment.
@@ -466,8 +686,7 @@ export default function CheckoutScreen() {
       setStep('confirmation');
     } catch (err: any) {
       const errorMsg = err?.message || JSON.stringify(err) || 'Payment processing failed';
-      console.error('[CHECKOUT] Payment error:', errorMsg);
-      console.error('[CHECKOUT] Full error object:', err);
+      console.warn('[CHECKOUT] Payment warning:', errorMsg);
       setError(errorMsg);
     } finally {
       setProcessing(false);
@@ -475,7 +694,9 @@ export default function CheckoutScreen() {
   };
 
   const handleBackPress = () => {
-    if (step === 'shipping') {
+    if (step === 'cart') {
+      router.back();
+    } else if (step === 'shipping') {
       setStep('cart');
     } else if (step === 'payment') {
       setStep('shipping');
@@ -551,7 +772,7 @@ export default function CheckoutScreen() {
     <ThemedView style={styles.container}>
       <ScatterView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Pressable onPress={() => (step === 'cart' ? router.back() : handleBackPress())}>
+          <Pressable onPress={handleBackPress}>
             <Ionicons name={step === 'cart' ? 'close' : 'chevron-back'} size={28} color="#fff" />
           </Pressable>
           <ThemedText type="title" style={styles.headerTitle}>
@@ -585,7 +806,12 @@ export default function CheckoutScreen() {
                     />
                     <View style={styles.itemDetails}>
                       <ThemedText numberOfLines={2} style={styles.itemTitle}>{item.product.title}</ThemedText>
-                      <ThemedText style={styles.subtleText}>₹{item.product.price}</ThemedText>
+                      <View style={styles.priceMetaRow}>
+                        <ThemedText style={styles.subtleText}>₹{getEffectiveProductPrice(item.product).toFixed(2)}</ThemedText>
+                        {getEffectiveProductPrice(item.product) < Math.max(0, Number(item.product.realPrice ?? item.product.price) || 0) ? (
+                          <ThemedText style={styles.originalPriceStrike}>₹{Math.max(0, Number(item.product.realPrice ?? item.product.price) || 0).toFixed(2)}</ThemedText>
+                        ) : null}
+                      </View>
                     </View>
                     <View style={styles.quantityControl}>
                       <Pressable
@@ -601,7 +827,7 @@ export default function CheckoutScreen() {
                       </Pressable>
                     </View>
                     <View style={styles.itemTotalCol}>
-                      <ThemedText style={styles.itemPrice}>₹{(item.product.price * item.quantity).toFixed(2)}</ThemedText>
+                      <ThemedText style={styles.itemPrice}>₹{(getEffectiveProductPrice(item.product) * item.quantity).toFixed(2)}</ThemedText>
                       <Pressable onPress={() => handleRemoveItem(item.product._id)}>
                         <Ionicons name="trash-outline" size={14} color="#ff6b6b" />
                       </Pressable>
@@ -612,11 +838,11 @@ export default function CheckoutScreen() {
                 <View style={styles.costSummary}>
                   <View style={styles.costRow}>
                     <ThemedText>Subtotal</ThemedText>
-                    <ThemedText>₹{subtotal.toFixed(2)}</ThemedText>
+                    <ThemedText>₹{displaySubtotal.toFixed(2)}</ThemedText>
                   </View>
                   <View style={styles.costRow}>
                     <ThemedText>Shipping</ThemedText>
-                    <ThemedText>{shippingCost === 0 ? 'Free' : `₹${shippingCost}`}</ThemedText>
+                    <ThemedText>{shippingDisplayText}</ThemedText>
                   </View>
                   <View style={styles.costRow}>
                     <ThemedText>Tax (5%)</ThemedText>
@@ -628,8 +854,10 @@ export default function CheckoutScreen() {
                   </View>
                 </View>
 
-                <Pressable style={styles.primaryButton} onPress={handleContinueToShipping}>
-                  <ThemedText style={styles.buttonText}>Continue Checkout</ThemedText>
+                <ThemedText style={styles.shippingInfoText}>{shippingSourceText}</ThemedText>
+
+                <Pressable style={styles.primaryButton} onPress={handleContinueToShippingStep}>
+                  <ThemedText style={styles.buttonText}>Continue to Address</ThemedText>
                 </Pressable>
               </>
             )}
@@ -652,6 +880,9 @@ export default function CheckoutScreen() {
                       onPress={() => {
                         setSelectedAddressIndex(index);
                         setUseNewAddressForm(false);
+                        setShippingEstimate(null);
+                        setSelectedQuotesMap({});
+                        setShippingEstimateError(null);
                         setError(null);
                       }}>
                       <View style={styles.savedAddressTopRow}>
@@ -671,6 +902,9 @@ export default function CheckoutScreen() {
                     setUseNewAddressForm(true);
                     setSelectedAddressIndex(null);
                     setSetAsDefaultAddress(savedAddresses.length === 0);
+                    setShippingEstimate(null);
+                    setSelectedQuotesMap({});
+                    setShippingEstimateError(null);
                     setError(null);
                   }}>
                   <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
@@ -738,8 +972,11 @@ export default function CheckoutScreen() {
               </>
             ) : null}
 
-            <Pressable style={styles.primaryButton} onPress={() => void handleContinueToPayment()}>
-              <ThemedText style={styles.buttonText}>Continue to Payment</ThemedText>
+            <Pressable
+              style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
+              onPress={() => void handleContinueToReview()}
+              disabled={estimatingShipping}>
+              <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Calculating Shipping...' : 'Continue to Payment'}</ThemedText>
             </Pressable>
           </>
         )}
@@ -751,49 +988,81 @@ export default function CheckoutScreen() {
             <View style={styles.orderSummaryBox}>
               <ThemedText style={styles.summaryTitle}>Order Total</ThemedText>
               <ThemedText style={styles.summaryPrice}>₹{totalAmount.toFixed(2)}</ThemedText>
+
+              <View style={styles.paymentBreakdown}>
+                <View style={styles.costRow}>
+                  <ThemedText style={styles.summaryLineLabel}>Subtotal</ThemedText>
+                  <ThemedText style={styles.summaryLineValue}>₹{displaySubtotal.toFixed(2)}</ThemedText>
+                </View>
+                <View style={styles.costRow}>
+                  <ThemedText style={styles.summaryLineLabel}>Shipping</ThemedText>
+                  <ThemedText style={styles.summaryLineValue}>{shippingDisplayText}</ThemedText>
+                </View>
+                <View style={styles.costRow}>
+                  <ThemedText style={styles.summaryLineLabel}>Tax</ThemedText>
+                  <ThemedText style={styles.summaryLineValue}>₹{tax.toFixed(2)}</ThemedText>
+                </View>
+              </View>
+
+              <ThemedText style={styles.shippingInfoText}>{shippingSourceText}</ThemedText>
+
+              {hasLiveNimbusQuote ? (
+                <View style={styles.quoteListWrap}>
+                  {(quoteDetails || []).map((detail, detailIndex) => {
+                    const key = String(detail.shipmentRef || detail.sellerId || `shipment-${detailIndex}`);
+                    const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+
+                    return (
+                      <View key={`quote-detail-${detailIndex}`} style={styles.quoteShipmentCard}>
+                        <ThemedText style={styles.quoteShipmentTitle}>
+                          Shipment {detailIndex + 1}: {detail.origin} to {detail.destination} ({detail.weight}g)
+                        </ThemedText>
+
+                        {(detail.options || []).map((option, optionIndex) => {
+                          const isSelected = String(option.courierId || '') === selectedCourierId;
+                          return (
+                            <Pressable
+                              key={`quote-option-${detailIndex}-${optionIndex}`}
+                              style={[styles.quoteOptionRow, isSelected && styles.quoteOptionRowSelected]}
+                              onPress={() => setSelectedQuotesMap((prev) => ({ ...prev, [key]: String(option.courierId || '') }))}>
+                              <View style={styles.quoteOptionTextWrap}>
+                                <ThemedText style={styles.quoteOptionName}>{option.courierName || option.courierId}</ThemedText>
+                                <ThemedText style={styles.quoteOptionMeta}>ETA {option.etd || 'NA'} • Chargeable {option.chargeableWeight || detail.weight}g</ThemedText>
+                              </View>
+                              <ThemedText style={styles.quoteOptionPrice}>₹{Number(option.totalCharges || 0).toFixed(2)}</ThemedText>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
 
-            <ThemedText style={[styles.sectionTitle, { marginTop: 16 }]}>Card Information</ThemedText>
-            <TextInput
-              style={styles.input}
-              placeholder="Card Number (16 digits)"
-              placeholderTextColor="#666"
-              value={cardNumber}
-              onChangeText={setCardNumber}
-              keyboardType="number-pad"
-              maxLength={16}
-            />
-            <View style={styles.rowInputs}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="MM/YY"
-                placeholderTextColor="#666"
-                value={cardExpiry}
-                onChangeText={(value) => setCardExpiry(formatCardExpiry(value))}
-                keyboardType="number-pad"
-                maxLength={5}
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="CVC"
-                placeholderTextColor="#666"
-                value={cardCvc}
-                onChangeText={setCardCvc}
-                keyboardType="number-pad"
-                maxLength={4}
-              />
-            </View>
+            <ThemedText style={[styles.sectionTitle, { marginTop: 16 }]}>Razorpay Checkout</ThemedText>
+            <ThemedText style={styles.paymentHintText}>
+              Tap pay to open Razorpay secure checkout. Use Razorpay test mode cards/UPI/netbanking in the popup.
+            </ThemedText>
+
+            {!razorpayRuntime.open ? (
+              <ThemedText style={styles.paymentUnavailableText}>{razorpayRuntime.reason}</ThemedText>
+            ) : null}
 
             <ThemedText style={styles.secureText}>
-              <Ionicons name="lock-closed" size={12} color="#4caf50" /> Secure payment powered by Stripe
+              <Ionicons name="lock-closed" size={12} color="#4caf50" /> Secure payment powered by Razorpay
             </ThemedText>
 
             <Pressable
               style={[styles.primaryButton, processing && styles.disabledButton]}
               onPress={handleProcessPayment}
-              disabled={processing}>
+              disabled={processing || !razorpayRuntime.open}>
               <ThemedText style={styles.buttonText}>
-                {processing ? 'Processing...' : `Pay ₹${totalAmount.toFixed(2)}`}
+                {processing
+                  ? 'Processing...'
+                  : razorpayRuntime.open
+                    ? `Pay ₹${totalAmount.toFixed(2)}`
+                    : 'Razorpay unavailable in this build'}
               </ThemedText>
             </Pressable>
           </>
@@ -918,6 +1187,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
   },
+  priceMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  originalPriceStrike: {
+    fontSize: 11,
+    color: '#7f8792',
+    textDecorationLine: 'line-through',
+  },
   itemPrice: {
     fontSize: 13,
     fontWeight: '600',
@@ -1037,6 +1316,64 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
+  shippingInfoText: {
+    marginTop: 8,
+    color: '#9eb0c8',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  quoteListWrap: {
+    marginTop: 12,
+    width: '100%',
+    gap: 10,
+  },
+  quoteShipmentCard: {
+    borderWidth: 1,
+    borderColor: '#2d3d4f',
+    backgroundColor: '#101723',
+    borderRadius: 10,
+    padding: 10,
+    gap: 8,
+  },
+  quoteShipmentTitle: {
+    color: '#d8e5f8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  quoteOptionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#223045',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#0e1622',
+  },
+  quoteOptionRowSelected: {
+    borderColor: '#6ec77a',
+    backgroundColor: '#13261d',
+  },
+  quoteOptionTextWrap: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  quoteOptionName: {
+    color: '#f5fbff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  quoteOptionMeta: {
+    marginTop: 2,
+    color: '#9eb0c8',
+    fontSize: 11,
+  },
+  quoteOptionPrice: {
+    color: '#9df0a2',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   input: {
     backgroundColor: '#141922',
     borderColor: '#2d3d4f',
@@ -1054,6 +1391,18 @@ const styles = StyleSheet.create({
   },
   halfInput: {
     flex: 1,
+  },
+  paymentHintText: {
+    color: '#9eb0c8',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  paymentUnavailableText: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#ff9f7a',
   },
   secureText: {
     color: '#888',
@@ -1146,5 +1495,22 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#4caf50',
+  },
+  paymentBreakdown: {
+    marginTop: 10,
+    width: '100%',
+    gap: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#253246',
+    paddingTop: 10,
+  },
+  summaryLineLabel: {
+    color: '#9eb0c8',
+    fontSize: 12,
+  },
+  summaryLineValue: {
+    color: '#dce7f8',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

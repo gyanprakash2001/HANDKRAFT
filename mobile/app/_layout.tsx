@@ -1,4 +1,3 @@
-import 'react-native-gesture-handler';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -36,8 +35,12 @@ export default function RootLayout() {
             <Stack.Screen name="upload" />
             <Stack.Screen name="profile" />
             <Stack.Screen name="seller-analytics" />
+            <Stack.Screen name="seller-payouts" />
+            <Stack.Screen name="admin-payouts" />
             <Stack.Screen name="seller-posts" />
+            <Stack.Screen name="edit-seller-profile" />
             <Stack.Screen name="seller-orders/[stage]" />
+            <Stack.Screen name="seller/[id]" />
             <Stack.Screen name="product/[id]" />
             <Stack.Screen name="seller-product/[id]" />
             <Stack.Screen name="(tabs)" />

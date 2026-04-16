@@ -38,6 +38,28 @@ function parseNonNegativeNumber(value, fallback) {
   return parsed;
 }
 
+function parseCsv(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return [];
+  }
+
+  const seen = new Set();
+  const values = [];
+
+  String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      if (!seen.has(item)) {
+        seen.add(item);
+        values.push(item);
+      }
+    });
+
+  return values;
+}
+
 function requireEnv(name, value) {
   if (value === undefined || value === null || String(value).trim() === '') {
     throw new Error(`[ENV] Missing required environment variable: ${name}`);
@@ -50,9 +72,15 @@ const hasRazorpayCredentials = Boolean(
   && String(process.env.RAZORPAY_KEY_SECRET || '').trim()
 );
 
+const configuredCorsOrigins = parseCsv(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '');
+
 const env = {
   port: Number(process.env.PORT || 5000),
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/handkraft',
+  cors: {
+    allowAnyOrigin: configuredCorsOrigins.length === 0 || configuredCorsOrigins.includes('*'),
+    origins: configuredCorsOrigins.filter((origin) => origin !== '*'),
+  },
   razorpay: {
     enabled: parseBoolean(process.env.RAZORPAY_ENABLED, hasRazorpayCredentials),
     keyId: process.env.RAZORPAY_KEY_ID || '',

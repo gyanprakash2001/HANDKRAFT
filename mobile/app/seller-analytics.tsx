@@ -233,6 +233,12 @@ export default function SellerAnalyticsScreen() {
               <ThemedText style={styles.detailLabel}>Failed payments</ThemedText>
               <ThemedText style={styles.detailValue}>{analytics.failedPayments}</ThemedText>
             </View>
+            <Pressable
+              style={({ pressed }) => [styles.paymentPayoutBtn, pressed && styles.paymentPayoutBtnPressed]}
+              onPress={() => router.push('/seller-payouts')}>
+              <Ionicons name="wallet-outline" size={14} color="#0f1a12" />
+              <ThemedText style={styles.paymentPayoutBtnText}>Open Seller Wallet</ThemedText>
+            </Pressable>
           </View>
         ) : null}
 
@@ -465,5 +471,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     paddingVertical: 4,
+  },
+  paymentPayoutBtn: {
+    marginTop: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#9df0a2',
+    backgroundColor: '#9df0a2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    paddingVertical: 8,
+  },
+  paymentPayoutBtnPressed: {
+    opacity: 0.9,
+  },
+  paymentPayoutBtnText: {
+    color: '#0f1a12',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

@@ -12,9 +12,27 @@ console.log('BACKEND STARTING - NEW CODE WITH IMPROVED ERROR HANDLING');
 console.log('='.repeat(60) + '\n');
 console.log(`[ENV] Razorpay enabled: ${env.razorpay?.enabled ? 'yes' : 'no'}`);
 console.log(`[ENV] NimbusPost enabled: ${env.nimbuspost?.enabled ? 'yes' : 'no'} (mode: ${env.nimbuspost?.mode || 'auto'})`);
+console.log(`[ENV] CORS allowlist: ${env.cors?.allowAnyOrigin ? '*' : env.cors?.origins?.join(', ') || '(none)'}`);
 
 const app = express();
-app.use(cors());
+const corsOptions = env.cors?.allowAnyOrigin
+  ? {}
+  : {
+      origin(origin, callback) {
+        if (!origin) {
+          return callback(null, true);
+        }
+
+        if (env.cors.origins.includes(origin)) {
+          return callback(null, true);
+        }
+
+        return callback(new Error(`CORS blocked for origin: ${origin}`));
+      },
+      optionsSuccessStatus: 204,
+    };
+
+app.use(cors(corsOptions));
 app.use(compression());
 app.use(express.json({
   limit: '12mb',
