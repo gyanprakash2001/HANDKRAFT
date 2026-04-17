@@ -37,6 +37,17 @@ function classifyNimbusQuoteError(rawMessage = '') {
   const normalizedRaw = String(rawMessage || '').trim();
   const normalized = normalizedRaw.toLowerCase();
 
+  if (
+    normalized.includes('nimbuspost is disabled')
+    || normalized.includes('integration is disabled')
+  ) {
+    return {
+      code: 'NIMBUS_DISABLED',
+      retryable: false,
+      userMessage: 'Live Nimbus quote is unavailable right now. Showing fallback shipping estimate.',
+    };
+  }
+
   if (normalized.includes('wallet balance is low')) {
     return {
       code: 'NIMBUS_WALLET_LOW',
@@ -426,6 +437,183 @@ async function estimateOrderShippingFromNimbus({ orderItems = [], sellerShipment
     details: quoteDetails,
     reason: '',
   };
+}
+
+const FALLBACK_SHIPPING_BASE_INR = 45;
+const FALLBACK_SHIPPING_STEP_WEIGHT_GRAMS = 500;
+const FALLBACK_SHIPPING_STEP_SURCHARGE_INR = 12;
+const FALLBACK_SHIPPING_INTERZONE_SURCHARGE_INR = 18;
+const FALLBACK_SHIPPING_EXPRESS_SURCHARGE_INR = 20;
+
+function buildFallbackQuoteOptions({ origin = '', destination = '', weight = 500 } = {}) {
+  const normalizedWeight = Math.max(1, Math.round(Number(weight || 500)));
+  const extraWeight = Math.max(0, normalizedWeight - FALLBACK_SHIPPING_STEP_WEIGHT_GRAMS);
+  const extraSteps = Math.ceil(extraWeight / FALLBACK_SHIPPING_STEP_WEIGHT_GRAMS);
+
+  const originPrefix = String(origin || '').trim().slice(0, 3);
+  const destinationPrefix = String(destination || '').trim().slice(0, 3);
+  const interzoneSurcharge = originPrefix && destinationPrefix && originPrefix !== destinationPrefix
+    ? FALLBACK_SHIPPING_INTERZONE_SURCHARGE_INR
+    : 0;
+
+  const standardTotal = roundCurrency(
+    FALLBACK_SHIPPING_BASE_INR
+    + (extraSteps * FALLBACK_SHIPPING_STEP_SURCHARGE_INR)
+    + interzoneSurcharge
+  );
+  const expressTotal = roundCurrency(standardTotal + FALLBACK_SHIPPING_EXPRESS_SURCHARGE_INR);
+
+  return [
+    {
+      courierId: 'fallback-standard',
+      courierName: 'Standard Shipping',
+      totalCharges: standardTotal,
+      freightCharges: standardTotal,
+      codCharges: 0,
+      etd: '3-6 business days',
+      chargeableWeight: normalizedWeight,
+    },
+    {
+      courierId: 'fallback-express',
+      courierName: 'Express Shipping',
+      totalCharges: expressTotal,
+      freightCharges: expressTotal,
+      codCharges: 0,
+      etd: '2-4 business days',
+      chargeableWeight: normalizedWeight,
+    },
+  ];
+}
+
+async function estimateOrderShippingFallback({
+  orderItems = [],
+  sellerShipments = [],
+  shippingAddress = {},
+  preferredCouriers = new Map(),
+  reason = '',
+}) {
+  const destination = normalizePincodeForNimbus(shippingAddress?.postalCode || '');
+  if (!destination) {
+    throw new Error('Destination pincode is required for shipping quote calculation.');
+  }
+
+  const sellerIds = Array.from(new Set(
+    (sellerShipments || [])
+      .map((shipment) => String(shipment?.seller || '').trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value))
+  ));
+
+  const sellers = sellerIds.length > 0
+    ? await User.find({ _id: { $in: sellerIds } })
+      .select('name email sellerDisplayName sellerContactEmail sellerPickupAddress')
+      .lean()
+    : [];
+  const sellerMap = new Map((sellers || []).map((entry) => [String(entry._id), entry]));
+
+  const fallbackOrigin = normalizePincodeForNimbus(env?.nimbuspost?.pickup?.pincode || '') || destination;
+  const quoteDetails = [];
+  let totalShipping = 0;
+
+  for (const shipment of sellerShipments || []) {
+    const itemIndexes = Array.isArray(shipment?.itemIndexes)
+      ? shipment.itemIndexes.filter((index) => Number.isInteger(index) && index >= 0)
+      : [];
+
+    const shipmentItems = itemIndexes
+      .map((index) => orderItems[index])
+      .filter(Boolean);
+
+    if (shipmentItems.length === 0) {
+      continue;
+    }
+
+    const seller = sellerMap.get(String(shipment?.seller || '')) || null;
+    const pickup = mapSellerPickupForNimbus(seller) || null;
+
+    const origin = normalizePincodeForNimbus(pickup?.pincode || '') || fallbackOrigin;
+    const weight = estimateShipmentWeightGrams(shipmentItems);
+    const options = buildFallbackQuoteOptions({ origin, destination, weight });
+
+    const preferredCourierId = getPreferredCourierForShipment(preferredCouriers, shipment);
+    const selectedOption = preferredCourierId
+      ? options.find((entry) => String(entry.courierId || '') === preferredCourierId)
+      : options[0];
+    const resolvedSelection = selectedOption || options[0];
+
+    const shipmentCharge = roundCurrency(Number(resolvedSelection?.totalCharges || 0));
+    totalShipping += shipmentCharge;
+
+    quoteDetails.push({
+      sellerId: String(shipment?.seller || ''),
+      shipmentRef: String(shipment?.localShipmentRef || ''),
+      origin,
+      destination,
+      weight,
+      options,
+      selectedCourierId: String(resolvedSelection?.courierId || ''),
+      selectedCourierName: String(resolvedSelection?.courierName || ''),
+      selectedTotalCharges: shipmentCharge,
+      selectedEtd: String(resolvedSelection?.etd || ''),
+    });
+  }
+
+  if (quoteDetails.length === 0) {
+    throw new Error('No shippable items were found for shipping quote calculation.');
+  }
+
+  return {
+    source: 'fallback_estimate',
+    shippingCost: roundCurrency(totalShipping),
+    details: quoteDetails,
+    reason: String(reason || 'Live Nimbus quote is unavailable right now. Showing fallback shipping estimate.').trim(),
+  };
+}
+
+async function estimateOrderShippingWithFallback({
+  orderItems = [],
+  sellerShipments = [],
+  shippingAddress = {},
+  preferredCouriers = new Map(),
+  contextLabel = 'ESTIMATE',
+}) {
+  try {
+    const shippingQuote = await estimateOrderShippingFromNimbus({
+      orderItems,
+      sellerShipments,
+      shippingAddress,
+      preferredCouriers,
+    });
+
+    return {
+      shippingQuote,
+      usedFallback: false,
+      fallbackCode: '',
+      retryable: false,
+    };
+  } catch (quoteErr) {
+    const classified = classifyNimbusQuoteError(quoteErr?.message || '');
+    const fallbackReason = classified.userMessage || 'Live Nimbus quote is unavailable right now. Showing fallback shipping estimate.';
+
+    console.warn(
+      `[ORDERS][${contextLabel}][NIMBUS] Quote failed (${classified.code}). Falling back to local estimate:`,
+      quoteErr?.message || quoteErr
+    );
+
+    const shippingQuote = await estimateOrderShippingFallback({
+      orderItems,
+      sellerShipments,
+      shippingAddress,
+      preferredCouriers,
+      reason: fallbackReason,
+    });
+
+    return {
+      shippingQuote,
+      usedFallback: true,
+      fallbackCode: classified.code,
+      retryable: Boolean(classified.retryable),
+    };
+  }
 }
 
 function resolveEffectiveUnitPrice(product = {}) {
@@ -1244,23 +1432,13 @@ router.post('/estimate-shipping', auth, async (req, res) => {
     }
 
     const quoteShipments = buildSellerShipmentSkeletons(orderItems, 'ESTIMATE');
-    let shippingQuote;
-
-    try {
-      shippingQuote = await estimateOrderShippingFromNimbus({
-        orderItems,
-        sellerShipments: quoteShipments,
-        shippingAddress,
-      });
-    } catch (quoteErr) {
-      const classified = classifyNimbusQuoteError(quoteErr?.message || '');
-      console.warn('[ORDERS][ESTIMATE_SHIPPING][NIMBUS] Quote failed:', quoteErr?.message || quoteErr);
-      return res.status(422).json({
-        message: classified.userMessage,
-        code: classified.code,
-        retryable: classified.retryable,
-      });
-    }
+    const quoteResult = await estimateOrderShippingWithFallback({
+      orderItems,
+      sellerShipments: quoteShipments,
+      shippingAddress,
+      contextLabel: 'ESTIMATE_SHIPPING',
+    });
+    const shippingQuote = quoteResult.shippingQuote;
 
     const shippingCost = roundCurrency(shippingQuote.shippingCost);
     const tax = calculateTax(subtotal);
@@ -1376,24 +1554,14 @@ router.post('/', auth, async (req, res) => {
     // Calculate costs strictly from Nimbus live quotes.
     const quoteShipments = buildSellerShipmentSkeletons(orderItems, 'ESTIMATE');
     const preferredCouriers = buildPreferredCourierMap(selectedShippingQuotes);
-    let shippingQuote;
-
-    try {
-      shippingQuote = await estimateOrderShippingFromNimbus({
-        orderItems,
-        sellerShipments: quoteShipments,
-        shippingAddress,
-        preferredCouriers,
-      });
-    } catch (quoteErr) {
-      const classified = classifyNimbusQuoteError(quoteErr?.message || '');
-      console.warn('[CREATE_ORDER][NIMBUS] Quote failed:', quoteErr?.message || quoteErr);
-      return res.status(422).json({
-        message: classified.userMessage,
-        code: classified.code,
-        retryable: classified.retryable,
-      });
-    }
+    const quoteResult = await estimateOrderShippingWithFallback({
+      orderItems,
+      sellerShipments: quoteShipments,
+      shippingAddress,
+      preferredCouriers,
+      contextLabel: 'CREATE_ORDER',
+    });
+    const shippingQuote = quoteResult.shippingQuote;
 
     const shippingCost = roundCurrency(shippingQuote.shippingCost);
     const tax = calculateTax(subtotal);

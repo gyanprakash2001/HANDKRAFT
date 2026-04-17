@@ -116,6 +116,13 @@ function resolveNimbusQuoteErrorMessage(params: {
   }
 
   if (
+    normalized.includes('nimbuspost is disabled')
+    || normalized.includes('integration is disabled')
+  ) {
+    return 'Nimbus live quote is unavailable right now. Checkout will use fallback shipping estimate.';
+  }
+
+  if (
     normalized.includes('cannot post')
     || normalized.includes('/orders/estimate-shipping')
     || normalized.includes('not found')
@@ -216,7 +223,9 @@ export default function CheckoutScreen() {
 
   const subtotal = cartItems.reduce((sum, item) => sum + getEffectiveProductPrice(item.product) * item.quantity, 0);
   const quoteDetails = shippingEstimate?.shippingQuote?.details || [];
-  const hasLiveNimbusQuote = shippingEstimate?.shippingQuote?.source === 'nimbus_serviceability' && quoteDetails.length > 0;
+  const hasShippingQuote = quoteDetails.length > 0;
+  const isLiveNimbusQuote = shippingEstimate?.shippingQuote?.source === 'nimbus_serviceability' && hasShippingQuote;
+  const shippingQuoteReason = String(shippingEstimate?.shippingQuote?.reason || '').trim();
 
   const resolveSelectedOption = (detail: OrderShippingEstimateResponse['shippingQuote']['details'][number]) => {
     const key = String(detail.shipmentRef || detail.sellerId || '');
@@ -226,7 +235,7 @@ export default function CheckoutScreen() {
     return matched || options[0] || null;
   };
 
-  const selectedShippingCost = hasLiveNimbusQuote
+  const selectedShippingCost = hasShippingQuote
     ? quoteDetails.reduce((sum, detail) => {
         const selected = resolveSelectedOption(detail);
         return sum + Number(selected?.totalCharges || 0);
@@ -234,15 +243,17 @@ export default function CheckoutScreen() {
     : 0;
 
   const displaySubtotal = Number(shippingEstimate?.subtotal ?? subtotal);
-  const shippingCost = Number(hasLiveNimbusQuote ? selectedShippingCost : 0);
+  const shippingCost = Number(hasShippingQuote ? selectedShippingCost : 0);
   const tax = Number(shippingEstimate?.tax ?? 0);
   const totalAmount = Number(displaySubtotal + shippingCost + tax);
-  const shippingDisplayText = hasLiveNimbusQuote
+  const shippingDisplayText = hasShippingQuote
     ? (shippingCost === 0 ? 'Free' : `₹${shippingCost.toFixed(2)}`)
     : 'Quote pending';
 
-  const shippingSourceText = hasLiveNimbusQuote
-    ? 'Live Nimbus quote based on destination pincode and package weight/dimensions.'
+  const shippingSourceText = hasShippingQuote
+    ? (isLiveNimbusQuote
+      ? 'Live Nimbus quote based on destination pincode and package weight/dimensions.'
+      : (shippingQuoteReason || 'Nimbus live quote is unavailable, so checkout is using fallback shipping estimate.'))
     : (shippingEstimateError
       ? `Live shipping quote unavailable: ${shippingEstimateError}`
       : 'Select address to fetch live Nimbus shipping charge.');
@@ -560,7 +571,7 @@ export default function CheckoutScreen() {
 
     setShippingAddressForOrder(selected);
     const estimate = await fetchShippingEstimateForAddress(selected);
-    if (!estimate || estimate?.shippingQuote?.source !== 'nimbus_serviceability' || !Array.isArray(estimate?.shippingQuote?.details) || estimate.shippingQuote.details.length === 0) {
+    if (!estimate || !Array.isArray(estimate?.shippingQuote?.details) || estimate.shippingQuote.details.length === 0) {
       setError(resolveNimbusQuoteErrorMessage({
         estimate,
         shippingEstimateError: latestShippingEstimateErrorRef.current || shippingEstimateError,
@@ -608,8 +619,8 @@ export default function CheckoutScreen() {
       }
       console.log('[CHECKOUT] Shipping address confirmed');
 
-      if (!hasLiveNimbusQuote) {
-        setError('Live Nimbus shipping quote is required before payment.');
+      if (!hasShippingQuote) {
+        setError('Shipping quote is required before payment.');
         setStep('shipping');
         return;
       }
@@ -1006,7 +1017,7 @@ export default function CheckoutScreen() {
 
               <ThemedText style={styles.shippingInfoText}>{shippingSourceText}</ThemedText>
 
-              {hasLiveNimbusQuote ? (
+              {hasShippingQuote ? (
                 <View style={styles.quoteListWrap}>
                   {(quoteDetails || []).map((detail, detailIndex) => {
                     const key = String(detail.shipmentRef || detail.sellerId || `shipment-${detailIndex}`);
