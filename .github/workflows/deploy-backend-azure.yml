@@ -208,6 +208,7 @@ jobs:
 
           echo "app_settings_json<<EOF" >> "$GITHUB_OUTPUT"
           cat app-settings.json >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Login to Azure
