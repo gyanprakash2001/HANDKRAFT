@@ -4,7 +4,7 @@
     "slug": "handkraft",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/handkraft_logo.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "handkraft",
     "newArchEnabled": false,
     "userInterfaceStyle": "automatic",
@@ -14,8 +14,8 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#000000",
-        "foregroundImage": "./assets/handkraft_logo_trimmed.png",
-        "monochromeImage": "./assets/handkraft_logo_trimmed.png"
+        "foregroundImage": "./assets/images/app-icon-android-foreground.png",
+        "monochromeImage": "./assets/images/app-icon-android-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "versionCode": 1,

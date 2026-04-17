@@ -129,6 +129,32 @@ router.get('/integrations/readiness', auth, async (req, res) => {
   }
 });
 
+router.get('/integrations/public-readiness', async (req, res) => {
+  try {
+    const razorpay = getRazorpayReadiness();
+    const nimbuspost = getNimbuspostReadiness();
+
+    return res.json({
+      ok: razorpay.ready && nimbuspost.ready,
+      generatedAt: new Date().toISOString(),
+      readiness: {
+        razorpay: {
+          enabled: razorpay.enabled,
+          ready: razorpay.ready,
+        },
+        nimbuspost: {
+          enabled: nimbuspost.enabled,
+          ready: nimbuspost.ready,
+          mode: nimbuspost.effectiveMode,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('[DEBUG][INTEGRATIONS][PUBLIC] Readiness check error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || String(err) });
+  }
+});
+
 // Protected debug endpoint to run dry-runs against NimbusPost.
 // Body: { type: 'createShipment' | 'trackAwb' | 'raw', payload: {...} }
 router.post('/nimbus/dry-run', auth, async (req, res) => {

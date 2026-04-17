@@ -31,21 +31,122 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
 
-      - name: Validate required Azure secrets
+      - name: Validate required deployment secrets
         shell: bash
         env:
-          AZURE_WEBAPP_NAME: ${{ secrets['AZURE_WEBAPP_NAME'] }}
-          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets['AZURE_WEBAPP_PUBLISH_PROFILE'] }}
+          AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          AZURE_CREDENTIALS: ${{ secrets[format('{0}', 'AZURE_CREDENTIALS')] }}
+          AZURE_APP_SETTINGS_JSON: ${{ secrets[format('{0}', 'AZURE_APP_SETTINGS_JSON')] }}
         run: |
-          if [ -z "${AZURE_WEBAPP_NAME}" ]; then
-            echo "Missing GitHub secret: AZURE_WEBAPP_NAME"
-            exit 1
-          fi
+          set -euo pipefail
 
-          if [ -z "${AZURE_WEBAPP_PUBLISH_PROFILE}" ]; then
-            echo "Missing GitHub secret: AZURE_WEBAPP_PUBLISH_PROFILE"
-            exit 1
-          fi
+          required=(
+            AZURE_WEBAPP_NAME
+            AZURE_WEBAPP_PUBLISH_PROFILE
+            AZURE_CREDENTIALS
+            AZURE_APP_SETTINGS_JSON
+          )
+
+          for key in "${required[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing GitHub secret: ${key}"
+              exit 1
+            fi
+          done
+
+      - name: Validate checkout integration settings payload
+        shell: bash
+        env:
+          AZURE_APP_SETTINGS_JSON: ${{ secrets[format('{0}', 'AZURE_APP_SETTINGS_JSON')] }}
+        run: |
+          set -euo pipefail
+
+          node - <<'NODE'
+          const payload = process.env.AZURE_APP_SETTINGS_JSON || '';
+
+          let parsed;
+          try {
+            parsed = JSON.parse(payload);
+          } catch (err) {
+            console.error('AZURE_APP_SETTINGS_JSON is not valid JSON:', err.message);
+            process.exit(1);
+          }
+
+          if (!Array.isArray(parsed)) {
+            console.error('AZURE_APP_SETTINGS_JSON must be a JSON array of app settings objects.');
+            process.exit(1);
+          }
+
+          const settings = new Map();
+          for (const entry of parsed) {
+            const name = String(entry?.name || '').trim();
+            if (!name) {
+              continue;
+            }
+            const value = entry?.value == null ? '' : String(entry.value);
+            settings.set(name, value);
+          }
+
+          const requireNonEmpty = (name) => {
+            const value = String(settings.get(name) || '').trim();
+            if (!value) {
+              throw new Error(`Missing required app setting in AZURE_APP_SETTINGS_JSON: ${name}`);
+            }
+            return value;
+          };
+
+          const parseBool = (value) => ['1', 'true', 'yes', 'on', 'y'].includes(String(value || '').trim().toLowerCase());
+
+          requireNonEmpty('MONGO_URI');
+          requireNonEmpty('JWT_SECRET');
+          requireNonEmpty('RAZORPAY_KEY_ID');
+          requireNonEmpty('RAZORPAY_KEY_SECRET');
+          requireNonEmpty('RAZORPAY_WEBHOOK_SECRET');
+          requireNonEmpty('NIMBUSPOST_MODE');
+          requireNonEmpty('NIMBUSPOST_WEBHOOK_SECRET');
+
+          const razorpayEnabled = parseBool(requireNonEmpty('RAZORPAY_ENABLED'));
+          if (!razorpayEnabled) {
+            throw new Error('RAZORPAY_ENABLED must be true for production checkout deployments.');
+          }
+
+          const nimbusEnabled = parseBool(requireNonEmpty('NIMBUSPOST_ENABLED'));
+          if (!nimbusEnabled) {
+            throw new Error('NIMBUSPOST_ENABLED must be true for live shipping quote deployments.');
+          }
+
+          const mode = requireNonEmpty('NIMBUSPOST_MODE').toLowerCase();
+          if (!['auto', 'v1', 'v2'].includes(mode)) {
+            throw new Error('NIMBUSPOST_MODE must be one of auto|v1|v2.');
+          }
+
+          const apiKey = String(settings.get('NIMBUSPOST_API_KEY') || '').trim();
+          const requireV2PickupDefaults = () => {
+            requireNonEmpty('NIMBUSPOST_API_EMAIL');
+            requireNonEmpty('NIMBUSPOST_API_PASSWORD');
+            requireNonEmpty('NIMBUSPOST_PICKUP_WAREHOUSE_NAME');
+            requireNonEmpty('NIMBUSPOST_PICKUP_NAME');
+            requireNonEmpty('NIMBUSPOST_PICKUP_ADDRESS_1');
+            requireNonEmpty('NIMBUSPOST_PICKUP_CITY');
+            requireNonEmpty('NIMBUSPOST_PICKUP_STATE');
+            requireNonEmpty('NIMBUSPOST_PICKUP_PINCODE');
+            requireNonEmpty('NIMBUSPOST_PICKUP_PHONE');
+          };
+
+          if (mode === 'v1') {
+            requireNonEmpty('NIMBUSPOST_API_KEY');
+            requireNonEmpty('NIMBUSPOST_WAREHOUSE_ID');
+          } else if (mode === 'v2') {
+            requireV2PickupDefaults();
+          } else if (apiKey) {
+            requireNonEmpty('NIMBUSPOST_WAREHOUSE_ID');
+          } else {
+            requireV2PickupDefaults();
+          }
+
+          console.log(`Validated ${settings.size} app settings entries for checkout integrations.`);
+          NODE
 
       - name: Install backend dependencies
         working-directory: server
@@ -55,9 +156,119 @@ jobs:
         working-directory: server
         run: npm ls --depth=0
 
+      - name: Normalize Azure app settings payload
+        id: appsettings
+        shell: bash
+        env:
+          AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+          AZURE_APP_SETTINGS_JSON: ${{ secrets[format('{0}', 'AZURE_APP_SETTINGS_JSON')] }}
+        run: |
+          set -euo pipefail
+
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const appName = String(process.env.AZURE_WEBAPP_NAME || '').trim();
+          const payload = process.env.AZURE_APP_SETTINGS_JSON || '[]';
+          const parsed = JSON.parse(payload);
+
+          const map = new Map();
+
+          for (const entry of Array.isArray(parsed) ? parsed : []) {
+            const name = String(entry?.name || '').trim();
+            if (!name) {
+              continue;
+            }
+
+            map.set(name, {
+              name,
+              value: entry?.value == null ? '' : String(entry.value),
+              slotSetting: Boolean(entry?.slotSetting),
+            });
+          }
+
+          map.set('NODE_ENV', {
+            name: 'NODE_ENV',
+            value: 'production',
+            slotSetting: false,
+          });
+
+          if (!map.has('PUBLIC_BASE_URL')) {
+            map.set('PUBLIC_BASE_URL', {
+              name: 'PUBLIC_BASE_URL',
+              value: `https://${appName}.azurewebsites.net`,
+              slotSetting: false,
+            });
+          }
+
+          const normalized = Array.from(map.values());
+          fs.writeFileSync('app-settings.json', JSON.stringify(normalized));
+          console.log(`Prepared ${normalized.length} app settings for Azure App Service.`);
+          NODE
+
+          echo "app_settings_json<<EOF" >> "$GITHUB_OUTPUT"
+          cat app-settings.json >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets[format('{0}', 'AZURE_CREDENTIALS')] }}
+
+      - name: Apply Azure app settings
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          app-settings-json: ${{ steps.appsettings.outputs.app_settings_json }}
+
       - name: Deploy backend to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ secrets['AZURE_WEBAPP_NAME'] }}
-          publish-profile: ${{ secrets['AZURE_WEBAPP_PUBLISH_PROFILE'] }}
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: server
+
+      - name: Verify health and integration readiness
+        shell: bash
+        env:
+          AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+        run: |
+          set -euo pipefail
+
+          base_url="https://${AZURE_WEBAPP_NAME}.azurewebsites.net"
+
+          for attempt in {1..12}; do
+            if curl --silent --show-error --fail "${base_url}/health" > /dev/null; then
+              echo "Health check passed on attempt ${attempt}."
+              break
+            fi
+
+            if [ "${attempt}" -eq 12 ]; then
+              echo "Backend health check failed after deploy."
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          readiness_json="$(curl --silent --show-error --fail "${base_url}/api/debug/integrations/public-readiness")"
+          echo "Readiness response: ${readiness_json}"
+
+          READINESS_JSON="${readiness_json}" node - <<'NODE'
+          const payload = JSON.parse(process.env.READINESS_JSON || '{}');
+
+          if (!payload || payload.ok !== true) {
+            console.error('Integration readiness check failed:', payload);
+            process.exit(1);
+          }
+
+          const razorpayReady = Boolean(payload?.readiness?.razorpay?.ready);
+          const nimbusReady = Boolean(payload?.readiness?.nimbuspost?.ready);
+
+          if (!razorpayReady || !nimbusReady) {
+            console.error('Razorpay or Nimbus is not ready after deployment:', payload);
+            process.exit(1);
+          }
+
+          console.log('Integration readiness check passed.');
+          NODE
