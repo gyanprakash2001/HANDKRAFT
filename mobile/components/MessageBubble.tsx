@@ -29,7 +29,7 @@ export default function MessageBubble({
     try {
       const d = new Date(message.createdAt);
       return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
+    } catch {
       return '';
     }
   }, [message.createdAt]);

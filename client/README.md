@@ -24,6 +24,12 @@ Create `.env` in this folder if your backend runs elsewhere:
 VITE_API_BASE_URL=https://your-backend-domain/api
 ```
 
+For Azure App Service backend, use:
+
+```bash
+VITE_API_BASE_URL=https://your-backend-app-name.azurewebsites.net/api
+```
+
 3. Run dev server:
 
 ```bash

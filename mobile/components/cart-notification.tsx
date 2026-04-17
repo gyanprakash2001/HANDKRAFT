@@ -5,6 +5,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { ProductItem } from '@/utils/api';
 
+function getEffectiveProductPrice(product: ProductItem) {
+  const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
+  const discountedPrice = Number(product?.discountedPrice);
+  const hasDiscount = Number.isFinite(discountedPrice)
+    && discountedPrice >= 0
+    && discountedPrice < realPrice;
+
+  return hasDiscount ? discountedPrice : realPrice;
+}
+
 export interface CartNotificationItem {
   product: ProductItem;
   quantity: number;
@@ -32,7 +42,7 @@ export function CartNotification({
   if (!isVisible || items.length === 0) return null;
 
   const totalItems = items.reduce((sum, entry) => sum + entry.quantity, 0);
-  const totalAmount = items.reduce((sum, entry) => sum + entry.product.price * entry.quantity, 0);
+  const totalAmount = items.reduce((sum, entry) => sum + getEffectiveProductPrice(entry.product) * entry.quantity, 0);
 
   return (
     <View style={styles.container}>
@@ -79,7 +89,7 @@ export function CartNotification({
                   </Pressable>
                 </View>
 
-                <ThemedText style={styles.price}>INR {(entry.product.price * entry.quantity).toFixed(2)}</ThemedText>
+                <ThemedText style={styles.price}>INR {(getEffectiveProductPrice(entry.product) * entry.quantity).toFixed(2)}</ThemedText>
               </View>
             </View>
           ))}

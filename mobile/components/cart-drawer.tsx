@@ -5,6 +5,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { CartItem } from '@/utils/api';
 
+function getEffectiveProductPrice(product: CartItem['product']) {
+  const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
+  const discountedPrice = Number(product?.discountedPrice);
+  const hasDiscount = Number.isFinite(discountedPrice)
+    && discountedPrice >= 0
+    && discountedPrice < realPrice;
+
+  return hasDiscount ? discountedPrice : realPrice;
+}
+
 interface CartDrawerProps {
   isVisible: boolean;
   cartItems: CartItem[];
@@ -24,7 +34,7 @@ export function CartDrawer({
 }: CartDrawerProps) {
   if (!isVisible) return null;
 
-  const subtotal = cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  const subtotal = cartItems.reduce((sum, item) => sum + getEffectiveProductPrice(item.product) * item.quantity, 0);
   const shippingCost = subtotal > 500 ? 0 : 50;
   const tax = Number((subtotal * 0.05).toFixed(2));
   const total = subtotal + shippingCost + tax;
@@ -63,7 +73,12 @@ export function CartDrawer({
 
                   <View style={styles.itemInfo}>
                     <ThemedText numberOfLines={2} style={styles.itemName}>{item.product.title}</ThemedText>
-                    <ThemedText style={styles.itemPrice}>INR {item.product.price}</ThemedText>
+                    <View style={styles.itemPriceRow}>
+                      <ThemedText style={styles.itemPrice}>INR {getEffectiveProductPrice(item.product).toFixed(2)}</ThemedText>
+                      {getEffectiveProductPrice(item.product) < Math.max(0, Number(item.product.realPrice ?? item.product.price) || 0) ? (
+                        <ThemedText style={styles.itemOriginalPrice}>INR {Math.max(0, Number(item.product.realPrice ?? item.product.price) || 0).toFixed(2)}</ThemedText>
+                      ) : null}
+                    </View>
                   </View>
 
                   <View style={styles.quantityControl}>
@@ -83,7 +98,7 @@ export function CartDrawer({
                   </View>
 
                   <View style={styles.itemTotal}>
-                    <ThemedText style={styles.itemTotalPrice}>INR {(item.product.price * item.quantity).toFixed(2)}</ThemedText>
+                    <ThemedText style={styles.itemTotalPrice}>INR {(getEffectiveProductPrice(item.product) * item.quantity).toFixed(2)}</ThemedText>
                     <Pressable onPress={() => onRemoveItem(item.product._id)}>
                       <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
                     </Pressable>
@@ -213,6 +228,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#888',
   },
+  itemPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  itemOriginalPrice: {
+    fontSize: 10,
+    color: '#6f7782',
+    textDecorationLine: 'line-through',
+  },
   quantityControl: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -268,7 +293,7 @@ const styles = StyleSheet.create({
   costRowTotal: {
     borderTopWidth: 1,
     borderTopColor: '#2a2a2a',
-    paddingTopStart: 8,
+    paddingTop: 8,
     marginTop: 2,
   },
   totalLabel: {

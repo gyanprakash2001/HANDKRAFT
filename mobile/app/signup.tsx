@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, TextInput, Button, View, Alert, Platform } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { makeRedirectUri } from 'expo-auth-session';
+import Constants from 'expo-constants';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -21,7 +21,19 @@ export default function SignupScreen() {
   const router = useRouter();
   const isAndroid = Platform.OS === 'android';
 
-  const completeGoogleAuth = async (idToken?: string, accessToken?: string) => {
+  const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
+  const useProxyForExpo = appOwnership === 'expo';
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    scopes: ['openid', 'profile', 'email'],
+    selectAccount: true,
+  });
+
+  const completeGoogleAuth = useCallback(async (idToken?: string, accessToken?: string) => {
     const { token, user } = await signInWithGoogle(idToken, accessToken);
     await saveToken(token);
     if (user) currentUser.setProfile(user);
@@ -41,7 +53,7 @@ export default function SignupScreen() {
 
     Alert.alert('Success', 'Signed up with Google');
     router.replace('/feed');
-  };
+  }, [router]);
 
   const handleSubmit = async () => {
     try {
@@ -55,58 +67,74 @@ export default function SignupScreen() {
     }
   };
 
-  const redirectUri = makeRedirectUri({
-    scheme: 'handkraft',
-    path: 'oauthredirect',
-  });
+  useEffect(() => {
+    if (response?.type !== 'success') return;
 
-  const handleAndroidGoogleSignUp = async () => {
+    (async () => {
+      try {
+        const idToken =
+          response.authentication?.idToken ||
+          (typeof (response as any)?.params?.id_token === 'string' ? (response as any).params.id_token : null);
+        const accessToken =
+          response.authentication?.accessToken ||
+          (typeof (response as any)?.params?.access_token === 'string' ? (response as any).params.access_token : null);
+
+        if (!idToken && !accessToken) throw new Error('No id/access token returned from Google');
+        await completeGoogleAuth(idToken || undefined, accessToken || undefined);
+      } catch (err: any) {
+        Alert.alert('Google Sign-up Error', err.message || 'Failed to sign up with Google');
+      }
+    })();
+  }, [response, completeGoogleAuth]);
+
+  const handleGoogleSignUp = async () => {
+    if (!request) {
+      Alert.alert('Google Sign-up Error', 'Google sign-up is initializing. Please try again.');
+      return;
+    }
+
+    let nativeError: unknown = null;
+
+    if (isAndroid && !useProxyForExpo) {
+      try {
+        console.log('Trying native Google sign-up on Android app build');
+        const { idToken, accessToken } = await signInWithGoogleNative();
+        await completeGoogleAuth(idToken, accessToken);
+        return;
+      } catch (err) {
+        nativeError = err;
+        console.warn('Native Google sign-up failed, falling back to AuthSession', err);
+      }
+    }
+
+    // Debug: log OAuth request parameters so Metro shows them when sign-up is initiated
     try {
-      const { idToken, accessToken } = await signInWithGoogleNative();
-      await completeGoogleAuth(idToken, accessToken);
-    } catch (err) {
-      Alert.alert('Google Sign-up Error', getNativeGoogleErrorMessage(err));
+      console.log('Google Sign-up Request Initiating', {
+        expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
+        iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+        androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+        webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+        redirectUri: request.redirectUri,
+        useProxyForExpo,
+        appOwnership,
+        requestExists: Boolean(request),
+      });
+
+      // Start the appropriate flow: use Expo proxy only when running in Expo Go.
+      console.log(`Starting Google sign-up (useProxy=${useProxyForExpo})`);
+      console.log('Auth request object:', request);
+      await promptAsync({ useProxy: useProxyForExpo });
+    } catch (firstError) {
+      console.warn('Google AuthSession sign-up failed', firstError);
+
+      const authSessionMessage = firstError instanceof Error ? firstError.message : 'Failed to start Google sign-up.';
+      const nativeMessage = nativeError ? getNativeGoogleErrorMessage(nativeError) : '';
+      const message = nativeMessage
+        ? `${nativeMessage}\n\nAuthSession fallback error: ${authSessionMessage}`
+        : authSessionMessage;
+      Alert.alert('Google Sign-up Error', message);
     }
   };
-
-  // Keep expo-auth-session for non-Android platforms.
-  function GoogleSignupButton() {
-    const [request, response, promptAsync] = Google.useAuthRequest({
-      expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
-      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-      scopes: ['openid', 'profile', 'email', 'https://www.googleapis.com/auth/user.phonenumbers.read'],
-      redirectUri,
-    });
-
-    useEffect(() => {
-      if (response?.type === 'success') {
-        (async () => {
-          try {
-            const idToken =
-              response.authentication?.idToken ||
-              (typeof (response as any)?.params?.id_token === 'string' ? (response as any).params.id_token : null);
-            const accessToken =
-              response.authentication?.accessToken ||
-              (typeof (response as any)?.params?.access_token === 'string' ? (response as any).params.access_token : null);
-
-            if (!idToken) throw new Error('No id token returned from Google');
-            await completeGoogleAuth(idToken, accessToken || undefined);
-          } catch (err: any) {
-            Alert.alert('Google Sign-up Error', err.message || 'Failed to sign up with Google');
-          }
-        })();
-      }
-    }, [response]);
-
-    return (
-      <Button
-        title="Sign up with Google"
-        onPress={() => promptAsync()}
-        disabled={!request}
-      />
-    );
-  }
 
   return (
     <ThemedView style={styles.container}>
@@ -138,7 +166,7 @@ export default function SignupScreen() {
       <View style={styles.buttonContainer}>
         <Button title="Sign Up" onPress={handleSubmit} />
         <View style={styles.buttonSpacer} />
-        {isAndroid ? <Button title="Sign up with Google" onPress={handleAndroidGoogleSignUp} /> : <GoogleSignupButton />}
+        <Button title="Sign up with Google" onPress={handleGoogleSignUp} disabled={!request} />
       </View>
       <Link href="/login" style={styles.link}>
         <ThemedText type="link">Already have an account? Log in</ThemedText>

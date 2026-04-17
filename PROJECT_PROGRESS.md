@@ -77,7 +77,7 @@ How to use:
 - [ ] Backend validation and consistent error handling.
 - [ ] Authentication hardening and security checks.
 - [ ] Basic automated tests.
-- [ ] Deployment configuration for backend + apps.
+- [x] Deployment configuration for backend + apps.
 
 ## Phase 7.5 - APK Distribution Launch (Week 1)
 - [x] GitHub Pages landing site scaffolded for APK downloads (`docs/`).
@@ -128,4 +128,6 @@ How to use:
 - [x] Feed personalization started (discovery strip + category chips).
 - [ ] Next: offer strip in cart/checkout with savings summary.
 - [x] NimbusPost backend integration completed in server codebase.
+- [x] Week 2 web client lint/build verification passed.
+- [x] Azure + Atlas launch scaffolding added (backend deploy workflow, env templates, and launch guide).
 - [ ] Next: complete Nimbus + Razorpay dashboard webhook setup on deployed HTTPS backend and run first live booking test.

@@ -53,6 +53,7 @@ function buildPublicUserPayload(user) {
     avatarUrl: user.avatarUrl || '',
     phoneNumber: user.phoneNumber || '',
     locale: user.locale || '',
+    isAdmin: Boolean(user.isAdmin),
   };
 }
 

@@ -32,7 +32,17 @@ const ALLOWED_PRODUCT_CATEGORY_MAP = new Map(
 );
 
 function getPublicBaseUrl(req) {
-  return `${req.protocol}://${req.get('host')}`;
+  const explicitBaseUrl = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (explicitBaseUrl) {
+    return explicitBaseUrl;
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol || 'http';
+  const host = forwardedHost || req.get('host');
+
+  return `${protocol}://${host}`.replace(/\/+$/, '');
 }
 
 function mapAddressToSellerPickup(addressDoc = {}, overrides = {}) {

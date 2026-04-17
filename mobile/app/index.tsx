@@ -33,11 +33,6 @@ export default function HomeScreen() {
               Sign Up
             </ThemedText>
           </Link>
-          {__DEV__ ? (
-            <Link href="/dev/api-switcher" style={[styles.button, styles.devButton]}>
-              <ThemedText style={styles.devButtonText}>Dev</ThemedText>
-            </Link>
-          ) : null}
         </View>
       </LinearGradient>
     </ThemedView>
@@ -64,15 +59,16 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 20,
+    width: 184,
+    height: 184,
+    marginBottom: 0,
   },
   title: {
     fontFamily: 'sans-serif-medium',
     fontSize: 30,
     color: '#fff',
     textAlign: 'center',
+    marginTop: -14,
     marginBottom: 8,
   },
   subtitle: {
@@ -116,17 +112,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
     width: '100%',
-    textAlign: 'center',
-  },
-  devButton: {
-    backgroundColor: '#222',
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  devButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
     textAlign: 'center',
   },
 });

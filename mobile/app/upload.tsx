@@ -38,6 +38,42 @@ const SELLER_CATEGORIES = [
   'Others',
 ];
 
+const SAMPLE_PACKAGING_IMAGES = [
+  require('../assets/images/sample-packaging/page01_img01.jpg'),
+  require('../assets/images/sample-packaging/page02_img01.jpg'),
+  require('../assets/images/sample-packaging/page03_img01.jpg'),
+  require('../assets/images/sample-packaging/page04_img01.jpg'),
+];
+
+function mapSellerPickupToAddressSnapshot(pickup: any): UserAddress | null {
+  if (!pickup || typeof pickup !== 'object') return null;
+
+  const hasAnyValue = [
+    pickup.label,
+    pickup.street,
+    pickup.city,
+    pickup.postalCode,
+    pickup.phoneNumber,
+    pickup.email,
+  ].some((value) => String(value || '').trim().length > 0);
+
+  if (!hasAnyValue) return null;
+
+  return {
+    _id: pickup.addressId ? String(pickup.addressId) : undefined,
+    label: String(pickup.label || 'Pickup'),
+    fullName: String(pickup.fullName || ''),
+    phoneNumber: String(pickup.phoneNumber || ''),
+    email: String(pickup.email || ''),
+    street: String(pickup.street || ''),
+    city: String(pickup.city || ''),
+    state: String(pickup.state || ''),
+    postalCode: String(pickup.postalCode || ''),
+    country: String(pickup.country || 'India'),
+    isDefault: false,
+  };
+}
+
 function clampAspectRatio(value: number) {
   return Math.max(0.5, Math.min(2, Number(value) || 1));
 }
@@ -159,18 +195,18 @@ function UploadVideoPreview({ uri, onVideoSize }: { uri: string; onVideoSize?: (
           if (size && typeof size.width === 'number' && typeof size.height === 'number' && size.width > 0 && size.height > 0) {
             onVideoSize(size.width, size.height);
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
       });
-    } catch (e) {
+    } catch {
       // ignore if event not supported
     }
 
     return () => {
       try {
         if (sub && typeof sub.remove === 'function') sub.remove();
-      } catch (e) {
+      } catch {
         // ignore
       }
     };
@@ -198,6 +234,10 @@ export default function UploadScreen() {
   const [price, setPrice] = useState('');
   const [discountedPrice, setDiscountedPrice] = useState('');
   const [stock, setStock] = useState('1');
+  const [packageWeightGrams, setPackageWeightGrams] = useState('500');
+  const [packageLengthCm, setPackageLengthCm] = useState('10');
+  const [packageBreadthCm, setPackageBreadthCm] = useState('10');
+  const [packageHeightCm, setPackageHeightCm] = useState('10');
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [customizable, setCustomizable] = useState(false);
   const [imageAspectRatio, setImageAspectRatio] = useState(0.8);
@@ -211,7 +251,6 @@ export default function UploadScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [addressModalVisible, setAddressModalVisible] = useState(false);
-  const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
   const [pickupAddressId, setPickupAddressId] = useState<string | null>(null);
   const [pickupAddressSnapshot, setPickupAddressSnapshot] = useState<UserAddress | null>(null);
   const router = useRouter();
@@ -530,6 +569,11 @@ export default function UploadScreen() {
       try {
         const profile = await getProfile();
         setUserAvatar(profile?.avatarUrl || null);
+        const sellerPickupAddress = mapSellerPickupToAddressSnapshot(profile?.sellerPickupAddress);
+        if (sellerPickupAddress) {
+          setPickupAddressSnapshot(sellerPickupAddress);
+          setPickupAddressId(sellerPickupAddress._id ? String(sellerPickupAddress._id) : null);
+        }
         currentUser.setProfile(profile || null);
       } catch {
         // Avatar fetch is non-blocking for upload.
@@ -539,10 +583,10 @@ export default function UploadScreen() {
 
   useEffect(() => {
     const unsub = currentUser.subscribe((p) => {
-      try { setUserAvatar(p?.avatarUrl || null); } catch (e) { /* ignore */ }
+      try { setUserAvatar(p?.avatarUrl || null); } catch { /* ignore */ }
     });
     return () => {
-      try { unsub(); } catch (e) { /* ignore cleanup errors */ }
+      try { unsub(); } catch { /* ignore cleanup errors */ }
     };
   }, []);
 
@@ -586,7 +630,7 @@ export default function UploadScreen() {
       const minY = -maxY;
 
       return { minX, maxX, minY, maxY };
-    } catch (e) {
+    } catch {
       // Fail-safe: if geometry cannot be computed, lock panning to avoid exposing background.
       return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
     }
@@ -662,7 +706,7 @@ export default function UploadScreen() {
       if (prepared?.tempPath) {
         try {
           await FileSystem.deleteAsync(prepared.tempPath, { idempotent: true });
-        } catch (e) {
+        } catch {
           // ignore cleanup errors
         }
       }
@@ -673,7 +717,7 @@ export default function UploadScreen() {
       // fallback to center crop
       try {
         return await imageToDataUri(source.uri, (source as any).width || 1, (source as any).height || 1, item.aspectRatio || imageAspectRatio);
-      } catch (err) {
+      } catch {
         throw e;
       }
     }
@@ -726,16 +770,25 @@ export default function UploadScreen() {
 
   const createGridDragResponder = (index: number) => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_: GestureResponderEvent, gestureState: PanResponderGestureState) => Math.abs(gestureState.dx) > 7 || Math.abs(gestureState.dy) > 7,
+    onMoveShouldSetPanResponder: (_: GestureResponderEvent, gestureState: PanResponderGestureState) => {
+      const shouldCapture = Math.abs(gestureState.dx) > 7 || Math.abs(gestureState.dy) > 7;
+      if (shouldCapture) {
+        setFormScrollEnabled(false);
+      }
+      return shouldCapture;
+    },
     onPanResponderGrant: () => {
+      setFormScrollEnabled(false);
       setDraggingIndex(index);
     },
     onPanResponderRelease: (_: GestureResponderEvent, gestureState: PanResponderGestureState) => {
       handleGridReorder(index, gestureState.dx, gestureState.dy);
       setDraggingIndex(null);
+      setFormScrollEnabled(true);
     },
     onPanResponderTerminate: () => {
       setDraggingIndex(null);
+      setFormScrollEnabled(true);
     },
   });
 
@@ -795,7 +848,7 @@ export default function UploadScreen() {
           translateXAnim.setValue(0);
           translateYAnim.setValue(0);
         }
-      } catch (e) {
+      } catch {
         transformRef.current.offsetX = 0;
         transformRef.current.offsetY = 0;
         translateXAnim.setValue(0);
@@ -827,7 +880,7 @@ export default function UploadScreen() {
         translateXAnim.setValue(0);
         translateYAnim.setValue(0);
       }
-    } catch (e) {
+    } catch {
       transformRef.current.offsetX = 0;
       transformRef.current.offsetY = 0;
       translateXAnim.setValue(0);
@@ -871,6 +924,10 @@ export default function UploadScreen() {
     const parsedPrice = Number(price);
     const parsedDiscountedPrice = discountedPrice.trim().length ? Number(discountedPrice) : null;
     const parsedStock = Number(stock || 0);
+    const parsedPackageWeightGrams = Number(packageWeightGrams || 0);
+    const parsedPackageLengthCm = Number(packageLengthCm || 0);
+    const parsedPackageBreadthCm = Number(packageBreadthCm || 0);
+    const parsedPackageHeightCm = Number(packageHeightCm || 0);
     if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
       Alert.alert('Invalid price', 'Price must be a valid non-negative number.');
       return;
@@ -879,8 +936,22 @@ export default function UploadScreen() {
       Alert.alert('Invalid stock', 'Stock must be a valid non-negative number.');
       return;
     }
+    if (Number.isNaN(parsedPackageWeightGrams) || parsedPackageWeightGrams <= 0) {
+      Alert.alert('Invalid package weight', 'Package weight must be greater than 0 grams.');
+      return;
+    }
+    if (Number.isNaN(parsedPackageLengthCm) || parsedPackageLengthCm <= 0
+      || Number.isNaN(parsedPackageBreadthCm) || parsedPackageBreadthCm <= 0
+      || Number.isNaN(parsedPackageHeightCm) || parsedPackageHeightCm <= 0) {
+      Alert.alert('Invalid package dimensions', 'Length, breadth and height must be greater than 0 cm.');
+      return;
+    }
     if (!pickupAddressId && !pickupAddressSnapshot) {
       Alert.alert('Pickup address required', 'Please select a pickup address for this listing.');
+      return;
+    }
+    if (pickupAddressSnapshot && !String(pickupAddressSnapshot.state || '').trim()) {
+      Alert.alert('Pickup address incomplete', 'Selected pickup address must include state for shipping.');
       return;
     }
     if (parsedDiscountedPrice !== null) {
@@ -928,12 +999,12 @@ export default function UploadScreen() {
                 const dataUri = await cropImageWithTransform(item, source, previewFrameWidth, previewFrameHeight);
                 mediaForUpload.push({ type: 'image', url: dataUri, aspectRatio: item.aspectRatio });
               }
-            } catch (e) {
+            } catch {
               // As a fallback do a center crop similar to previous behavior
               try {
                 const fallback = await imageToDataUri(source.uri, (source as any).width || 1, (source as any).height || 1, item.aspectRatio || imageAspectRatio);
                 mediaForUpload.push({ type: 'image', url: fallback, aspectRatio: item.aspectRatio });
-              } catch (err) {
+              } catch {
                 // Skip this media if we cannot crop it
               }
             }
@@ -958,6 +1029,10 @@ export default function UploadScreen() {
         realPrice: parsedPrice,
         discountedPrice: parsedDiscountedPrice ?? undefined,
         stock: parsedStock,
+        packageWeightGrams: parsedPackageWeightGrams,
+        packageLengthCm: parsedPackageLengthCm,
+        packageBreadthCm: parsedPackageBreadthCm,
+        packageHeightCm: parsedPackageHeightCm,
         imageAspectRatio,
         media: uploadedMedia.media,
         customizable,
@@ -995,6 +1070,10 @@ export default function UploadScreen() {
       setPrice('');
       setDiscountedPrice('');
       setStock('1');
+      setPackageWeightGrams('500');
+      setPackageLengthCm('10');
+      setPackageBreadthCm('10');
+      setPackageHeightCm('10');
       setPickupAddressId(null);
       setPickupAddressSnapshot(null);
       setCategoryDropdownOpen(false);
@@ -1217,7 +1296,72 @@ export default function UploadScreen() {
               keyboardType="numeric"
             />
           </View>
-          <View style={styles.twoColItem} />
+          <View style={styles.twoColItem}>
+            <ThemedText style={styles.label}>Package Weight (grams) *</ThemedText>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 500"
+              placeholderTextColor="#8f8f8f"
+              value={packageWeightGrams}
+              onChangeText={setPackageWeightGrams}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+
+        <View style={styles.twoColRow}>
+          <View style={styles.twoColItem}>
+            <ThemedText style={styles.label}>Length (cm) *</ThemedText>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 10"
+              placeholderTextColor="#8f8f8f"
+              value={packageLengthCm}
+              onChangeText={setPackageLengthCm}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={styles.twoColItem}>
+            <ThemedText style={styles.label}>Breadth (cm) *</ThemedText>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 10"
+              placeholderTextColor="#8f8f8f"
+              value={packageBreadthCm}
+              onChangeText={setPackageBreadthCm}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+
+        <View style={styles.twoColRow}>
+          <View style={styles.twoColItem}>
+            <ThemedText style={styles.label}>Height (cm) *</ThemedText>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 10"
+              placeholderTextColor="#8f8f8f"
+              value={packageHeightCm}
+              onChangeText={setPackageHeightCm}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={styles.twoColItem}>
+            <ThemedText style={styles.label}>Packaging Guide</ThemedText>
+            <ThemedText style={styles.helperInlineText}>Use these values for live Nimbus shipping quote.</ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={styles.label}>Sample Packaging Photos</ThemedText>
+          <ThemedText style={styles.helperInlineText}>Reference images from Nimbus packaging guide.</ThemedText>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.samplePackagingRow}>
+            {SAMPLE_PACKAGING_IMAGES.map((source, index) => (
+              <View key={`sample-packaging-${index}`} style={styles.samplePackagingCard}>
+                <ExpoImage source={source} style={styles.samplePackagingImage} contentFit="cover" />
+              </View>
+            ))}
+          </ScrollView>
         </View>
 
         <View style={styles.section}>
@@ -1668,10 +1812,51 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 10,
   },
+  section: {
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  addressRow: {
+    borderWidth: 1,
+    borderColor: '#2d3f57',
+    backgroundColor: '#111b29',
+    borderRadius: 12,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  addressPreviewText: {
+    flex: 1,
+    color: '#f8fbff',
+    fontSize: 13,
+    lineHeight: 18,
+  },
   helperInlineText: {
     color: '#95a7bf',
     fontSize: 12,
     lineHeight: 16,
+  },
+  samplePackagingRow: {
+    gap: 10,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  samplePackagingCard: {
+    width: 150,
+    height: 110,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#2a3b52',
+    backgroundColor: '#111b29',
+  },
+  samplePackagingImage: {
+    width: '100%',
+    height: '100%',
   },
   categoryDropdownWrap: {
     marginTop: 6,

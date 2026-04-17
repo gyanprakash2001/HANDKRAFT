@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,14 +32,6 @@ type Params = {
   productTitle?: string;
 };
 
-function formatTime(input: string) {
-  const date = new Date(input);
-  return date.toLocaleTimeString('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 // MessageBubble, composer and typing indicator are implemented as separate components
 
 export default function MessageThreadScreen() {
@@ -52,7 +44,7 @@ export default function MessageThreadScreen() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [otherTyping, setOtherTyping] = useState(false);
+  const [otherTyping] = useState(false);
 
   const headerTitle = useMemo(() => {
     const label = String(sellerName || '').trim();
@@ -141,13 +133,13 @@ export default function MessageThreadScreen() {
         const isPng = String(uri).toLowerCase().endsWith('.png');
         const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
         dataUri = `data:${isPng ? 'image/png' : 'image/jpeg'};base64,${fileBase64}`;
-      } catch (readErr) {
+      } catch {
         // Attempt multipart upload as a fallback for URIs that can't be read as base64
         try {
           const sent = await uploadChatImage(conversationId, uri);
           setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
           return;
-        } catch (uploadErr: any) {
+        } catch {
           setMessages((prev) => prev.filter((m) => m.id !== tempId));
           return Alert.alert('Image error', 'Could not read or upload the selected image. Please try a different image or grant permission.');
         }

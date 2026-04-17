@@ -15,6 +15,7 @@ console.log(`[ENV] NimbusPost enabled: ${env.nimbuspost?.enabled ? 'yes' : 'no'}
 console.log(`[ENV] CORS allowlist: ${env.cors?.allowAnyOrigin ? '*' : env.cors?.origins?.join(', ') || '(none)'}`);
 
 const app = express();
+app.set('trust proxy', 1);
 const corsOptions = env.cors?.allowAnyOrigin
   ? {}
   : {

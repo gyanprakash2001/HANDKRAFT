@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedView } from '@/components/themed-view';
@@ -9,6 +9,10 @@ import { addUserAddress } from '@/utils/api';
 
 export default function AddAddressScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnTo?: string }>();
+  const returnTo = typeof params.returnTo === 'string' && params.returnTo.trim()
+    ? params.returnTo
+    : '/profile';
   const [loading, setLoading] = useState(false);
   const [label, setLabel] = useState('Home');
   const [fullName, setFullName] = useState('');
@@ -45,7 +49,7 @@ export default function AddAddressScreen() {
       Alert.alert('Success', 'Address added successfully', [
         {
           text: 'OK',
-          onPress: () => router.push('/profile'),
+          onPress: () => router.back(),
         },
       ]);
     } catch (err: any) {

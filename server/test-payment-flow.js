@@ -1,162 +1,162 @@
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
+
+require('dotenv').config({ path: __dirname + '/.env' });
+
 const User = require('./models/User');
 const Product = require('./models/Product');
 const Order = require('./models/Order');
-const jwt = require('jsonwebtoken');
+
+function getEffectiveUnitPrice(product) {
+  const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
+  const discountedPrice = Number(product?.discountedPrice);
+  const hasDiscount = Number.isFinite(discountedPrice)
+    && discountedPrice >= 0
+    && discountedPrice < realPrice;
+
+  return hasDiscount ? discountedPrice : realPrice;
+}
+
+async function requestJson(path, { method = 'GET', body, token } = {}) {
+  const port = Number(process.env.PORT || 5000);
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`http://localhost:${port}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  const raw = await response.text().catch(() => '');
+  let json;
+  try {
+    json = raw ? JSON.parse(raw) : {};
+  } catch {
+    json = { raw };
+  }
+
+  return {
+    status: response.status,
+    ok: response.ok,
+    json,
+  };
+}
 
 async function testPaymentFlow() {
-  try {
-    // Connect to DB
-    await mongoose.connect('mongodb://localhost:27017/handkraft', { family: 4 });
-    console.log('Connected to MongoDB');
+  let exitCode = 0;
 
-    // Create or get a test user
-    let user = await User.findOne({ email: 'test@example.com' });
+  try {
+    const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/handkraft';
+    await mongoose.connect(mongoUri, { family: 4 });
+    console.log('[TEST] Connected to MongoDB');
+
+    let user = await User.findOne({ email: 'qa-payment-smoke@handkraft.local' });
     if (!user) {
-      user = new User({
-        name: 'Test User',
-        email: 'test@example.com',
-        password: 'test',
+      user = await User.create({
+        name: 'QA Payment Smoke',
+        email: 'qa-payment-smoke@handkraft.local',
+        password: '',
         cartItems: [],
       });
-      await user.save();
-      console.log('Created test user:', user._id);
+      console.log('[TEST] Created QA user:', String(user._id));
     } else {
-      console.log('Using existing user:', user._id);
+      console.log('[TEST] Using QA user:', String(user._id));
     }
 
-    // Get a product and add to cart
-    let product = await Product.findOne({ stock: { $gt: 0 } });
+    const product = await Product.findOne({ isActive: true, stock: { $gt: 0 } }).sort({ updatedAt: -1 });
     if (!product) {
-      console.log('No products with stock found');
-      process.exit(1);
+      throw new Error('No in-stock active product found for payment smoke test.');
     }
-    console.log('Found product:', product._id, 'stock:', product.stock);
 
-    // Add to cart
-    user.cartItems = [{
-      product: product._id,
-      quantity: 1,
-    }];
+    user.cartItems = [{ product: product._id, quantity: 1 }];
     await user.save();
-    console.log('Added product to cart');
 
-    // Create JWT token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret', {
-      expiresIn: '7d',
-    });
-    console.log('Generated token');
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET || 'secret',
+      { expiresIn: '2h' }
+    );
 
-    // Now test the payment flow via HTTP
-    const http = require('http');
-
-    // Step 1: Create order
-    return new Promise((resolve) => {
-      const orderData = JSON.stringify({
+    const createOrderRes = await requestJson('/api/orders', {
+      method: 'POST',
+      token,
+      body: {
         shippingAddress: {
-          fullName: 'Test User',
+          fullName: 'QA Payment Smoke',
           phoneNumber: '9876543210',
-          email: 'test@example.com',
-          street: '123 Test Street',
-          city: 'Test City',
-          postalCode: '12345',
+          email: 'qa-payment-smoke@handkraft.local',
+          street: '12 Smoke Test Lane',
+          city: 'Bengaluru',
+          postalCode: '560001',
           country: 'India',
         },
-      });
-
-      const createOrderReq = http.request(
-        {
-          hostname: 'localhost',
-          port: 5000,
-          path: '/api/orders',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(orderData),
-            'Authorization': `Bearer ${token}`,
-          },
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (chunk) => (data += chunk));
-          res.on('end', () => {
-            try {
-              const parsed = JSON.parse(data);
-              console.log('\n[CREATE ORDER] Status:', res.statusCode);
-              console.log('[CREATE ORDER] Response:', JSON.stringify(parsed, null, 2));
-
-              if (res.statusCode === 201 && parsed.order) {
-                const orderId = parsed.order._id;
-
-                // Step 2: Process payment
-                const paymentData = JSON.stringify({
-                  stripeToken: 'tok_49484_demo',
-                });
-
-                const paymentReq = http.request(
-                  {
-                    hostname: 'localhost',
-                    port: 5000,
-                    path: `/api/orders/${orderId}/pay`,
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Content-Length': Buffer.byteLength(paymentData),
-                      'Authorization': `Bearer ${token}`,
-                    },
-                  },
-                  (payRes) => {
-                    let payData = '';
-                    payRes.on('data', (chunk) => (payData += chunk));
-                    payRes.on('end', () => {
-                      try {
-                        const payParsed = JSON.parse(payData);
-                        console.log('\n[PAY ORDER] Status:', payRes.statusCode);
-                        console.log('[PAY ORDER] Response:', JSON.stringify(payParsed, null, 2));
-
-                        if (payRes.statusCode === 200) {
-                          console.log('\n✓ Payment successful!');
-                        } else {
-                          console.log('\n✗ Payment failed');
-                        }
-                      } catch (e) {
-                        console.log('[PAY ORDER] Parse error:', e.message);
-                      }
-                      resolve();
-                    });
-                  }
-                );
-
-                paymentReq.on('error', (e) => {
-                  console.error('[PAY ORDER] Request error:', e.message);
-                  resolve();
-                });
-                paymentReq.write(paymentData);
-                paymentReq.end();
-              } else {
-                console.log('\n✗ Order creation failed');
-                resolve();
-              }
-            } catch (e) {
-              console.log('[CREATE ORDER] Parse error:', e.message);
-              resolve();
-            }
-          });
-        }
-      );
-
-      createOrderReq.on('error', (e) => {
-        console.error('[CREATE ORDER] Request error:', e.message);
-        resolve();
-      });
-      createOrderReq.write(orderData);
-      createOrderReq.end();
+      },
     });
+
+    console.log('[TEST] Create order status:', createOrderRes.status);
+    if (!createOrderRes.ok || !createOrderRes.json?.order?._id) {
+      throw new Error(`Create order failed: ${JSON.stringify(createOrderRes.json)}`);
+    }
+
+    const createdOrder = createOrderRes.json.order;
+    const orderId = String(createdOrder._id);
+    const expectedSubtotal = Number(getEffectiveUnitPrice(product).toFixed(2));
+    const actualSubtotal = Number(createdOrder.subtotal || 0);
+    if (Math.abs(expectedSubtotal - actualSubtotal) > 0.01) {
+      throw new Error(`Subtotal mismatch. Expected ${expectedSubtotal}, got ${actualSubtotal}`);
+    }
+
+    const payRes = await requestJson(`/api/orders/${orderId}/pay`, {
+      method: 'POST',
+      token,
+      body: {
+        stripeToken: 'tok_checkout_smoke',
+      },
+    });
+
+    console.log('[TEST] Pay order status:', payRes.status);
+    if (!payRes.ok) {
+      throw new Error(`Payment failed: ${JSON.stringify(payRes.json)}`);
+    }
+
+    const paidOrder = await Order.findById(orderId)
+      .select('paymentStatus status transactionId paymentMethod')
+      .lean();
+
+    if (!paidOrder) {
+      throw new Error('Paid order not found in DB verification step.');
+    }
+
+    if (String(paidOrder.paymentStatus) !== 'completed') {
+      throw new Error(`Expected paymentStatus=completed, got ${String(paidOrder.paymentStatus)}`);
+    }
+
+    if (String(paidOrder.status) !== 'confirmed') {
+      throw new Error(`Expected status=confirmed, got ${String(paidOrder.status)}`);
+    }
+
+    console.log('[TEST] PASS: payment flow succeeded end-to-end');
   } catch (err) {
-    console.error('Test error:', err.message);
+    exitCode = 1;
+    console.error('[TEST] FAIL:', err?.message || err);
+    if (err?.stack) {
+      console.error(err.stack);
+    }
   } finally {
-    await mongoose.connection.close();
-    process.exit(0);
+    try {
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.connection.close();
+      }
+    } catch {
+      // Ignore close failures in test cleanup.
+    }
+    process.exit(exitCode);
   }
 }
 

@@ -352,7 +352,7 @@ export default function ExploreScreen() {
   // subscribe to global avatar changes so the tab updates immediately
   useEffect(() => {
     const unsub = currentUser.subscribe((p) => {
-      try { setUserAvatar(p?.avatarUrl || null); } catch (e) { /* ignore */ }
+      try { setUserAvatar(p?.avatarUrl || null); } catch { /* ignore */ }
     });
     return () => unsub();
   }, []);

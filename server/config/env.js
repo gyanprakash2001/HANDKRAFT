@@ -72,6 +72,18 @@ const hasRazorpayCredentials = Boolean(
   && String(process.env.RAZORPAY_KEY_SECRET || '').trim()
 );
 
+const hasNimbusV1Credentials = Boolean(
+  String(process.env.NIMBUSPOST_API_KEY || '').trim()
+  && String(process.env.NIMBUSPOST_WAREHOUSE_ID || '').trim()
+);
+
+const hasNimbusV2Credentials = Boolean(
+  String(process.env.NIMBUSPOST_API_EMAIL || '').trim()
+  && String(process.env.NIMBUSPOST_API_PASSWORD || '').trim()
+);
+
+const hasNimbusCredentials = hasNimbusV1Credentials || hasNimbusV2Credentials;
+
 const configuredCorsOrigins = parseCsv(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '');
 
 const env = {
@@ -91,7 +103,7 @@ const env = {
     descriptionPrefix: String(process.env.RAZORPAY_DESCRIPTION_PREFIX || 'HANDKRAFT Order').trim(),
   },
   nimbuspost: {
-    enabled: parseBoolean(process.env.NIMBUSPOST_ENABLED, false),
+    enabled: parseBoolean(process.env.NIMBUSPOST_ENABLED, hasNimbusCredentials),
     mode: String(process.env.NIMBUSPOST_MODE || 'auto').trim().toLowerCase(),
     apiKey: process.env.NIMBUSPOST_API_KEY || '',
     apiEmail: process.env.NIMBUSPOST_API_EMAIL || '',

@@ -11,9 +11,10 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onSelect: (addr: any) => void;
+  returnTo?: string;
 };
 
-export default function AddressPickerModal({ visible, onClose, onSelect }: Props) {
+export default function AddressPickerModal({ visible, onClose, onSelect, returnTo = '/upload' }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [addresses, setAddresses] = useState<any[]>([]);
@@ -26,7 +27,7 @@ export default function AddressPickerModal({ visible, onClose, onSelect }: Props
       try {
         const list = await getUserAddresses();
         if (mounted) setAddresses(list || []);
-      } catch (e) {
+      } catch {
         if (mounted) setAddresses([]);
       } finally {
         if (mounted) setLoading(false);
@@ -37,8 +38,7 @@ export default function AddressPickerModal({ visible, onClose, onSelect }: Props
 
   const handleAddNew = () => {
     onClose();
-    // navigate to add-address screen; include returnTo so the add flow can return here if desired
-    router.push({ pathname: '/add-address', params: { returnTo: '/upload' } } as any);
+    router.push({ pathname: '/add-address', params: { returnTo } } as any);
   };
 
   return (

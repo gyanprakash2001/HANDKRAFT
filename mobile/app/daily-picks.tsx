@@ -3,7 +3,6 @@ import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, S
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -16,7 +15,6 @@ const FEED_SIDE_PADDING = 14;
 const COLUMN_GAP = 8;
 const COLUMN_WIDTH = (SCREEN_WIDTH - FEED_SIDE_PADDING * 2 - COLUMN_GAP) / 2;
 const DAILY_PICKS_LIMIT_DEFAULT = 60;
-const DAILY_PICKS_LIMIT_TUNNEL = 24;
 
 function formatPriceINR(price: number) {
   return `₹${Number(price || 0).toLocaleString('en-IN')}`;
@@ -232,8 +230,7 @@ export default function DailyPicksScreen() {
 
     try {
       setError(null);
-      const apiMode = (await AsyncStorage.getItem('API_DEV_MODE')) || 'auto';
-      const productLimit = apiMode === 'tunnel' ? DAILY_PICKS_LIMIT_TUNNEL : DAILY_PICKS_LIMIT_DEFAULT;
+      const productLimit = DAILY_PICKS_LIMIT_DEFAULT;
 
       const [productsRes, dashboardRes, ordersRes, behavior] = await Promise.all([
         getProducts({ page: 1, limit: productLimit, sort: 'newest' }),

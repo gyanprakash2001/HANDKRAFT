@@ -35,9 +35,7 @@ const SKELETON_LEFT_RATIOS = [1, 0.8, 1.25];
 const SKELETON_RIGHT_RATIOS = [0.75, 1, 0.67];
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 const FEED_LIMIT_DEFAULT = 40;
-const FEED_LIMIT_TUNNEL = 16;
 const UNREAD_POLL_MS_DEFAULT = 12000;
-const UNREAD_POLL_MS_TUNNEL = 30000;
 const CART_SYNC_THROTTLE_MS = 60000;
 
 function resolveFileBaseUrl() {
@@ -208,7 +206,6 @@ export default function FeedScreen() {
   const lastScrollYRef = useRef(0);
   const firstFocusRef = useRef(true);
   const lastCartSyncAtRef = useRef(0);
-  const lastKnownApiModeRef = useRef<'auto' | 'adb' | 'tunnel' | 'custom'>('auto');
   const seenProductIdsRef = useRef<Set<string>>(new Set());
   const topFiltersAnim = useRef(new Animated.Value(1)).current;
   const router = useRouter();
@@ -272,10 +269,7 @@ export default function FeedScreen() {
 
     try {
       setError(null);
-
-      const apiMode = ((await AsyncStorage.getItem('API_DEV_MODE')) || 'auto') as 'auto' | 'adb' | 'tunnel' | 'custom';
-      lastKnownApiModeRef.current = apiMode;
-      const productLimit = apiMode === 'tunnel' ? FEED_LIMIT_TUNNEL : FEED_LIMIT_DEFAULT;
+      const productLimit = FEED_LIMIT_DEFAULT;
 
       const profilePromise = getProfile();
       const productsPromise = getProducts({ page: 1, limit: productLimit, sort: 'newest' });
@@ -349,14 +343,9 @@ export default function FeedScreen() {
       loadFeed(!isFirstFocus);
       loadUnreadMessageCount();
       syncCartBadgeFromBackend();
-
-      const pollEveryMs = lastKnownApiModeRef.current === 'tunnel'
-        ? UNREAD_POLL_MS_TUNNEL
-        : UNREAD_POLL_MS_DEFAULT;
-
       const pollerId = setInterval(() => {
         loadUnreadMessageCount();
-      }, pollEveryMs);
+      }, UNREAD_POLL_MS_DEFAULT);
 
       return () => {
         clearInterval(pollerId);
@@ -574,7 +563,15 @@ export default function FeedScreen() {
     <ThemedView style={styles.container}>
       {/* Header with brand left and quick actions right */}
       <View style={styles.header}>
-        <ThemedText type="title" style={styles.headerTitle}>Handkraft</ThemedText>
+        <View style={styles.brandWrap}>
+          <Image
+            source={require('../assets/feed_logo.png')}
+            style={styles.brandLogo}
+            contentFit="cover"
+            accessibilityLabel="Handkraft logo"
+            accessibilityRole="image"
+          />
+        </View>
         <View style={styles.headerActions}>
           <Pressable
             style={({ pressed }) => [styles.headerActionButton, styles.headerActionCart, pressed && styles.headerActionPressed]}
@@ -781,15 +778,18 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 16,
     paddingTop: 64,
-    paddingBottom: 16,
+    paddingBottom: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 35,
-    fontWeight: '700',
-    color: '#fff',
+  brandWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  brandLogo: {
+    width: 150,
+    height: 48,
   },
   headerActions: {
     flexDirection: 'row',
@@ -887,9 +887,9 @@ const styles = StyleSheet.create({
   },
   discoveryStrip: {
     marginHorizontal: 10,
-    marginBottom: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#27323d',
@@ -900,7 +900,7 @@ const styles = StyleSheet.create({
   },
   discoveryTitle: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
   },
   discoverySubtitle: {

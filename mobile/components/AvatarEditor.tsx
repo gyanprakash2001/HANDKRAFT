@@ -1,12 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Modal, View, StyleSheet, Pressable, Text, Dimensions, ActivityIndicator, Platform, Image as RNImage } from 'react-native';
+import { Modal, View, StyleSheet, Pressable, Text, Dimensions, ActivityIndicator, Image as RNImage } from 'react-native';
 import { GestureHandlerRootView, PanGestureHandler, PinchGestureHandler, State } from 'react-native-gesture-handler';
-import Animated from 'react-native-reanimated';
-// Some bundler/type setups expose hooks only as named exports on the module object.
-// Use require to get the full module object at runtime and read hook functions from it.
-const ReanimatedModule: any = require('react-native-reanimated');
-const { useSharedValue, useAnimatedStyle } = ReanimatedModule;
+import Animated, * as ReanimatedModule from 'react-native-reanimated';
 import * as ImageManipulator from 'expo-image-manipulator';
+
+const { useSharedValue, useAnimatedStyle } = ReanimatedModule as any;
 
 const AnimatedImage = Animated.createAnimatedComponent(RNImage as any);
 
@@ -53,7 +51,7 @@ export default function AvatarEditor({ visible, imageUri, onCancel, onSave, setO
         setImageSize({ width: size, height: size });
       }
     );
-  }, [imageUri]);
+  }, [baseScale, imageUri, scale, size, translateX, translateY]);
 
   // Fallback gesture handling: some environments don't export
   // `useAnimatedGestureHandler`. Use plain JS handlers that update
@@ -118,7 +116,6 @@ export default function AvatarEditor({ visible, imageUri, onCancel, onSave, setO
       actions.push({ resize: { width: 512, height: 512 } });
 
       const result = await ImageManipulator.manipulateAsync(imageUri, actions, { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true });
-      const dataUri = `data:image/jpeg;base64,${result.base64}`;
       onSave({ uri: result.uri, base64: result.base64, setOnProfile: Boolean(setOnSaveApplyToProfile) });
     } catch (err) {
       console.error('Avatar crop error', err);

@@ -53,8 +53,118 @@ function getCandidateBaseUrls() {
 const API_BASE_URLS = getCandidateBaseUrls();
 const API_BASE_URL = API_BASE_URLS[0] || 'http://localhost:5000/api';
 const FETCH_BASE_URLS = API_BASE_URLS.length ? API_BASE_URLS : [API_BASE_URL];
+const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, '');
+
+let API_ROOT_PROTOCOL = '';
+let API_ROOT_HOST = '';
+
+try {
+  const parsedApiRoot = new URL(API_ROOT_URL);
+  API_ROOT_PROTOCOL = parsedApiRoot.protocol;
+  API_ROOT_HOST = parsedApiRoot.host;
+} catch {
+  API_ROOT_PROTOCOL = '';
+  API_ROOT_HOST = '';
+}
 
 console.log(`[API] Base URL candidates: ${API_BASE_URLS.join(' -> ')}`);
+
+function normalizeAssetUrl(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  if (raw.startsWith('data:') || raw.startsWith('file://') || raw.startsWith('content://')) {
+    return raw;
+  }
+
+  if (raw.startsWith('/')) {
+    return `${API_ROOT_URL}${raw}`;
+  }
+
+  if (raw.startsWith('//')) {
+    return `${API_ROOT_PROTOCOL || 'https:'}${raw}`;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    if (API_ROOT_PROTOCOL === 'https:' && /^http:\/\//i.test(raw)) {
+      try {
+        const parsed = new URL(raw);
+        if (parsed.host === API_ROOT_HOST) {
+          return `https://${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        }
+      } catch {
+        return raw;
+      }
+    }
+
+    return raw;
+  }
+
+  return raw;
+}
+
+function normalizeProductMediaEntry(entry: any, fallbackAspectRatio?: number): ProductMediaItem | null {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const type: 'image' | 'video' = entry.type === 'video' ? 'video' : 'image';
+  const url = normalizeAssetUrl(entry.url);
+  if (!url) {
+    return null;
+  }
+
+  const ratioCandidate = Number(entry.aspectRatio ?? fallbackAspectRatio);
+  const hasValidRatio = Number.isFinite(ratioCandidate) && ratioCandidate > 0;
+  const thumbnailCandidate = normalizeAssetUrl(entry.thumbnailUrl || (type === 'image' ? url : ''));
+
+  return {
+    type,
+    url,
+    thumbnailUrl: thumbnailCandidate || (type === 'image' ? url : ''),
+    aspectRatio: hasValidRatio ? ratioCandidate : undefined,
+  };
+}
+
+function normalizeProductItem(item: any): ProductItem {
+  const fallbackRatio = Number(item?.imageAspectRatio);
+
+  const media = Array.isArray(item?.media)
+    ? item.media
+        .map((entry: any) => normalizeProductMediaEntry(entry, fallbackRatio))
+        .filter(Boolean) as ProductMediaItem[]
+    : [];
+
+  const imageUrls = Array.isArray(item?.images)
+    ? item.images
+        .map((imageUrl: any) => normalizeAssetUrl(imageUrl))
+        .filter((imageUrl: string) => Boolean(imageUrl))
+    : [];
+
+  const normalizedImages = imageUrls.length > 0
+    ? imageUrls
+    : media
+        .filter((entry) => entry.type === 'image')
+        .map((entry) => entry.url)
+        .filter(Boolean);
+
+  const normalizedMedia = media.length > 0
+    ? media
+    : normalizedImages.map((url) => ({
+        type: 'image' as const,
+        url,
+        thumbnailUrl: url,
+        aspectRatio: Number.isFinite(fallbackRatio) && fallbackRatio > 0 ? fallbackRatio : undefined,
+      }));
+
+  return {
+    ...(item || {}),
+    images: normalizedImages,
+    media: normalizedMedia,
+  } as ProductItem;
+}
 
 async function safeFetch(path: string, opts: RequestInit = {}) {
   let lastError: any = null;
@@ -436,7 +546,15 @@ export async function getSellerPublicProfile(params: {
     throw new Error(err.message || 'Failed to fetch seller profile');
   }
 
-  return res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    seller: {
+      ...(data?.seller || {}),
+      avatarUrl: normalizeAssetUrl(data?.seller?.avatarUrl) || data?.seller?.avatarUrl,
+    },
+    items: Array.isArray(data?.items) ? data.items.map((item: any) => normalizeProductItem(item)) : [],
+  };
 }
 
 export async function updateSellerProfile(payload: UpdateSellerProfilePayload): Promise<{
@@ -474,7 +592,23 @@ export async function getProfileDashboard(): Promise<ProfileDashboardResponse> {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to fetch profile dashboard');
   }
-  return res.json();
+
+  const data = await res.json();
+  return {
+    ...data,
+    user: {
+      ...(data?.user || {}),
+      avatarUrl: normalizeAssetUrl(data?.user?.avatarUrl) || data?.user?.avatarUrl,
+    },
+    listedItems: Array.isArray(data?.listedItems) ? data.listedItems.map((item: any) => normalizeProductItem(item)) : [],
+    likedItems: Array.isArray(data?.likedItems) ? data.likedItems.map((item: any) => normalizeProductItem(item)) : [],
+    cartItems: Array.isArray(data?.cartItems)
+      ? data.cartItems.map((entry: any) => ({
+          ...entry,
+          product: normalizeProductItem(entry?.product || {}),
+        }))
+      : [],
+  } as ProfileDashboardResponse;
 }
 
 export async function getSellerListedItems(): Promise<ProductItem[]> {
@@ -499,7 +633,7 @@ export async function getSellerListedItems(): Promise<ProductItem[]> {
   }
 
   const data = await res.json();
-  return Array.isArray(data?.items) ? data.items : [];
+  return Array.isArray(data?.items) ? data.items.map((item: any) => normalizeProductItem(item)) : [];
 }
 
 export async function toggleLikedProduct(productId: string): Promise<{ liked: boolean; message: string }> {
@@ -593,7 +727,13 @@ export async function getProducts(params: {
     throw new Error(err.message || 'Failed to fetch products');
   }
 
-  return res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    items: Array.isArray(data?.items)
+      ? data.items.map((item: any) => normalizeProductItem(item))
+      : [],
+  };
 }
 
 export async function getProductById(productId: string): Promise<ProductItem> {
@@ -604,7 +744,8 @@ export async function getProductById(productId: string): Promise<ProductItem> {
     throw new Error(err.message || 'Failed to fetch product details');
   }
 
-  return res.json();
+  const data = await res.json();
+  return normalizeProductItem(data);
 }
 
 export type ProductReviewSort = 'top' | 'latest' | 'media' | 'rating_high' | 'rating_low';
@@ -780,7 +921,7 @@ export async function createProduct(payload: CreateProductPayload): Promise<Prod
   }
 
   const data = await res.json();
-  return data.item;
+  return normalizeProductItem(data.item);
 }
 
 export async function uploadProductMedia(media: ProductMediaItem[]): Promise<{ media: ProductMediaItem[]; images: string[] }> {
@@ -816,9 +957,22 @@ export async function uploadProductMedia(media: ProductMediaItem[]): Promise<{ m
   }
 
   const data = await res.json();
+
+  const normalizedMedia = Array.isArray(data?.media)
+    ? data.media
+        .map((entry: any) => normalizeProductMediaEntry(entry))
+        .filter(Boolean) as ProductMediaItem[]
+    : [];
+
+  const normalizedImages = Array.isArray(data?.images)
+    ? data.images
+        .map((url: any) => normalizeAssetUrl(url))
+        .filter((url: string) => Boolean(url))
+    : [];
+
   return {
-    media: Array.isArray(data?.media) ? data.media : [],
-    images: Array.isArray(data?.images) ? data.images : [],
+    media: normalizedMedia,
+    images: normalizedImages,
   };
 }
 
