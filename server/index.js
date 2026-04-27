@@ -17,7 +17,11 @@ console.log(`[ENV] CORS allowlist: ${env.cors?.allowAnyOrigin ? '*' : env.cors?.
 const app = express();
 app.set('trust proxy', 1);
 const corsOptions = env.cors?.allowAnyOrigin
-  ? {}
+  ? {
+      origin: true,
+      credentials: true,
+      optionsSuccessStatus: 204,
+    }
   : {
       origin(origin, callback) {
         if (!origin) {
@@ -30,6 +34,7 @@ const corsOptions = env.cors?.allowAnyOrigin
 
         return callback(new Error(`CORS blocked for origin: ${origin}`));
       },
+      credentials: true,
       optionsSuccessStatus: 204,
     };
 
