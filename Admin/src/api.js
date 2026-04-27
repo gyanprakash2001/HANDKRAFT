@@ -12,7 +12,6 @@ const API_BASE_URL = trimTrailingSlash(
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
 });
 
 export function getStoredToken() {
