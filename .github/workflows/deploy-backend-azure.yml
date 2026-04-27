@@ -171,10 +171,30 @@ jobs:
           const fs = require('fs');
 
           const appName = String(process.env.AZURE_WEBAPP_NAME || '').trim();
+          const repoOwner = String(process.env.GITHUB_REPOSITORY_OWNER || process.env.GITHUB_REPOSITORY || '').split('/')[0].trim();
+          const pagesOrigin = repoOwner ? `https://${repoOwner}.github.io` : '';
           const payload = process.env.AZURE_APP_SETTINGS_JSON || '[]';
           const parsed = JSON.parse(payload);
 
           const map = new Map();
+
+          const mergeCsvValues = (currentValue, additions) => {
+            const values = new Set(
+              String(currentValue || '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean)
+            );
+
+            for (const addition of additions) {
+              const normalized = String(addition || '').trim();
+              if (normalized) {
+                values.add(normalized);
+              }
+            }
+
+            return Array.from(values).join(',');
+          };
 
           for (const entry of Array.isArray(parsed) ? parsed : []) {
             const name = String(entry?.name || '').trim();
@@ -187,6 +207,25 @@ jobs:
               value: entry?.value == null ? '' : String(entry.value),
               slotSetting: Boolean(entry?.slotSetting),
             });
+          }
+
+          if (pagesOrigin) {
+            const existingCorsOrigins = map.get('CORS_ORIGINS');
+            const existingCorsOrigin = map.get('CORS_ORIGIN');
+
+            if (existingCorsOrigins) {
+              existingCorsOrigins.value = mergeCsvValues(existingCorsOrigins.value, [pagesOrigin]);
+              map.set('CORS_ORIGINS', existingCorsOrigins);
+            } else if (existingCorsOrigin) {
+              existingCorsOrigin.value = mergeCsvValues(existingCorsOrigin.value, [pagesOrigin]);
+              map.set('CORS_ORIGIN', existingCorsOrigin);
+            } else {
+              map.set('CORS_ORIGINS', {
+                name: 'CORS_ORIGINS',
+                value: pagesOrigin,
+                slotSetting: false,
+              });
+            }
           }
 
           map.set('NODE_ENV', {
