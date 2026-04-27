@@ -39,16 +39,25 @@ jobs:
       - name: Resolve Admin API base URL
         shell: bash
         env:
+          AZURE_API_BASE_URL: ${{ secrets.AZURE_API_BASE_URL }}
           AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
         run: |
           set -euo pipefail
 
-          if [ -z "${AZURE_WEBAPP_NAME:-}" ]; then
-            echo "Missing AZURE_WEBAPP_NAME secret. Set it in GitHub repository secrets so the admin build can point to your live backend API."
+          if [ -n "${AZURE_API_BASE_URL:-}" ]; then
+            trimmed_base_url="${AZURE_API_BASE_URL%/}"
+            if [[ "${trimmed_base_url}" == */api ]]; then
+              admin_api_base_url="${trimmed_base_url}"
+            else
+              admin_api_base_url="${trimmed_base_url}/api"
+            fi
+          elif [ -n "${AZURE_WEBAPP_NAME:-}" ]; then
+            admin_api_base_url="https://${AZURE_WEBAPP_NAME}.azurewebsites.net/api"
+          else
+            echo "Missing AZURE_API_BASE_URL or AZURE_WEBAPP_NAME secret. Set AZURE_API_BASE_URL to the live Azure backend base URL, or AZURE_WEBAPP_NAME if you want the workflow to derive the default azurewebsites.net URL."
             exit 1
           fi
 
-          admin_api_base_url="https://${AZURE_WEBAPP_NAME}.azurewebsites.net/api"
           echo "VITE_API_BASE_URL=${admin_api_base_url}" >> "$GITHUB_ENV"
 
       - name: Install Admin dependencies
