@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "create-admin": "node scripts/create-admin.js",
+    "admin-smoke": "node scripts/admin-smoke-check.js",
     "tunnel": "npx ngrok http --region ap 5000",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

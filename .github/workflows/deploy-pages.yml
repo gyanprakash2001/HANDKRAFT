@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - docs/**
+      - Admin/**
       - .github/workflows/deploy-pages.yml
   workflow_dispatch:
 
@@ -25,13 +26,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: Admin/package-lock.json
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
+
+      - name: Resolve Admin API base URL
+        shell: bash
+        env:
+          AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AZURE_WEBAPP_NAME:-}" ]; then
+            echo "Missing AZURE_WEBAPP_NAME secret. Set it in GitHub repository secrets so the admin build can point to your live backend API."
+            exit 1
+          fi
+
+          admin_api_base_url="https://${AZURE_WEBAPP_NAME}.azurewebsites.net/api"
+          echo "VITE_API_BASE_URL=${admin_api_base_url}" >> "$GITHUB_ENV"
+
+      - name: Install Admin dependencies
+        run: npm ci --prefix Admin
+
+      - name: Build Admin app for GitHub Pages
+        run: npm --prefix Admin run build -- --base=./
+
+      - name: Assemble Pages artifact (docs + admin)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _site
+          mkdir -p _site/admin
+          cp -R docs/. _site/
+          cp -R Admin/dist/. _site/admin/
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: _site
 
   deploy:
     runs-on: ubuntu-latest

@@ -147,6 +147,14 @@ const env = {
     defaultReservePercent: parseNonNegativeNumber(process.env.PAYOUTS_DEFAULT_RESERVE_PERCENT, 10),
     defaultMinimumPayoutAmount: parseNonNegativeNumber(process.env.PAYOUTS_DEFAULT_MIN_PAYOUT_AMOUNT, 0),
   },
+  admin: {
+    superEmails: parseCsv(process.env.ADMIN_SUPER_EMAILS || '').map((entry) => entry.toLowerCase()),
+    defaultRole: String(process.env.ADMIN_DEFAULT_ROLE || 'superadmin').trim().toLowerCase(),
+    defaultDeleteMode: String(process.env.ADMIN_DEFAULT_DELETE_MODE || 'soft').trim().toLowerCase() === 'hard'
+      ? 'hard'
+      : 'soft',
+    deleteReasonMinLength: Math.max(5, parsePositiveNumber(process.env.ADMIN_DELETE_REASON_MIN_LENGTH, 12)),
+  },
 };
 
 if (env.razorpay.enabled) {

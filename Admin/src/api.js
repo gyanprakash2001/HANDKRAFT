@@ -15,4 +15,35 @@ const api = axios.create({
   withCredentials: true,
 });
 
+export function getStoredToken() {
+  return localStorage.getItem('token') || '';
+}
+
+export function setStoredToken(token) {
+  if (token) {
+    localStorage.setItem('token', token);
+  } else {
+    localStorage.removeItem('token');
+  }
+}
+
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      setStoredToken('');
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;

@@ -9,6 +9,9 @@ module.exports = async function (req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
     const user = await User.findById(decoded.id);
     if (!user) return res.status(401).json({ message: 'User not found' });
+    if (String(user.accountStatus || 'active') === 'suspended') {
+      return res.status(403).json({ message: 'Your account is suspended. Please contact support.' });
+    }
     try {
       console.log('[AUTH] decoded.id:', decoded.id, 'loaded user._id:', user?._id, 'userType:', typeof user);
     } catch (e) {

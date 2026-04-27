@@ -122,11 +122,23 @@ const userSchema = new mongoose.Schema({
   sellerPayoutProfile: { type: sellerPayoutProfileSchema, default: () => ({}) },
   sellerPayoutSettings: { type: sellerPayoutSettingsSchema, default: () => ({}) },
   sellerTrust: { type: sellerTrustSchema, default: () => ({}) },
+  accountStatus: {
+    type: String,
+    enum: ['active', 'suspended'],
+    default: 'active',
+  },
+  suspensionReason: { type: String, default: '' },
+  suspendedAt: { type: Date, default: null },
   likedProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   likedProductTimestamps: [likedProductTimestampSchema],
   cartItems: [cartItemSchema],
   addresses: [addressSchema],
   isAdmin: { type: Boolean, default: false },
+  adminRole: {
+    type: String,
+    enum: ['support', 'ops', 'finance', 'superadmin'],
+    default: 'support',
+  },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

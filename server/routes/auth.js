@@ -54,6 +54,7 @@ function buildPublicUserPayload(user) {
     phoneNumber: user.phoneNumber || '',
     locale: user.locale || '',
     isAdmin: Boolean(user.isAdmin),
+    adminRole: user.isAdmin ? String(user.adminRole || 'support') : null,
   };
 }
 
@@ -61,7 +62,7 @@ function buildPublicUserPayload(user) {
 router.get('/profile', auth, async (req, res) => {
   if (!req.user) return res.status(401).json({ message: 'Not authenticated' });
   const user = buildPublicUserPayload(req.user);
-  res.json({ user: { ...user, isAdmin: req.user.isAdmin } });
+  res.json({ user });
 });
 
 // signup
