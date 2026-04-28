@@ -49,8 +49,41 @@ app.use(express.json({
 }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+const mongoStatus = {
+  state: 'disconnected',
+  readyState: mongoose.connection.readyState,
+  lastError: null,
+  lastErrorAt: null,
+  lastConnectedAt: null,
+};
+
+function updateMongoStatus(state, err) {
+  mongoStatus.state = state;
+  mongoStatus.readyState = mongoose.connection.readyState;
+
+  if (state === 'connected' || state === 'reconnected') {
+    mongoStatus.lastConnectedAt = new Date().toISOString();
+  }
+
+  if (err) {
+    mongoStatus.lastError = err?.message || String(err);
+    mongoStatus.lastErrorAt = new Date().toISOString();
+  }
+}
+
+mongoose.connection.on('connected', () => updateMongoStatus('connected'));
+mongoose.connection.on('reconnected', () => updateMongoStatus('reconnected'));
+mongoose.connection.on('disconnected', () => updateMongoStatus('disconnected'));
+mongoose.connection.on('error', (err) => updateMongoStatus('error', err));
+
 // health check
 app.get('/health', (req, res) => res.send('OK'));
+app.get('/health/db', (req, res) => {
+  res.json({
+    ...mongoStatus,
+    readyState: mongoose.connection.readyState,
+  });
+});
 
 // routes
 const authRouter = require('./routes/auth');

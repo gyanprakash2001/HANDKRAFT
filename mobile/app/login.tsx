@@ -91,8 +91,6 @@ export default function LoginScreen() {
       return;
     }
 
-    let nativeError: unknown = null;
-
     if (isAndroid && !useProxyForExpo) {
       try {
         console.log('Trying native Google sign-in on Android app build');
@@ -100,8 +98,9 @@ export default function LoginScreen() {
         await completeGoogleAuth(idToken, accessToken);
         return;
       } catch (err) {
-        nativeError = err;
-        console.warn('Native Google sign-in failed, falling back to AuthSession', err);
+        console.warn('Native Google sign-in failed', err);
+        Alert.alert('Google Sign-in Error', getNativeGoogleErrorMessage(err));
+        return;
       }
     }
 
@@ -126,11 +125,7 @@ export default function LoginScreen() {
       console.warn('Google AuthSession sign-in failed', firstError);
 
       const authSessionMessage = firstError instanceof Error ? firstError.message : 'Failed to start Google sign-in.';
-      const nativeMessage = nativeError ? getNativeGoogleErrorMessage(nativeError) : '';
-      const message = nativeMessage
-        ? `${nativeMessage}\n\nAuthSession fallback error: ${authSessionMessage}`
-        : authSessionMessage;
-      Alert.alert('Google Sign-in Error', message);
+      Alert.alert('Google Sign-in Error', authSessionMessage);
     }
   };
 
