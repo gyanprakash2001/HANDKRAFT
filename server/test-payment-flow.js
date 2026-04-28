@@ -106,6 +106,10 @@ async function testPaymentFlow() {
 
     const createdOrder = createOrderRes.json.order;
     const orderId = String(createdOrder._id);
+    if (String(createdOrder.isDraft) !== 'true') {
+      throw new Error(`Expected created order to be draft, got isDraft=${String(createdOrder.isDraft)}`);
+    }
+
     const expectedSubtotal = Number(getEffectiveUnitPrice(product).toFixed(2));
     const actualSubtotal = Number(createdOrder.subtotal || 0);
     if (Math.abs(expectedSubtotal - actualSubtotal) > 0.01) {
@@ -126,7 +130,7 @@ async function testPaymentFlow() {
     }
 
     const paidOrder = await Order.findById(orderId)
-      .select('paymentStatus status transactionId paymentMethod')
+      .select('paymentStatus status transactionId paymentMethod isDraft')
       .lean();
 
     if (!paidOrder) {
@@ -139,6 +143,10 @@ async function testPaymentFlow() {
 
     if (String(paidOrder.status) !== 'confirmed') {
       throw new Error(`Expected status=confirmed, got ${String(paidOrder.status)}`);
+    }
+
+    if (String(paidOrder.isDraft) === 'true') {
+      throw new Error('Expected paid order to be published (isDraft=false).');
     }
 
     console.log('[TEST] PASS: payment flow succeeded end-to-end');

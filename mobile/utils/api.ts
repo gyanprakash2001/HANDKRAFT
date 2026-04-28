@@ -1074,6 +1074,7 @@ export interface Order {
   shippingCost: number;
   tax: number;
   totalAmount: number;
+  isDraft?: boolean;
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
   paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
   paymentMethod: string;
@@ -1218,6 +1219,19 @@ export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
 
   const data = await res.json();
   return data.order;
+}
+
+export async function discardDraftOrder(orderId: string): Promise<{ message: string }> {
+  const res = await fetchWithAuth(`/orders/${orderId}/draft`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    const parsed = await parseApiErrorResponse(res, 'Failed to discard draft order.');
+    throw toApiError(parsed);
+  }
+
+  return res.json();
 }
 
 export async function createRazorpayPaymentOrder(orderId: string): Promise<RazorpayPaymentOrder> {

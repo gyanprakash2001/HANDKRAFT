@@ -13,6 +13,7 @@ import {
   getProfileDashboard,
   createOrder,
   createRazorpayPaymentOrder,
+  discardDraftOrder,
   processOrderPayment,
   ShippingAddress,
   Order,
@@ -265,6 +266,32 @@ export default function CheckoutScreen() {
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to update cart');
+    }
+  };
+
+  const restoreCartAfterFailedCheckout = async (draftOrderId?: string | null, fallbackMessage?: string) => {
+    if (draftOrderId) {
+      await discardDraftOrder(draftOrderId).catch(() => {
+        // Ignore cleanup errors; the order will be hidden from sellers and can be removed later.
+      });
+    }
+
+    try {
+      const dashboard = await getProfileDashboard();
+      hydrateCartFromBackend(dashboard.cartItems || []);
+    } catch {
+      hydrateCartFromBackend(sharedCartItems);
+    }
+
+    setShippingEstimate(null);
+    setSelectedQuotesMap({});
+    setShippingEstimateError(null);
+    setShippingAddressForOrder(null);
+    setOrder(null);
+    setStep('cart');
+
+    if (fallbackMessage) {
+      setError(fallbackMessage);
     }
   };
 
@@ -651,8 +678,16 @@ export default function CheckoutScreen() {
       console.log('[CHECKOUT] Order created:', newOrder._id);
       setOrder(newOrder);
 
-      // Create gateway order and open Razorpay checkout.
-      const paymentOrder = await createRazorpayPaymentOrder(newOrder._id);
+      const draftOrderId = String(newOrder._id || '');
+
+      let paymentOrder;
+      try {
+        paymentOrder = await createRazorpayPaymentOrder(newOrder._id);
+      } catch (paymentOrderError: any) {
+        await restoreCartAfterFailedCheckout(draftOrderId, paymentOrderError?.message || 'Failed to initialize payment.');
+        return;
+      }
+
       console.log('[CHECKOUT] Razorpay order created:', paymentOrder.gatewayOrderId);
 
       let razorpayResult: any;
@@ -671,7 +706,7 @@ export default function CheckoutScreen() {
         const checkoutMessage = checkoutError?.description || checkoutError?.message || 'Payment cancelled';
         const normalizedMessage = String(checkoutMessage).toLowerCase();
         if (normalizedMessage.includes('cancel') || normalizedMessage.includes('dismiss')) {
-          setError('Payment was cancelled. You can retry from checkout.');
+          await restoreCartAfterFailedCheckout(draftOrderId, 'Payment was cancelled. Your cart is unchanged.');
           return;
         }
 

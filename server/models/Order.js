@@ -123,6 +123,7 @@ const orderSchema = new mongoose.Schema({
   shippingCost: { type: Number, default: 0, min: 0 },
   tax: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 },
+  isDraft: { type: Boolean, default: false },
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'],

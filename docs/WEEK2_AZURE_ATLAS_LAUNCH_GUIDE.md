@@ -68,6 +68,12 @@ NIMBUSPOST_ENABLED=true
 NIMBUSPOST_MODE=auto
 NIMBUSPOST_API_KEY=... (or V2 credentials)
 NIMBUSPOST_WEBHOOK_SECRET=...
+
+# Admin policy guardrails
+ADMIN_SUPER_EMAILS=owner@yourdomain.com
+ADMIN_DEFAULT_ROLE=superadmin
+ADMIN_DEFAULT_DELETE_MODE=soft
+ADMIN_DELETE_REASON_MIN_LENGTH=12
 ```
 
 ## Step 4: Add GitHub secrets for deployment

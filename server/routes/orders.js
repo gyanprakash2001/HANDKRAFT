@@ -1043,6 +1043,11 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
   order.transactionId = String(transactionId || '');
   order.paymentMethod = String(paymentMethod || 'card');
 
+  // Reveal draft orders to sellers once payment is successful
+  if (order.isDraft) {
+    order.isDraft = false;
+  }
+
   if (paymentGateway && typeof paymentGateway === 'object') {
     order.paymentGateway = Object.assign({}, order.paymentGateway || {}, paymentGateway);
   }
@@ -1436,6 +1441,7 @@ router.post('/', auth, async (req, res) => {
       totalAmount: Number(totalAmount.toFixed(2)),
       status: 'pending',
       paymentStatus: 'pending',
+      isDraft: true,
       notes: notes || '',
     });
 
@@ -1481,6 +1487,37 @@ router.post('/', auth, async (req, res) => {
     console.error('Full stack:', err?.stack || 'No stack');
     console.error('================================\n');
     res.status(500).json({ message: errorMsg });
+  }
+});
+
+// DELETE /api/orders/:id/draft - Discard an unpaid draft order
+router.delete('/:id/draft', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    assertOrderOwnership(order, req.user._id);
+
+    if (String(order.paymentStatus || '').toLowerCase() === 'completed') {
+      return res.status(409).json({ message: 'Paid orders cannot be discarded.' });
+    }
+
+    await Order.deleteOne({ _id: order._id });
+
+    return res.json({ message: 'Draft order discarded' });
+  } catch (err) {
+    const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Unknown error');
+    const status = Number(err?.status || 500);
+    console.error('[DISCARD_DRAFT_ORDER] Error:', errorMsg, err);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ message: errorMsg });
   }
 });
 
@@ -1915,7 +1952,7 @@ router.get('/seller/me', auth, async (req, res) => {
       .collection('orders')
       .aggregate([
         { $unwind: '$items' },
-        { $match: { $or: matchOr } },
+        { $match: { $and: [ { $or: matchOr }, { isDraft: { $ne: true } } ] } },
         { $group: { _id: '$_id' } },
         { $sort: { _id: -1 } },
       ])
