@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Platform } from 'react-native';
+import { StyleSheet, TextInput, Button, View, Alert, Platform, Modal } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 
@@ -19,6 +19,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const router = useRouter();
   const isAndroid = Platform.OS === 'android';
+
+  const [successVisible, setSuccessVisible] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
@@ -50,16 +53,24 @@ export default function LoginScreen() {
       return;
     }
 
-    Alert.alert('Success', 'Logged in with Google');
-    router.replace('/feed');
+    setSuccessMessage('Logged in with Google');
+    setSuccessVisible(true);
+    setTimeout(() => {
+      setSuccessVisible(false);
+      router.replace('/feed');
+    }, 900);
   }, [router]);
 
   const handleSubmit = async () => {
     try {
       const { token } = await loginUser(email, password);
       await saveToken(token);
-      Alert.alert('Success', 'Logged in');
-      router.replace('/feed');
+      setSuccessMessage('Logged in');
+      setSuccessVisible(true);
+      setTimeout(() => {
+        setSuccessVisible(false);
+        router.replace('/feed');
+      }, 900);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Login failed');
     }
@@ -131,6 +142,14 @@ export default function LoginScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <Modal visible={successVisible} transparent animationType="fade">
+        <View style={styles.successBackdrop}>
+          <View style={styles.successCard}>
+            <ThemedText type="title">✅</ThemedText>
+            <ThemedText style={styles.successText}>{successMessage}</ThemedText>
+          </View>
+        </View>
+      </Modal>
       <ThemedText type="title">Login</ThemedText>
       <TextInput
         style={styles.input}
@@ -186,5 +205,26 @@ const styles = StyleSheet.create({
   link: {
     marginTop: 20,
     alignItems: 'center',
+  },
+  successBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successCard: {
+    backgroundColor: '#0f1720',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#253044',
+    minWidth: 220,
+  },
+  successText: {
+    marginTop: 8,
+    color: '#dff6e6',
+    fontWeight: '700',
+    fontSize: 16,
   },
 });

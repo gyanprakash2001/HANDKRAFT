@@ -414,7 +414,14 @@ export default function ProfileScreen() {
         Promise.allSettled([getUserOrderHistory(), getUserAddresses()])
           .then(([ordersResult, addressesResult]) => {
             if (ordersResult.status === 'fulfilled') {
-              setOrders(ordersResult.value);
+              try {
+                // Only show completed (paid) orders in buyer order list
+                const allOrders = ordersResult.value || [];
+                const completed = allOrders.filter((o: any) => String(o.paymentStatus || '').toLowerCase() === 'completed');
+                setOrders(completed);
+              } catch {
+                setOrders(ordersResult.value);
+              }
             }
             if (addressesResult.status === 'fulfilled') {
               setAddresses(addressesResult.value);
@@ -766,7 +773,12 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.profileInfo}>
             <ThemedText style={styles.nameText}>{dashboard?.user.name || 'User'}</ThemedText>
-            <ThemedText style={styles.subtleText}>{dashboard?.user.email || ''}</ThemedText>
+            <View style={styles.emailCsrRow}>
+              <ThemedText style={styles.subtleText}>{dashboard?.user.email || ''}</ThemedText>
+              <Pressable style={styles.csrInlineBtn} onPress={() => router.push('/csr')} accessibilityLabel="CSR">
+                <ThemedText style={styles.csrInlineText}>🌿</ThemedText>
+              </Pressable>
+            </View>
             <ThemedText style={styles.subtleText}>Seller account</ThemedText>
           </View>
         </View>
@@ -804,14 +816,7 @@ export default function ProfileScreen() {
               <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Wallet</ThemedText>
             </View>
           </Pressable>
-          <Pressable
-            style={[styles.profileTabButton, styles.profileTabButtonActive]}
-            onPress={() => router.push('/csr')}>
-            <View style={styles.profileTabTitleRow}>
-              <Ionicons name="leaf-outline" size={16} color="#88e6a2" />
-              <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>CSR</ThemedText>
-            </View>
-          </Pressable>
+          {/* CSR moved inline next to email */}
           {dashboard?.user?.isAdmin ? (
             <Pressable
               style={[styles.profileTabButton, styles.profileTabButtonActive]}
@@ -1284,7 +1289,12 @@ export default function ProfileScreen() {
           </View>
           <View style={[styles.profileInfo, styles.buyerProfileInfo]}>
             <ThemedText style={[styles.nameText, styles.buyerNameText]}>{dashboard?.user.name || 'User'}</ThemedText>
-            <ThemedText style={styles.buyerEmailText}>{dashboard?.user.email || ''}</ThemedText>
+            <View style={styles.emailCsrRowBuyer}>
+              <ThemedText style={styles.buyerEmailText}>{dashboard?.user.email || ''}</ThemedText>
+              <Pressable style={styles.csrInlineBtnBuyer} onPress={() => router.push('/csr')} accessibilityLabel="CSR">
+                <ThemedText style={styles.csrInlineText}>🌿</ThemedText>
+              </Pressable>
+            </View>
             <ThemedText style={styles.subtleText}>Buyer account</ThemedText>
           </View>
         </View>
@@ -1325,14 +1335,7 @@ export default function ProfileScreen() {
               <ThemedText style={[styles.tabText, buyerTab === 'account' && styles.tabTextActive]}>Account</ThemedText>
             </View>
           </Pressable>
-          <Pressable
-            style={styles.tab}
-            onPress={() => router.push('/csr')}>
-            <View style={styles.tabInner}>
-              <Ionicons name="leaf-outline" size={13} color="#8ea3bd" />
-              <ThemedText style={styles.tabText}>CSR</ThemedText>
-            </View>
-          </Pressable>
+          {/* CSR moved inline next to email */}
         </View>
       )}
 
@@ -1713,6 +1716,33 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     marginTop: 0,
+  },
+  emailCsrRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  emailCsrRowBuyer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  csrInlineBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  csrInlineBtnBuyer: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  csrInlineText: {
+    fontSize: 16,
   },
   buyerProfileInfo: {
     gap: 1,
