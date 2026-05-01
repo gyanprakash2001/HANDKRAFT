@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Platform, Modal, ActivityIndicator } from 'react-native';
+import { StyleSheet, TextInput, Button, View, Alert, Platform, Modal, Animated } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -162,17 +161,14 @@ export default function LoginScreen() {
         statusBarTranslucent
         onRequestClose={() => setSuccessVisible(false)}>
         <View style={styles.successBackdrop}>
-          <LinearGradient colors={['#0f1824', '#122739']} style={styles.successCard}>
+          <View style={styles.successCard}>
             <View style={styles.successIconWrap}>
-              <Ionicons name="checkmark-circle" size={30} color="#9df0a2" />
+              <Ionicons name="checkmark-circle" size={56} color="#9df0a2" />
             </View>
-            <ThemedText style={styles.successTitle}>Welcome back</ThemedText>
+            <ThemedText style={styles.successTitle}>Success</ThemedText>
             <ThemedText style={styles.successText}>{successMessage}</ThemedText>
-            <View style={styles.successFooter}>
-              <ActivityIndicator size="small" color="#9df0a2" />
-              <ThemedText style={styles.successSubText}>Taking you to the feed…</ThemedText>
-            </View>
-          </LinearGradient>
+            <View style={styles.successDot} />
+          </View>
         </View>
       </Modal>
       <ThemedText type="title">Login</ThemedText>
@@ -233,55 +229,55 @@ const styles = StyleSheet.create({
   },
   successBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(3,8,15,0.58)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   successCard: {
-    padding: 20,
-    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+    borderRadius: 16,
     alignItems: 'center',
+    backgroundColor: '#111a27',
     borderWidth: 1,
-    borderColor: '#24364a',
-    minWidth: 250,
-    maxWidth: '86%',
+    borderColor: 'rgba(157, 240, 162, 0.15)',
+    minWidth: 280,
+    maxWidth: '82%',
     shadowColor: '#000',
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 10,
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
   },
   successIconWrap: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(157,240,162,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(157,240,162,0.28)',
+    backgroundColor: 'rgba(157, 240, 162, 0.08)',
+    borderWidth: 0,
   },
   successTitle: {
-    marginTop: 12,
-    color: '#eef6ff',
-    fontWeight: '800',
-    fontSize: 18,
+    marginTop: 16,
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 20,
+    letterSpacing: 0.3,
   },
   successText: {
-    marginTop: 6,
-    color: '#c5d8eb',
-    fontWeight: '600',
+    marginTop: 8,
+    color: '#b8c9dd',
+    fontWeight: '500',
     fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
-  successFooter: {
-    marginTop: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  successSubText: {
-    color: '#9fb2c8',
-    fontSize: 12,
-    fontWeight: '600',
+  successDot: {
+    marginTop: 14,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#9df0a2',
   },
 });

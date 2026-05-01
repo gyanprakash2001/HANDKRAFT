@@ -626,7 +626,7 @@ router.get('/me/listed-items', auth, async (req, res) => {
       isActive: true,
       $or: [{ seller: user._id }, { sellerName: user.name }],
     })
-      .select('_id title description price images customizable isCustomizable monthlySold createdAt')
+      .select('_id title description price realPrice discountedPrice stock images customizable isCustomizable monthlySold createdAt category')
       .sort({ createdAt: -1 })
       .lean();
 
