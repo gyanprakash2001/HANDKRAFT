@@ -18,9 +18,14 @@ const app = express();
 app.set('trust proxy', 1);
 const corsOptions = env.cors?.allowAnyOrigin
   ? {
-      origin: true,
+      origin(origin, callback) {
+        // Allow any origin when allowAnyOrigin is true
+        callback(null, true);
+      },
       credentials: true,
       optionsSuccessStatus: 204,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
     }
   : {
       origin(origin, callback) {
@@ -36,6 +41,8 @@ const corsOptions = env.cors?.allowAnyOrigin
       },
       credentials: true,
       optionsSuccessStatus: 204,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
     };
 
 app.use(cors(corsOptions));
