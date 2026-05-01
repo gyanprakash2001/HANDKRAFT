@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Platform, Modal } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, TextInput, Button, View, Alert, Platform, Modal, ActivityIndicator } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -22,6 +24,7 @@ export default function LoginScreen() {
 
   const [successVisible, setSuccessVisible] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
@@ -55,10 +58,11 @@ export default function LoginScreen() {
 
     setSuccessMessage('Logged in with Google');
     setSuccessVisible(true);
-    setTimeout(() => {
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    successTimerRef.current = setTimeout(() => {
       setSuccessVisible(false);
       router.replace('/feed');
-    }, 900);
+    }, 1200);
   }, [router]);
 
   const handleSubmit = async () => {
@@ -67,14 +71,23 @@ export default function LoginScreen() {
       await saveToken(token);
       setSuccessMessage('Logged in');
       setSuccessVisible(true);
-      setTimeout(() => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => {
         setSuccessVisible(false);
         router.replace('/feed');
-      }, 900);
+      }, 1200);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Login failed');
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) {
+        clearTimeout(successTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (response?.type !== 'success') return;
@@ -142,12 +155,24 @@ export default function LoginScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Modal visible={successVisible} transparent animationType="fade">
+      <Modal
+        visible={successVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setSuccessVisible(false)}>
         <View style={styles.successBackdrop}>
-          <View style={styles.successCard}>
-            <ThemedText type="title">✅</ThemedText>
+          <LinearGradient colors={['#0f1824', '#122739']} style={styles.successCard}>
+            <View style={styles.successIconWrap}>
+              <Ionicons name="checkmark-circle" size={30} color="#9df0a2" />
+            </View>
+            <ThemedText style={styles.successTitle}>Welcome back</ThemedText>
             <ThemedText style={styles.successText}>{successMessage}</ThemedText>
-          </View>
+            <View style={styles.successFooter}>
+              <ActivityIndicator size="small" color="#9df0a2" />
+              <ThemedText style={styles.successSubText}>Taking you to the feed…</ThemedText>
+            </View>
+          </LinearGradient>
         </View>
       </Modal>
       <ThemedText type="title">Login</ThemedText>
@@ -208,23 +233,55 @@ const styles = StyleSheet.create({
   },
   successBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(3,8,15,0.58)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   successCard: {
-    backgroundColor: '#0f1720',
-    padding: 18,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#253044',
-    minWidth: 220,
+    borderColor: '#24364a',
+    minWidth: 250,
+    maxWidth: '86%',
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  successIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(157,240,162,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(157,240,162,0.28)',
+  },
+  successTitle: {
+    marginTop: 12,
+    color: '#eef6ff',
+    fontWeight: '800',
+    fontSize: 18,
   },
   successText: {
-    marginTop: 8,
-    color: '#dff6e6',
-    fontWeight: '700',
-    fontSize: 16,
+    marginTop: 6,
+    color: '#c5d8eb',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  successFooter: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  successSubText: {
+    color: '#9fb2c8',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

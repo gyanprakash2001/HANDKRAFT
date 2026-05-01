@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Vie
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -17,6 +18,7 @@ function formatMoney(value: number) {
 
 export default function CsrScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,8 +61,8 @@ export default function CsrScreen() {
   }, []);
 
   return (
-    <ThemedView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={[styles.header, { paddingTop: Math.max(12, insets.top + 6) }]}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={18} color="#e8f2ff" />
         </Pressable>
@@ -145,7 +147,7 @@ export default function CsrScreen() {
         mediaType={viewerType}
         onClose={() => setViewerVisible(false)}
       />
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -157,7 +159,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 12,
-    paddingTop: 10,
     paddingBottom: 8,
   },
   backBtn: {

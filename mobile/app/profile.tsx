@@ -776,7 +776,7 @@ export default function ProfileScreen() {
             <View style={styles.emailCsrRow}>
               <ThemedText style={styles.subtleText}>{dashboard?.user.email || ''}</ThemedText>
               <Pressable style={styles.csrInlineBtn} onPress={() => router.push('/csr')} accessibilityLabel="CSR">
-                <ThemedText style={styles.csrInlineText}>🌿</ThemedText>
+                <ThemedText style={styles.csrInlineText}>🌿 CSR</ThemedText>
               </Pressable>
             </View>
             <ThemedText style={styles.subtleText}>Seller account</ThemedText>
@@ -919,6 +919,18 @@ export default function ProfileScreen() {
     handleAddStock(stockPromptItem, parsed);
   };
 
+  const resolveSellerCardPricing = (item: ProductItem) => {
+    const realPrice = Math.max(0, Number(item.realPrice ?? item.price) || 0);
+    const discountedPrice = Number(item.discountedPrice);
+    const hasDiscount = Number.isFinite(discountedPrice) && discountedPrice >= 0 && realPrice > 0 && discountedPrice < realPrice;
+
+    return {
+      realPrice,
+      discountedPrice: hasDiscount ? discountedPrice : null,
+      effectivePrice: hasDiscount ? discountedPrice : realPrice,
+    };
+  };
+
   const renderProductCard = (item: ProductItem, sellerModeCard = false) => (
     <Pressable
       style={sellerModeCard ? styles.card : styles.buyerSavedCard}
@@ -935,7 +947,19 @@ export default function ProfileScreen() {
       />
       <View style={sellerModeCard ? styles.cardBody : styles.buyerSavedCardBody}>
         <ThemedText numberOfLines={2} style={sellerModeCard ? styles.cardTitle : styles.buyerSavedCardTitle}>{item.title}</ThemedText>
-        <ThemedText style={sellerModeCard ? styles.priceText : styles.buyerSavedCardPrice}>₹{Number(item.price || 0).toLocaleString('en-IN')}</ThemedText>
+        {sellerModeCard ? (() => {
+          const pricing = resolveSellerCardPricing(item);
+          return pricing.discountedPrice !== null ? (
+            <View style={styles.priceRow}>
+              <ThemedText style={styles.discountedPrice}>₹{Number(pricing.effectivePrice).toLocaleString('en-IN')}</ThemedText>
+              <ThemedText style={styles.originalPrice}>₹{Number(pricing.realPrice).toLocaleString('en-IN')}</ThemedText>
+            </View>
+          ) : (
+            <ThemedText style={styles.priceText}>₹{Number(pricing.effectivePrice).toLocaleString('en-IN')}</ThemedText>
+          );
+        })() : (
+          <ThemedText style={styles.buyerSavedCardPrice}>₹{Number(item.price || 0).toLocaleString('en-IN')}</ThemedText>
+        )}
         <ThemedText style={sellerModeCard ? styles.subtleText : styles.buyerSavedCardMeta}>
           {sellerModeCard
             ? item.category
@@ -1292,7 +1316,7 @@ export default function ProfileScreen() {
             <View style={styles.emailCsrRowBuyer}>
               <ThemedText style={styles.buyerEmailText}>{dashboard?.user.email || ''}</ThemedText>
               <Pressable style={styles.csrInlineBtnBuyer} onPress={() => router.push('/csr')} accessibilityLabel="CSR">
-                <ThemedText style={styles.csrInlineText}>🌿</ThemedText>
+                <ThemedText style={styles.csrInlineText}>🌿 CSR</ThemedText>
               </Pressable>
             </View>
             <ThemedText style={styles.subtleText}>Buyer account</ThemedText>
@@ -1730,19 +1754,29 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   csrInlineBtn: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#2c435c',
+    backgroundColor: '#101a27',
   },
   csrInlineBtnBuyer: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#2c435c',
+    backgroundColor: '#101a27',
   },
   csrInlineText: {
-    fontSize: 16,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#d8f9df',
   },
   buyerProfileInfo: {
     gap: 1,
@@ -2952,6 +2986,23 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontWeight: '700',
     fontSize: 15,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  discountedPrice: {
+    color: '#9df0a2',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  originalPrice: {
+    color: '#8f9bad',
+    fontSize: 11,
+    fontWeight: '600',
+    textDecorationLine: 'line-through',
   },
   tabBar: {
     position: 'absolute',
