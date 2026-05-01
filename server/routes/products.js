@@ -12,7 +12,8 @@ const Order = require('../models/Order');
 const auth = require('../middleware/auth');
 
 const PRODUCT_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'products');
-const DATA_URI_IMAGE_REGEX = /^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i;
+// Accept broader image data-URI formats (allow additional params like charset)
+const DATA_URI_IMAGE_REGEX = /^data:(image\/[a-zA-Z0-9+.-]+)(?:;[^,]*)?;base64,(.+)$/i;
 const MAX_REVIEW_MEDIA_PER_REVIEW = 10;
 
 const ALLOWED_PRODUCT_CATEGORIES = [
@@ -107,8 +108,15 @@ function parseImageDataUri(value) {
   const match = trimmed.match(DATA_URI_IMAGE_REGEX);
   if (!match || !match[2]) return null;
 
-  const format = String(match[1] || 'jpeg').toLowerCase();
-  const extension = format === 'jpg' ? 'jpeg' : format;
+  // match[1] contains full mime like 'image/jpeg' or 'image/png'
+  const mime = String(match[1] || 'image/jpeg').toLowerCase();
+  // Derive extension from mime subtype, handle things like 'image/jpeg' -> 'jpg'
+  let subtype = mime.split('/')[1] || 'jpeg';
+  // strip any +suffix (e.g. 'svg+xml')
+  subtype = subtype.split('+')[0];
+  let extension = subtype;
+  if (extension === 'jpeg') extension = 'jpg';
+
   let buffer;
   try {
     buffer = Buffer.from(match[2], 'base64');
@@ -116,7 +124,7 @@ function parseImageDataUri(value) {
     return null;
   }
   if (!buffer || !buffer.length) return null;
-  return { extension, buffer };
+  return { extension, buffer, mime };
 }
 
 async function persistImageDataUri(req, dataUri) {
