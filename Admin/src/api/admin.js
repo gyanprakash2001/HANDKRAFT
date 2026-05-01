@@ -18,14 +18,23 @@ export async function fetchAdminOverview() {
 }
 
 export async function fetchSystemHealth() {
-  const [healthRes, readinessRes] = await Promise.all([
+  const [healthRes, readinessRes] = await Promise.allSettled([
     api.get('/admin/system/health'),
     api.get('/debug/integrations/public-readiness'),
   ]);
 
+  if (healthRes.status !== 'fulfilled') {
+    throw healthRes.reason;
+  }
+
   return {
-    health: healthRes.data,
-    readiness: readinessRes.data,
+    health: healthRes.value.data,
+    readiness: readinessRes.status === 'fulfilled'
+      ? readinessRes.value.data
+      : {
+          ok: false,
+          message: readinessRes.reason?.response?.data?.message || readinessRes.reason?.message || 'Readiness check unavailable',
+        },
   };
 }
 

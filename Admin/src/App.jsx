@@ -270,12 +270,26 @@ function DashboardPage({ showToast }) {
     setLoading(true);
     setError('');
     try {
-      const [overviewRes, systemRes] = await Promise.all([
+      const [overviewRes, systemRes] = await Promise.allSettled([
         fetchAdminOverview(),
         fetchSystemHealth(),
       ]);
-      setOverview(overviewRes);
-      setSystemData(systemRes);
+
+      if (overviewRes.status === 'fulfilled') {
+        setOverview(overviewRes.value);
+      } else {
+        throw overviewRes.reason;
+      }
+
+      if (systemRes.status === 'fulfilled') {
+        setSystemData(systemRes.value);
+      } else {
+        setSystemData({
+          health: { ok: false, message: systemRes.reason?.message || 'System health unavailable' },
+          readiness: { ok: false, message: systemRes.reason?.message || 'Readiness check unavailable' },
+        });
+        showToast('System readiness check is currently unavailable', 'warning');
+      }
     } catch (err) {
       const message = safeError(err, 'Failed to load dashboard');
       setError(message);

@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { deleteProduct, getSellerListedItems, ProductItem } from '@/utils/api';
+import { normalizeProduct } from '@/utils/product';
 
 function formatPrice(value: number) {
   return `₹${Number(value || 0).toLocaleString('en-IN')}`;
@@ -44,7 +45,7 @@ export default function SellerPostsScreen() {
     try {
       setError(null);
       const items = await getSellerListedItems();
-      setPosts(items || []);
+      setPosts((items || []).map((item) => normalizeProduct(item)));
     } catch (err: any) {
       setError(err?.message || 'Failed to load seller posts');
     } finally {

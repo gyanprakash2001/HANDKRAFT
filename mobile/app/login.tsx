@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Platform, Modal, Animated } from 'react-native';
+import { StyleSheet, TextInput, Button, View, Alert, Modal, Animated } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,7 +9,6 @@ import { ThemedText } from '@/components/themed-text';
 import { loginUser, signInWithGoogle } from '@/utils/api';
 import { saveToken } from '@/utils/auth';
 import currentUser from '@/utils/currentUser';
-import { getNativeGoogleErrorMessage, signInWithGoogleNative } from '@/utils/google-native-auth';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 
@@ -19,7 +18,6 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const router = useRouter();
-  const isAndroid = Platform.OS === 'android';
 
   const [successVisible, setSuccessVisible] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -27,6 +25,7 @@ export default function LoginScreen() {
 
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
+  const useNativeGoogleAuth = String(process.env.EXPO_PUBLIC_GOOGLE_NATIVE_AUTH || '').toLowerCase() === 'true';
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
@@ -114,19 +113,6 @@ export default function LoginScreen() {
       return;
     }
 
-    if (isAndroid && !useProxyForExpo) {
-      try {
-        console.log('Trying native Google sign-in on Android app build');
-        const { idToken, accessToken } = await signInWithGoogleNative();
-        await completeGoogleAuth(idToken, accessToken);
-        return;
-      } catch (err) {
-        console.warn('Native Google sign-in failed', err);
-        Alert.alert('Google Sign-in Error', getNativeGoogleErrorMessage(err));
-        return;
-      }
-    }
-
     // Debug: log OAuth request parameters so Metro shows them when sign-in is initiated
     try {
       console.log('Google Sign-in Request Initiating', {
@@ -136,13 +122,28 @@ export default function LoginScreen() {
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
         redirectUri: request.redirectUri,
         useProxyForExpo,
+        useNativeGoogleAuth,
         appOwnership,
         requestExists: Boolean(request),
       });
 
-      // Start the appropriate flow: use Expo proxy only when running in Expo Go.
-      console.log(`Starting Google sign-in (useProxy=${useProxyForExpo})`);
+      // Start Expo proxy only in Expo Go; otherwise use the browser/web flow by default.
+      console.log(`Starting Google sign-in (useProxy=${useProxyForExpo}, useNative=${useNativeGoogleAuth})`);
       console.log('Auth request object:', request);
+      if (useNativeGoogleAuth) {
+        const { signInWithGoogleNative, getNativeGoogleErrorMessage } = await import('@/utils/google-native-auth');
+        try {
+          console.log('Trying native Google sign-in on Android app build');
+          const { idToken, accessToken } = await signInWithGoogleNative();
+          await completeGoogleAuth(idToken, accessToken);
+          return;
+        } catch (err) {
+          console.warn('Native Google sign-in failed', err);
+          Alert.alert('Google Sign-in Error', getNativeGoogleErrorMessage(err));
+          return;
+        }
+      }
+
       await promptAsync({ useProxy: useProxyForExpo });
     } catch (firstError) {
       console.warn('Google AuthSession sign-in failed', firstError);

@@ -55,6 +55,8 @@ npm run start:dev-client
 
 - If you only want to test in Expo Go (not dev-client), you can use the Expo/web client flow with `EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID` and `useProxy: true`, but Expo Go cannot test native SDKs (like Razorpay).
 
+- Android release builds now use the browser/web Google sign-in flow by default. Native Android Google sign-in is optional and only runs when `EXPO_PUBLIC_GOOGLE_NATIVE_AUTH=true`, which keeps APK logins from breaking on SHA-1 or signing mismatches.
+
 - To retrieve phone numbers during sign-up, enable the Google People API in your Cloud project and add the scope `https://www.googleapis.com/auth/user.phonenumbers.read` to the OAuth consent screen. The mobile client requests this scope and will send the access token to the backend so the server can fetch the user's phone number (if permitted).
 
 6) If you want me to create the client for you

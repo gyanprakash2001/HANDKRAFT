@@ -59,6 +59,12 @@ jobs:
           fi
 
           echo "VITE_API_BASE_URL=${admin_api_base_url}" >> "$GITHUB_ENV"
+          mkdir -p Admin/public
+          cat > Admin/public/runtime-config.js <<EOF
+          window.HANDKRAFT_ADMIN_CONFIG = {
+            apiBaseUrl: "${admin_api_base_url}"
+          };
+          EOF
 
       - name: Install Admin dependencies
         run: npm ci --prefix Admin

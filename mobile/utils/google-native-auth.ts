@@ -32,14 +32,27 @@ function getWebClientId() {
   return process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
 }
 
+function getAndroidClientId() {
+  return process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
+}
+
+function getNativeGoogleSetupHelp() {
+  return 'Google Sign-In is not configured for this Android build. Verify the APK signing SHA-1, the com.handkraft Android OAuth client, and EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID / EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID in the build environment, then rebuild and reinstall the APK.';
+}
+
 function configureGoogleSignin(mode: ConfigureMode) {
   if (configuredMode === mode) return;
 
   const { GoogleSignin } = getGoogleSigninModule();
 
   const webClientId = getWebClientId();
+  const androidClientId = getAndroidClientId();
   if (mode === 'withWebClient' && !webClientId) {
     throw new Error('Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in mobile/.env');
+  }
+
+  if (!webClientId && !androidClientId) {
+    throw new Error(getNativeGoogleSetupHelp());
   }
 
   if (mode === 'withWebClient') {
@@ -73,7 +86,7 @@ function getErrorCode(error: unknown) {
 
 export function getNativeGoogleErrorMessage(error: unknown) {
   const developerErrorHelp =
-    'Google Sign-In developer configuration mismatch. Verify BOTH in Google Cloud: (1) Android OAuth client uses package com.handkraft and the SHA-1 from your currently installed app signing key (run mobile/android gradlew signingReport); (2) EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID is a Web client ID from the same Google project. Then uninstall/reinstall the app and try again.';
+    'Google Sign-In developer configuration mismatch. Verify BOTH in Google Cloud: (1) Android OAuth client uses package com.handkraft and the SHA-1 from the signing key used to build this APK (run mobile/android gradlew signingReport or rebuild with the same keystore); (2) EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID belong to the same Google project. Then uninstall/reinstall the app and try again.';
 
   const errorCode = getErrorCode(error);
   if (errorCode === 'DEVELOPER_ERROR' || errorCode === '10') {
@@ -103,6 +116,9 @@ export function getNativeGoogleErrorMessage(error: unknown) {
   }
 
   if (error instanceof Error && error.message) {
+    if (error.message.includes('not configured for this Android build')) {
+      return error.message;
+    }
     if (error.message.toUpperCase().includes('DEVELOPER_ERROR')) {
       return developerErrorHelp;
     }

@@ -13,6 +13,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import LocalAvatar from '@/components/LocalAvatar';
 import currentUser from '@/utils/currentUser';
+import { normalizeProduct } from '@/utils/product';
 import { useCartNotification } from '@/contexts/cart-notification-context';
 import { getProfile, getProducts, ProductItem, ProductMediaItem, getChatConversations, getProfileDashboard } from '@/utils/api';
 import { removeToken } from '@/utils/auth';
@@ -289,7 +290,7 @@ export default function FeedScreen() {
 
       const productsRes = await productsPromise;
 
-      setProducts(productsRes.items || []);
+      setProducts((productsRes.items || []).map((item) => normalizeProduct(item)));
       loadUnreadMessageCount();
     } catch (err: any) {
       const message = err?.message || 'Failed to load feed';

@@ -32,6 +32,8 @@ Replace `YOUR_EXPO_USERNAME` with your Expo account username.
 
 If you plan to accept tokens from native Android builds, also add `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` (the Android client ID) to the server `.env` so the backend verifier accepts that audience.
 
+By default the mobile app now uses the browser/web auth flow on Android release builds so Google login is not blocked by native SHA-1 mismatches. Native Android Google sign-in is opt-in only via `EXPO_PUBLIC_GOOGLE_NATIVE_AUTH=true`.
+
 ## 3) Configure mobile env
 
 1. Copy `mobile/.env.example` to `mobile/.env`.
