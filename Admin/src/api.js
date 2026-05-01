@@ -25,7 +25,7 @@ if (!API_BASE_URL) {
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
+  withCredentials: false,  // Using Bearer tokens, not cookies
 });
 
 export function getStoredToken() {
