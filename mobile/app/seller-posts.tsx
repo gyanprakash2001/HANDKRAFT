@@ -8,6 +8,22 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { deleteProduct, getSellerListedItems, ProductItem } from '@/utils/api';
 
+function formatPrice(value: number) {
+  return `₹${Number(value || 0).toLocaleString('en-IN')}`;
+}
+
+function resolvePostPricing(item: ProductItem) {
+  const realPrice = Number(item.realPrice ?? item.price ?? 0);
+  const discountedPrice = Number(item.discountedPrice);
+  const hasDiscount = Number.isFinite(discountedPrice) && discountedPrice >= 0 && discountedPrice < realPrice;
+
+  return {
+    realPrice,
+    discountedPrice: hasDiscount ? discountedPrice : null,
+    effectivePrice: hasDiscount ? discountedPrice : realPrice,
+  };
+}
+
 export default function SellerPostsScreen() {
   const router = useRouter();
   const { width: screenWidth } = useWindowDimensions();
@@ -95,6 +111,7 @@ export default function SellerPostsScreen() {
     const sold = Math.max(0, Number(item.monthlySold) || 0);
     const socialProof = sold > 0 ? `${sold} sold` : '';
     const isDeleting = deletingPostId === item._id;
+    const pricing = resolvePostPricing(item);
 
     return (
       <View key={item._id} style={[styles.postCard, { width: cardWidth }]}>
@@ -110,7 +127,14 @@ export default function SellerPostsScreen() {
             <ThemedText numberOfLines={1} style={[styles.postTitle, { flex: 1 }]}>{item.title}</ThemedText>
             {supportsCustomization ? <ThemedText style={styles.postBadge}>CUSTOM</ThemedText> : null}
           </View>
-          <ThemedText style={styles.postPrice}>₹{(item.price || 0).toLocaleString('en-IN')}</ThemedText>
+          {pricing.discountedPrice !== null ? (
+            <View style={styles.priceRow}>
+              <ThemedText style={styles.discountedPrice}>{formatPrice(pricing.effectivePrice)}</ThemedText>
+              <ThemedText style={styles.originalPrice}>{formatPrice(pricing.realPrice)}</ThemedText>
+            </View>
+          ) : (
+            <ThemedText style={styles.postPrice}>{formatPrice(pricing.effectivePrice)}</ThemedText>
+          )}
           {!!socialProof && (
             <ThemedText numberOfLines={1} style={styles.postMeta}>{socialProof}</ThemedText>
           )}
@@ -324,6 +348,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 4,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  discountedPrice: {
+    color: '#9df0a2',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  originalPrice: {
+    color: '#8b9bb1',
+    fontSize: 12,
+    fontWeight: '600',
+    textDecorationLine: 'line-through',
+    textDecorationStyle: 'solid',
   },
   postMeta: {
     color: '#a9b5c4',

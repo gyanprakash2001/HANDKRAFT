@@ -804,6 +804,14 @@ export default function ProfileScreen() {
               <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>Wallet</ThemedText>
             </View>
           </Pressable>
+          <Pressable
+            style={[styles.profileTabButton, styles.profileTabButtonActive]}
+            onPress={() => router.push('/csr')}>
+            <View style={styles.profileTabTitleRow}>
+              <Ionicons name="leaf-outline" size={16} color="#88e6a2" />
+              <ThemedText style={[styles.profileTabText, styles.profileTabTextActive]}>CSR</ThemedText>
+            </View>
+          </Pressable>
           {dashboard?.user?.isAdmin ? (
             <Pressable
               style={[styles.profileTabButton, styles.profileTabButtonActive]}
@@ -1277,9 +1285,7 @@ export default function ProfileScreen() {
           <View style={[styles.profileInfo, styles.buyerProfileInfo]}>
             <ThemedText style={[styles.nameText, styles.buyerNameText]}>{dashboard?.user.name || 'User'}</ThemedText>
             <ThemedText style={styles.buyerEmailText}>{dashboard?.user.email || ''}</ThemedText>
-            <View style={styles.buyerAccountPill}>
-              <ThemedText style={styles.buyerAccountPillText}>Buyer account</ThemedText>
-            </View>
+            <ThemedText style={styles.subtleText}>Buyer account</ThemedText>
           </View>
         </View>
       )}
@@ -1317,6 +1323,14 @@ export default function ProfileScreen() {
             <View style={styles.tabInner}>
               <Ionicons name="person-outline" size={13} color={buyerTab === 'account' ? '#e9f4ff' : '#8ea3bd'} />
               <ThemedText style={[styles.tabText, buyerTab === 'account' && styles.tabTextActive]}>Account</ThemedText>
+            </View>
+          </Pressable>
+          <Pressable
+            style={styles.tab}
+            onPress={() => router.push('/csr')}>
+            <View style={styles.tabInner}>
+              <Ionicons name="leaf-outline" size={13} color="#8ea3bd" />
+              <ThemedText style={styles.tabText}>CSR</ThemedText>
             </View>
           </Pressable>
         </View>
@@ -1716,20 +1730,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9eb2ca',
     marginBottom: 7,
-  },
-  buyerAccountPill: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#30455e',
-    backgroundColor: '#152536',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-  },
-  buyerAccountPillText: {
-    color: '#dbe9f9',
-    fontSize: 10,
-    fontWeight: '700',
   },
   profileTabs: {
     flexDirection: 'row',

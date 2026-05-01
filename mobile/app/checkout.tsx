@@ -243,6 +243,7 @@ export default function CheckoutScreen() {
     : 0;
 
   const displaySubtotal = Number(shippingEstimate?.subtotal ?? subtotal);
+  const csrContributionPerPaidOrder = 1;
   const shippingCost = Number(hasLiveNimbusQuote ? selectedShippingCost : 0);
   const tax = Number(shippingEstimate?.tax ?? 0);
   const totalAmount = Number(displaySubtotal + shippingCost + tax);
@@ -895,6 +896,11 @@ export default function CheckoutScreen() {
                     <ThemedText>Tax (5%)</ThemedText>
                     <ThemedText>₹{tax.toFixed(2)}</ThemedText>
                   </View>
+                <View style={styles.csrInfoRow}>
+                  <ThemedText style={styles.csrInfoText}>
+                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per paid order.
+                  </ThemedText>
+                </View>
                   <View style={[styles.costRow, styles.costRowTotal]}>
                     <ThemedText style={styles.totalLabel}>Total</ThemedText>
                     <ThemedText style={styles.totalLabel}>₹{totalAmount.toFixed(2)}</ThemedText>
@@ -1048,6 +1054,11 @@ export default function CheckoutScreen() {
                 <View style={styles.costRow}>
                   <ThemedText style={styles.summaryLineLabel}>Tax</ThemedText>
                   <ThemedText style={styles.summaryLineValue}>₹{tax.toFixed(2)}</ThemedText>
+                </View>
+                <View style={styles.csrInfoRow}>
+                  <ThemedText style={styles.csrInfoText}>
+                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per paid order.
+                  </ThemedText>
                 </View>
               </View>
 
@@ -1368,6 +1379,22 @@ const styles = StyleSheet.create({
     color: '#9eb0c8',
     fontSize: 11,
     lineHeight: 16,
+  },
+  csrInfoRow: {
+    marginTop: 6,
+    marginBottom: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#2a3d53',
+    backgroundColor: '#102132',
+  },
+  csrInfoText: {
+    color: '#bee4ff',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '600',
   },
   quoteListWrap: {
     marginTop: 12,

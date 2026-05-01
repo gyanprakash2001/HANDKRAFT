@@ -1203,6 +1203,45 @@ export interface ProcessOrderPaymentPayload {
   razorpaySignature?: string;
 }
 
+export interface CsrSummary {
+  contributionPerOrder: number;
+  milestoneAmount: number;
+  totalPaidOrdersCounted: number;
+  totalContributionAmount: number;
+  completedMilestones: number;
+  currentMilestoneProgressAmount: number;
+  remainingAmountToNextMilestone: number;
+  nextMilestoneNumber: number;
+  progressPercent: number;
+  lastContributionAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface CsrActivityMedia {
+  type: 'image' | 'video';
+  url: string;
+  thumbnailUrl: string;
+  caption: string;
+}
+
+export interface CsrActivity {
+  id: string;
+  title: string;
+  description: string;
+  milestoneNumber: number;
+  milestoneAmount: number;
+  targetAmount: number;
+  fundedAmount: number;
+  ordersCounted: number;
+  activityDate: string | null;
+  location: string;
+  media: CsrActivityMedia[];
+  status: 'draft' | 'published';
+  publishedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
   const res = await fetchWithAuth('/orders', {
     method: 'POST',
@@ -1266,6 +1305,28 @@ export async function processOrderPayment(
   }
 
   return res.json();
+}
+
+export async function getCsrSummary(): Promise<CsrSummary> {
+  const res = await fetchWithAuth('/csr/summary');
+  if (!res.ok) {
+    const parsed = await parseApiErrorResponse(res, 'Failed to fetch CSR summary');
+    throw toApiError(parsed);
+  }
+
+  const data = await res.json();
+  return data.summary;
+}
+
+export async function getCsrActivities(): Promise<CsrActivity[]> {
+  const res = await fetchWithAuth('/csr/activities');
+  if (!res.ok) {
+    const parsed = await parseApiErrorResponse(res, 'Failed to fetch CSR activities');
+    throw toApiError(parsed);
+  }
+
+  const data = await res.json();
+  return Array.isArray(data.activities) ? data.activities : [];
 }
 
 export async function getSellerOrders(): Promise<{ orders: SellerOrder[]; newOrdersCount: number }> {

@@ -1,5 +1,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const admin = require('../middleware/admin');
@@ -11,6 +14,8 @@ const Review = require('../models/Review');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
+const CsrSummary = require('../models/CsrSummary');
+const CsrActivity = require('../models/CsrActivity');
 const { env } = require('../config/env');
 const {
   processDuePayouts,
@@ -58,6 +63,147 @@ function safeText(value, maxLength = 500) {
 
 function escapeRegex(input) {
   return String(input || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const CSR_SUMMARY_KEY = 'global';
+const CSR_CONTRIBUTION_PER_ORDER = 1;
+const CSR_MILESTONE_AMOUNT = 20000;
+const CSR_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'csr');
+const DATA_URI_MEDIA_REGEX = /^data:(image\/[a-zA-Z0-9+.-]+|video\/[a-zA-Z0-9+.-]+)(?:;[^,]*)?;base64,(.+)$/i;
+
+function getPublicBaseUrl(req) {
+  const explicitBaseUrl = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (explicitBaseUrl) {
+    return explicitBaseUrl;
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol || 'http';
+  const host = forwardedHost || req.get('host');
+  return `${protocol}://${host}`.replace(/\/+$/, '');
+}
+
+async function getOrCreateCsrSummary() {
+  const existing = await CsrSummary.findOne({ key: CSR_SUMMARY_KEY });
+  if (existing) return existing;
+
+  return CsrSummary.create({
+    key: CSR_SUMMARY_KEY,
+    contributionPerOrder: CSR_CONTRIBUTION_PER_ORDER,
+    milestoneAmount: CSR_MILESTONE_AMOUNT,
+    totalPaidOrdersCounted: 0,
+    totalContributionAmount: 0,
+    completedMilestones: 0,
+  });
+}
+
+function mapCsrSummary(summaryDoc) {
+  const contributionPerOrder = Math.max(0, Number(summaryDoc?.contributionPerOrder || CSR_CONTRIBUTION_PER_ORDER));
+  const milestoneAmount = Math.max(1, Number(summaryDoc?.milestoneAmount || CSR_MILESTONE_AMOUNT));
+  const totalContributionAmount = Math.max(0, Number(summaryDoc?.totalContributionAmount || 0));
+  const totalPaidOrdersCounted = Math.max(0, Number(summaryDoc?.totalPaidOrdersCounted || 0));
+  const completedMilestones = Math.max(0, Number(summaryDoc?.completedMilestones || Math.floor(totalContributionAmount / milestoneAmount)));
+  const currentMilestoneProgressAmount = totalContributionAmount % milestoneAmount;
+  const remainingAmountToNextMilestone = Math.max(0, milestoneAmount - currentMilestoneProgressAmount);
+  const progressPercent = Number(((currentMilestoneProgressAmount / milestoneAmount) * 100).toFixed(2));
+
+  return {
+    contributionPerOrder,
+    milestoneAmount,
+    totalPaidOrdersCounted,
+    totalContributionAmount,
+    completedMilestones,
+    currentMilestoneProgressAmount,
+    remainingAmountToNextMilestone,
+    nextMilestoneNumber: completedMilestones + 1,
+    progressPercent,
+    lastContributionAt: summaryDoc?.lastContributionAt || null,
+    updatedAt: summaryDoc?.updatedAt || null,
+  };
+}
+
+function mapCsrActivity(activityDoc) {
+  return {
+    id: String(activityDoc?._id || ''),
+    title: String(activityDoc?.title || ''),
+    description: String(activityDoc?.description || ''),
+    milestoneNumber: Number(activityDoc?.milestoneNumber || 0),
+    milestoneAmount: Number(activityDoc?.milestoneAmount || CSR_MILESTONE_AMOUNT),
+    targetAmount: Number(activityDoc?.targetAmount || CSR_MILESTONE_AMOUNT),
+    fundedAmount: Number(activityDoc?.fundedAmount || 0),
+    ordersCounted: Number(activityDoc?.ordersCounted || 0),
+    activityDate: activityDoc?.activityDate || null,
+    location: String(activityDoc?.location || ''),
+    media: Array.isArray(activityDoc?.media)
+      ? activityDoc.media.map((entry) => ({
+          type: entry?.type === 'video' ? 'video' : 'image',
+          url: String(entry?.url || ''),
+          thumbnailUrl: String(entry?.thumbnailUrl || ''),
+          caption: String(entry?.caption || ''),
+        }))
+      : [],
+    status: String(activityDoc?.status || 'draft'),
+    publishedAt: activityDoc?.publishedAt || null,
+    createdAt: activityDoc?.createdAt || null,
+    updatedAt: activityDoc?.updatedAt || null,
+  };
+}
+
+async function persistCsrMedia(req, mediaEntry = {}) {
+  const rawType = String(mediaEntry?.type || '').trim().toLowerCase();
+  const mediaType = rawType === 'video' ? 'video' : 'image';
+  const providedUrl = String(mediaEntry?.url || '').trim();
+  const caption = safeText(mediaEntry?.caption || '', 200);
+
+  if (providedUrl && /^https?:\/\//i.test(providedUrl)) {
+    return {
+      type: mediaType,
+      url: providedUrl,
+      thumbnailUrl: String(mediaEntry?.thumbnailUrl || '').trim(),
+      caption,
+    };
+  }
+
+  if (!providedUrl) {
+    return null;
+  }
+
+  const match = providedUrl.match(DATA_URI_MEDIA_REGEX);
+  if (!match) {
+    return null;
+  }
+
+  const mime = String(match[1] || '').toLowerCase();
+  const payload = String(match[2] || '');
+  const inferredType = mime.startsWith('video/') ? 'video' : 'image';
+  const effectiveType = mediaType || inferredType;
+
+  let buffer = null;
+  try {
+    buffer = Buffer.from(payload, 'base64');
+  } catch {
+    buffer = null;
+  }
+  if (!buffer || !buffer.length) {
+    return null;
+  }
+
+  await fs.promises.mkdir(CSR_UPLOAD_DIR, { recursive: true });
+  const subtype = mime.split('/')[1]?.split('+')[0] || (effectiveType === 'video' ? 'mp4' : 'jpg');
+  const ext = subtype === 'jpeg' ? 'jpg' : subtype;
+  const baseName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+  const fileName = `${baseName}.${ext}`;
+  const filePath = path.join(CSR_UPLOAD_DIR, fileName);
+  await fs.promises.writeFile(filePath, buffer);
+
+  const publicUrl = `${getPublicBaseUrl(req)}/uploads/csr/${fileName}`;
+  return {
+    type: effectiveType,
+    url: publicUrl,
+    thumbnailUrl: effectiveType === 'image' ? publicUrl : '',
+    caption,
+  };
 }
 
 function cleanUserDoc(user = {}) {
@@ -1721,6 +1867,203 @@ router.get('/audit-logs', auth, admin, async (req, res) => {
   } catch (err) {
     console.error('[ADMIN][AUDIT_LOGS] Error:', err?.message || err);
     return res.status(500).json({ message: 'Failed to fetch audit logs' });
+  }
+});
+
+// GET /api/admin/csr/summary
+router.get('/csr/summary', auth, admin, async (req, res) => {
+  try {
+    const summary = await getOrCreateCsrSummary();
+    return res.json({ summary: mapCsrSummary(summary) });
+  } catch (err) {
+    console.error('[ADMIN][CSR][SUMMARY] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch CSR summary' });
+  }
+});
+
+// GET /api/admin/csr/activities
+router.get('/csr/activities', auth, admin, async (req, res) => {
+  try {
+    const statusFilter = safeText(req.query.status || '', 20).toLowerCase();
+    const query = {};
+    if (statusFilter === 'draft' || statusFilter === 'published') {
+      query.status = statusFilter;
+    }
+
+    const activities = await CsrActivity.find(query)
+      .sort({ milestoneNumber: -1, createdAt: -1 })
+      .lean();
+
+    return res.json({ activities: activities.map(mapCsrActivity) });
+  } catch (err) {
+    console.error('[ADMIN][CSR][ACTIVITIES] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch CSR activities' });
+  }
+});
+
+// POST /api/admin/csr/activities
+router.post('/csr/activities', auth, admin, async (req, res) => {
+  try {
+    const summary = await getOrCreateCsrSummary();
+    const fallbackMilestone = Math.max(1, Number(summary.completedMilestones || 0) || 1);
+    const milestoneAmount = Math.max(1, Number(summary.milestoneAmount || CSR_MILESTONE_AMOUNT));
+
+    const title = safeText(req.body?.title || '', 160);
+    if (!title) {
+      return res.status(400).json({ message: 'title is required' });
+    }
+
+    const requestedMilestone = Math.max(1, Number(req.body?.milestoneNumber || fallbackMilestone));
+    const existing = await CsrActivity.findOne({ milestoneNumber: requestedMilestone }).lean();
+    if (existing) {
+      return res.status(409).json({ message: 'CSR activity for this milestone already exists' });
+    }
+
+    const rawMedia = Array.isArray(req.body?.media) ? req.body.media.slice(0, 20) : [];
+    const media = [];
+    for (const entry of rawMedia) {
+      const saved = await persistCsrMedia(req, entry || {});
+      if (saved && saved.url) {
+        media.push(saved);
+      }
+    }
+
+    const activity = await CsrActivity.create({
+      title,
+      description: safeText(req.body?.description || '', 2000),
+      milestoneNumber: requestedMilestone,
+      milestoneAmount,
+      targetAmount: Math.max(1, Number(req.body?.targetAmount || milestoneAmount)),
+      fundedAmount: Math.max(0, Number(req.body?.fundedAmount || milestoneAmount)),
+      ordersCounted: Math.max(0, Number(req.body?.ordersCounted || milestoneAmount)),
+      activityDate: req.body?.activityDate ? new Date(req.body.activityDate) : null,
+      location: safeText(req.body?.location || '', 160),
+      media,
+      status: req.body?.status === 'published' ? 'published' : 'draft',
+      publishedAt: req.body?.status === 'published' ? new Date() : null,
+      createdBy: req.user?._id || null,
+      updatedBy: req.user?._id || null,
+    });
+
+    await writeAuditLog(req, {
+      action: 'create_csr_activity',
+      targetType: 'csr_activity',
+      targetId: String(activity._id),
+      note: `Created CSR activity milestone #${requestedMilestone}`,
+      before: null,
+      after: activity.toObject(),
+      meta: { milestoneNumber: requestedMilestone },
+    });
+
+    return res.status(201).json({ activity: mapCsrActivity(activity) });
+  } catch (err) {
+    console.error('[ADMIN][CSR][CREATE] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to create CSR activity' });
+  }
+});
+
+// PATCH /api/admin/csr/activities/:id
+router.patch('/csr/activities/:id', auth, admin, async (req, res) => {
+  try {
+    const activityId = toObjectId(req.params.id);
+    if (!activityId) {
+      return res.status(400).json({ message: 'Invalid CSR activity id' });
+    }
+
+    const activity = await CsrActivity.findById(activityId);
+    if (!activity) {
+      return res.status(404).json({ message: 'CSR activity not found' });
+    }
+
+    const before = activity.toObject();
+    if (typeof req.body?.title === 'string') {
+      activity.title = safeText(req.body.title, 160);
+    }
+    if (typeof req.body?.description === 'string') {
+      activity.description = safeText(req.body.description, 2000);
+    }
+    if (typeof req.body?.location === 'string') {
+      activity.location = safeText(req.body.location, 160);
+    }
+    if (req.body?.activityDate !== undefined) {
+      activity.activityDate = req.body.activityDate ? new Date(req.body.activityDate) : null;
+    }
+    if (req.body?.targetAmount !== undefined) {
+      activity.targetAmount = Math.max(1, Number(req.body.targetAmount || CSR_MILESTONE_AMOUNT));
+    }
+    if (req.body?.fundedAmount !== undefined) {
+      activity.fundedAmount = Math.max(0, Number(req.body.fundedAmount || 0));
+    }
+    if (req.body?.ordersCounted !== undefined) {
+      activity.ordersCounted = Math.max(0, Number(req.body.ordersCounted || 0));
+    }
+
+    if (Array.isArray(req.body?.media)) {
+      const nextMedia = [];
+      const trimmed = req.body.media.slice(0, 20);
+      for (const entry of trimmed) {
+        const saved = await persistCsrMedia(req, entry || {});
+        if (saved && saved.url) {
+          nextMedia.push(saved);
+        }
+      }
+      activity.media = nextMedia;
+    }
+
+    activity.updatedBy = req.user?._id || null;
+    await activity.save();
+
+    await writeAuditLog(req, {
+      action: 'update_csr_activity',
+      targetType: 'csr_activity',
+      targetId: String(activity._id),
+      note: `Updated CSR activity milestone #${activity.milestoneNumber}`,
+      before,
+      after: activity.toObject(),
+      meta: null,
+    });
+
+    return res.json({ activity: mapCsrActivity(activity) });
+  } catch (err) {
+    console.error('[ADMIN][CSR][UPDATE] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to update CSR activity' });
+  }
+});
+
+// PATCH /api/admin/csr/activities/:id/publish
+router.patch('/csr/activities/:id/publish', auth, admin, async (req, res) => {
+  try {
+    const activityId = toObjectId(req.params.id);
+    if (!activityId) {
+      return res.status(400).json({ message: 'Invalid CSR activity id' });
+    }
+
+    const shouldPublish = toBoolean(req.body?.published, true);
+    const activity = await CsrActivity.findById(activityId);
+    if (!activity) {
+      return res.status(404).json({ message: 'CSR activity not found' });
+    }
+
+    const before = activity.toObject();
+    activity.status = shouldPublish ? 'published' : 'draft';
+    activity.publishedAt = shouldPublish ? new Date() : null;
+    activity.updatedBy = req.user?._id || null;
+    await activity.save();
+
+    await writeAuditLog(req, {
+      action: shouldPublish ? 'publish_csr_activity' : 'unpublish_csr_activity',
+      targetType: 'csr_activity',
+      targetId: String(activity._id),
+      note: `${shouldPublish ? 'Published' : 'Unpublished'} CSR activity milestone #${activity.milestoneNumber}`,
+      before,
+      after: activity.toObject(),
+      meta: null,
+    });
+
+    return res.json({ activity: mapCsrActivity(activity) });
+  } catch (err) {
+    console.error('[ADMIN][CSR][PUBLISH] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to update CSR publish status' });
   }
 });
 

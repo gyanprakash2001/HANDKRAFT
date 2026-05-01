@@ -22,6 +22,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ChatMessage, getChatMessages, sendChatMessage, uploadChatImage } from '@/utils/api';
 import MessageBubble from '@/components/MessageBubble';
 import MessageComposer from '@/components/MessageComposer';
+import MediaViewerModal from '@/components/MediaViewerModal';
 import TypingIndicator from '@/components/TypingIndicator';
 
 import currentUser from '@/utils/currentUser';
@@ -45,6 +46,9 @@ export default function MessageThreadScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [otherTyping] = useState(false);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerUri, setViewerUri] = useState('');
+  const [viewerType, setViewerType] = useState<'image' | 'video'>('image');
 
   const headerTitle = useMemo(() => {
     const label = String(sellerName || '').trim();
@@ -158,6 +162,13 @@ export default function MessageThreadScreen() {
     }
   };
 
+  const handleOpenMedia = useCallback((payload: { uri: string; type: 'image' | 'video' }) => {
+    if (!payload?.uri) return;
+    setViewerUri(payload.uri);
+    setViewerType(payload.type);
+    setViewerVisible(true);
+  }, []);
+
   return (
     <ThemedView style={styles.container}>
       <LinearGradient colors={['#111b2a', '#0a0a0a']} style={styles.headerGradient} />
@@ -196,7 +207,14 @@ export default function MessageThreadScreen() {
             renderItem={({ item, index }) => {
               const prev = messages[index - 1];
               const showAvatar = !item.isMine && (!prev || prev.senderId !== item.senderId || (new Date(item.createdAt).getTime() - new Date(prev.createdAt).getTime()) > 1000 * 60 * 5);
-              return <MessageBubble message={item} isOutgoing={Boolean(item.isMine)} showAvatar={showAvatar} />;
+              return (
+                <MessageBubble
+                  message={item}
+                  isOutgoing={Boolean(item.isMine)}
+                  showAvatar={showAvatar}
+                  onPressMedia={handleOpenMedia}
+                />
+              );
             }}
           />
         )}
@@ -219,6 +237,13 @@ export default function MessageThreadScreen() {
 
         <MessageComposer value={draft} onChangeText={setDraft} onSend={handleSend} sending={sending} onPickImage={handlePickImage} />
       </KeyboardAvoidingView>
+
+      <MediaViewerModal
+        visible={viewerVisible}
+        mediaUri={viewerUri}
+        mediaType={viewerType}
+        onClose={() => setViewerVisible(false)}
+      />
     </ThemedView>
   );
 }

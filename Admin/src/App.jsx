@@ -61,6 +61,7 @@ import './App.css';
 import { fetchProfile, loginAdmin, logoutAdmin } from './api/auth';
 import { getStoredToken } from './api';
 import {
+  createCsrActivity,
   claimPayouts,
   deleteConversation,
   deleteMessage,
@@ -70,6 +71,8 @@ import {
   deleteUser,
   fetchAdminOverview,
   fetchAuditLogs,
+  fetchCsrActivities,
+  fetchCsrSummary,
   fetchConversationMessages,
   fetchConversations,
   fetchOrderDetail,
@@ -80,6 +83,8 @@ import {
   fetchSystemHealth,
   fetchUsers,
   processDuePayouts,
+  setCsrActivityPublishState,
+  updateCsrActivity,
   updateOrder,
   updateOrderItem,
   updatePayout,
@@ -1478,6 +1483,230 @@ function AuditLogsPage({ showToast }) {
   );
 }
 
+function CsrPage({ showToast }) {
+  const [summary, setSummary] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editingActivity, setEditingActivity] = useState(null);
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    location: '',
+    activityDate: '',
+    milestoneNumber: '',
+    mediaFiles: [],
+  });
+
+  const resetForm = useCallback(() => {
+    setForm({
+      title: '',
+      description: '',
+      location: '',
+      activityDate: '',
+      milestoneNumber: '',
+      mediaFiles: [],
+    });
+    setEditingActivity(null);
+  }, []);
+
+  const fileToDataUri = useCallback((file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read selected file'));
+    reader.readAsDataURL(file);
+  }), []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [summaryRes, activitiesRes] = await Promise.all([
+        fetchCsrSummary(),
+        fetchCsrActivities(),
+      ]);
+      setSummary(summaryRes?.summary || null);
+      setActivities(activitiesRes?.activities || []);
+    } catch (err) {
+      showToast(safeError(err, 'Failed to load CSR dashboard'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async () => {
+    const title = String(form.title || '').trim();
+    if (!title) {
+      showToast('Title is required', 'warning');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const mediaPayload = await Promise.all((form.mediaFiles || []).slice(0, 12).map(async (file) => {
+        const dataUri = await fileToDataUri(file);
+        const mime = String(file?.type || '').toLowerCase();
+        return {
+          type: mime.startsWith('video/') ? 'video' : 'image',
+          url: dataUri,
+          caption: '',
+        };
+      }));
+
+      const payload = {
+        title,
+        description: String(form.description || '').trim(),
+        location: String(form.location || '').trim(),
+        activityDate: form.activityDate || undefined,
+        milestoneNumber: Number(form.milestoneNumber || 0) || undefined,
+        media: mediaPayload,
+      };
+
+      if (editingActivity?.id) {
+        await updateCsrActivity(editingActivity.id, payload);
+        showToast('CSR activity updated', 'success');
+      } else {
+        await createCsrActivity(payload);
+        showToast('CSR activity created', 'success');
+      }
+
+      resetForm();
+      await load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to save CSR activity'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const togglePublish = async (activity) => {
+    try {
+      await setCsrActivityPublishState(activity.id, activity.status !== 'published');
+      showToast(activity.status === 'published' ? 'Activity moved to draft' : 'Activity published', 'success');
+      await load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to update publish status'), 'error');
+    }
+  };
+
+  return (
+    <Box>
+      <PageHeader
+        title="CSR Activities"
+        subtitle="Publish social impact updates funded by ₹1 from each paid order"
+        actions={[
+          <Button key="refresh" startIcon={<RefreshIcon />} variant="outlined" onClick={load} disabled={loading}>Refresh</Button>,
+        ]}
+      />
+
+      <Grid container spacing={2} sx={{ mb: 2 }}>
+        <Grid item xs={12} md={4}>
+          <Card><CardContent><Typography color="text.secondary">CSR Collected</Typography><Typography variant="h4">₹{Number(summary?.totalContributionAmount || 0).toLocaleString('en-IN')}</Typography></CardContent></Card>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Card><CardContent><Typography color="text.secondary">Paid Orders Counted</Typography><Typography variant="h4">{Number(summary?.totalPaidOrdersCounted || 0).toLocaleString('en-IN')}</Typography></CardContent></Card>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Card><CardContent><Typography color="text.secondary">Completed Milestones</Typography><Typography variant="h4">{Number(summary?.completedMilestones || 0)}</Typography></CardContent></Card>
+        </Grid>
+      </Grid>
+
+      <Card sx={{ mb: 2 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1.5 }}>{editingActivity ? 'Edit CSR Activity' : 'Create CSR Activity'}</Typography>
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={6}>
+              <TextField label="Title" fullWidth value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField label="Milestone Number" fullWidth value={form.milestoneNumber} onChange={(e) => setForm((prev) => ({ ...prev, milestoneNumber: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField label="Activity Date" type="date" fullWidth InputLabelProps={{ shrink: true }} value={form.activityDate} onChange={(e) => setForm((prev) => ({ ...prev, activityDate: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField label="Description" fullWidth multiline minRows={3} value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField label="Location" fullWidth value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Button variant="outlined" component="label" fullWidth>
+                Select Images/Videos
+                <input hidden multiple type="file" accept="image/*,video/*" onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  setForm((prev) => ({ ...prev, mediaFiles: files }));
+                }} />
+              </Button>
+              {form.mediaFiles.length > 0 ? (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  {form.mediaFiles.length} file(s) selected
+                </Typography>
+              ) : null}
+            </Grid>
+          </Grid>
+
+          <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+            <Button variant="contained" onClick={handleSubmit} disabled={saving}>{saving ? 'Saving...' : (editingActivity ? 'Update Activity' : 'Create Activity')}</Button>
+            <Button variant="text" onClick={resetForm} disabled={saving}>Clear</Button>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <TableContainer component={Paper}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Milestone</TableCell>
+              <TableCell>Title</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Media</TableCell>
+              <TableCell>Updated</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              <TableRow><TableCell colSpan={6} align="center"><CircularProgress size={24} /></TableCell></TableRow>
+            ) : activities.length === 0 ? (
+              <TableRow><TableCell colSpan={6} align="center">No CSR activities created yet</TableCell></TableRow>
+            ) : activities.map((activity) => (
+              <TableRow key={activity.id} hover>
+                <TableCell>#{activity.milestoneNumber}</TableCell>
+                <TableCell>{activity.title}</TableCell>
+                <TableCell><Chip size="small" label={activity.status} color={activity.status === 'published' ? 'success' : 'default'} /></TableCell>
+                <TableCell>{Array.isArray(activity.media) ? activity.media.length : 0}</TableCell>
+                <TableCell>{formatDate(activity.updatedAt)}</TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={1} justifyContent="flex-end">
+                    <Button size="small" variant="outlined" onClick={() => {
+                      setEditingActivity(activity);
+                      setForm({
+                        title: activity.title || '',
+                        description: activity.description || '',
+                        location: activity.location || '',
+                        activityDate: activity.activityDate ? String(activity.activityDate).slice(0, 10) : '',
+                        milestoneNumber: String(activity.milestoneNumber || ''),
+                        mediaFiles: [],
+                      });
+                    }}>Edit</Button>
+                    <Button size="small" variant="contained" onClick={() => togglePublish(activity)}>
+                      {activity.status === 'published' ? 'Unpublish' : 'Publish'}
+                    </Button>
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+}
+
 function AdminLayout({ profile, onLogout, showToast }) {
   const location = useLocation();
 
@@ -1489,6 +1718,7 @@ function AdminLayout({ profile, onLogout, showToast }) {
     { label: 'Payouts', path: '/payouts' },
     { label: 'Reviews', path: '/reviews' },
     { label: 'Chats', path: '/chats' },
+    { label: 'CSR', path: '/csr' },
     { label: 'Audit Logs', path: '/audit' },
   ], []);
 
@@ -1543,6 +1773,7 @@ function AdminLayout({ profile, onLogout, showToast }) {
             <Route path="/payouts" element={<PayoutsPage showToast={showToast} />} />
             <Route path="/reviews" element={<ReviewsPage showToast={showToast} />} />
             <Route path="/chats" element={<ChatsPage showToast={showToast} />} />
+            <Route path="/csr" element={<CsrPage showToast={showToast} />} />
             <Route path="/audit" element={<AuditLogsPage showToast={showToast} />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

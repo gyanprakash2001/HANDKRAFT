@@ -7,6 +7,7 @@ const Razorpay = require('razorpay');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const User = require('../models/User');
+const CsrSummary = require('../models/CsrSummary');
 const { env } = require('../config/env');
 const {
   createShipment,
@@ -18,6 +19,43 @@ const {
   ensureOrderPayoutRecords,
   syncSellerPayoutAfterFulfillment,
 } = require('../services/payouts');
+
+const CSR_SUMMARY_KEY = 'global';
+const CSR_CONTRIBUTION_PER_ORDER = 1;
+const CSR_MILESTONE_AMOUNT = 20000;
+
+async function recordCsrContributionForPaidOrder() {
+  const summary = await CsrSummary.findOneAndUpdate(
+    { key: CSR_SUMMARY_KEY },
+    {
+      $setOnInsert: {
+        key: CSR_SUMMARY_KEY,
+        contributionPerOrder: CSR_CONTRIBUTION_PER_ORDER,
+        milestoneAmount: CSR_MILESTONE_AMOUNT,
+        totalPaidOrdersCounted: 0,
+        totalContributionAmount: 0,
+        completedMilestones: 0,
+      },
+      $inc: {
+        totalPaidOrdersCounted: 1,
+        totalContributionAmount: CSR_CONTRIBUTION_PER_ORDER,
+      },
+      $set: {
+        lastContributionAt: new Date(),
+        contributionPerOrder: CSR_CONTRIBUTION_PER_ORDER,
+        milestoneAmount: CSR_MILESTONE_AMOUNT,
+      },
+    },
+    { upsert: true, new: true }
+  );
+
+  const totalContributionAmount = Math.max(0, Number(summary?.totalContributionAmount || 0));
+  const completedMilestones = Math.floor(totalContributionAmount / CSR_MILESTONE_AMOUNT);
+  if (Number(summary?.completedMilestones || 0) !== completedMilestones) {
+    summary.completedMilestones = completedMilestones;
+    await summary.save();
+  }
+}
 
 // Helper: Calculate tax (assumed 5% for demo)
 function calculateTax(subtotal) {
@@ -1038,10 +1076,16 @@ function assertOrderOwnership(order, userId) {
 }
 
 async function applySuccessfulPaymentEffects(order, { transactionId, paymentMethod = 'card', paymentGateway = null } = {}) {
+  const shouldRecordCsrContribution = !order.csrContributionCredited;
   order.paymentStatus = 'completed';
   order.status = 'confirmed';
   order.transactionId = String(transactionId || '');
   order.paymentMethod = String(paymentMethod || 'card');
+  order.csrContributionAmount = CSR_CONTRIBUTION_PER_ORDER;
+  if (shouldRecordCsrContribution) {
+    order.csrContributionCredited = true;
+    order.csrCreditedAt = new Date();
+  }
 
   // Reveal draft orders to sellers once payment is successful
   if (order.isDraft) {
@@ -1069,6 +1113,14 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
   }
 
   await order.save();
+
+  if (shouldRecordCsrContribution) {
+    try {
+      await recordCsrContributionForPaidOrder();
+    } catch (csrErr) {
+      console.warn('[PAYMENT][CSR] Failed to update CSR contribution summary:', csrErr?.message || csrErr);
+    }
+  }
 
   try {
     await ensureOrderPayoutRecords(order);

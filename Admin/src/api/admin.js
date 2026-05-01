@@ -153,3 +153,28 @@ export async function fetchAuditLogs(filters = {}) {
   const res = await api.get('/admin/audit-logs', { params: toParams(filters) });
   return res.data;
 }
+
+export async function fetchCsrSummary() {
+  const res = await api.get('/admin/csr/summary');
+  return res.data;
+}
+
+export async function fetchCsrActivities(filters = {}) {
+  const res = await api.get('/admin/csr/activities', { params: toParams(filters) });
+  return res.data;
+}
+
+export async function createCsrActivity(payload) {
+  const res = await api.post('/admin/csr/activities', payload);
+  return res.data;
+}
+
+export async function updateCsrActivity(id, payload) {
+  const res = await api.patch(`/admin/csr/activities/${id}`, payload);
+  return res.data;
+}
+
+export async function setCsrActivityPublishState(id, published) {
+  const res = await api.patch(`/admin/csr/activities/${id}/publish`, { published });
+  return res.data;
+}
