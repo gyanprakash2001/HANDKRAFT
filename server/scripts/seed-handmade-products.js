@@ -4,7 +4,7 @@ const { env } = require('../config/env');
 const Product = require('../models/Product');
 
 async function run() {
-  await mongoose.connect(env.mongoUri, { useNewUrlParser: true, useUnifiedTopology: true });
+  await mongoose.connect(env.mongoUri);
   console.log('[SEED] Connected to MongoDB:', env.mongoUri);
 
   const items = [
