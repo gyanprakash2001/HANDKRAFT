@@ -190,8 +190,9 @@ async function run() {
     },
   ];
 
-  // Use picsum.photos seeded images with varying sizes to simulate aspect ratios
-  const seeds = ['ceramic', 'scarf', 'necklace', 'wood', 'macrame', 'candle', 'pouch', 'leather', 'vase', 'booties'];
+  // Use Unsplash source images with relevant handmade keywords to produce more realistic imagery.
+  // Each keyword targets the product type; sizes chosen to create varied aspect ratios like a Pinterest feed.
+  const keywords = ['handmade+mug', 'handwoven+scarf', 'beaded+necklace', 'wooden+cutting+board', 'macrame+wall+hanging', 'soy+candle', 'embroidered+pouch', 'leather+keychain', 'stoneware+vase', 'knitted+baby+booties'];
   const sizes = [800, 1000, 600, 1200, 700, 800, 900, 600, 1200, 800];
   const heights = [1000, 800, 800, 900, 1200, 800, 800, 700, 1600, 800];
 
@@ -199,11 +200,14 @@ async function run() {
     const item = items[i];
     const w = sizes[i] || 800;
     const h = heights[i] || 800;
-    const seed = seeds[i] || `handmade${i}`;
-    const imageUrl = `https://picsum.photos/seed/${encodeURIComponent(seed)}/${w}/${h}`;
-    const thumbUrl = `https://picsum.photos/seed/${encodeURIComponent(seed)}=${i}/300/300`;
+    const keyword = keywords[i] || `handmade+item+${i}`;
 
-    item.images = [imageUrl];
+    // Unsplash source endpoint returns a relevant image for the query.
+    const imageUrl = `https://source.unsplash.com/${w}x${h}/?${keyword}`;
+    const thumbUrl = `https://source.unsplash.com/300x300/?${keyword}`;
+    const secondImageUrl = `https://source.unsplash.com/${Math.max(500, Math.floor(w * 0.8))}x${Math.max(500, Math.floor(h * 0.8))}/?${keyword}`;
+
+    item.images = [imageUrl, secondImageUrl];
     item.media = [
       {
         type: 'image',
@@ -214,7 +218,7 @@ async function run() {
     ];
 
     // compute discount percent if discountedPrice provided
-    if (item.discountedPrice && item.realPrice && item.realPrice > 0) {
+    if (item.discountedPrice !== null && item.discountedPrice !== undefined && item.realPrice && item.realPrice > 0) {
       item.discountPercentage = Math.round(((item.realPrice - item.discountedPrice) / item.realPrice) * 100);
     }
   }
