@@ -514,9 +514,12 @@ export default function FeedScreen() {
                   style={[styles.mediaSlideWrap, { width: slideWidth, height: mediaHeightPx }]}
                   onPress={() => openProductDetail(item._id)}>
                   <Image
-                    source={{ uri: entry.url }}
+                    source={{ uri: entry.thumbnailUrl || entry.url }}
                     style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
                     contentFit={imageFitMode}
+                    onError={() => {
+                      console.warn(`[Feed] Image failed to load: ${entry.url}`);
+                    }}
                   />
                 </Pressable>
               );

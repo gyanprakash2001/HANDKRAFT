@@ -88,6 +88,17 @@ function normalizeAssetUrl(value?: string | null) {
   }
 
   if (/^https?:\/\//i.test(raw)) {
+    // Rewrite loopback hosts to current API root (fixes localhost URLs on physical devices)
+    try {
+      const parsed = new URL(raw);
+      const loopbackHosts = ['localhost', '127.0.0.1', '::1', '10.0.2.2'];
+      if (loopbackHosts.includes(parsed.hostname) && API_ROOT_HOST) {
+        return `${API_ROOT_PROTOCOL}//${API_ROOT_HOST}${parsed.pathname}${parsed.search}${parsed.hash}`;
+      }
+    } catch {
+      // ignore parse errors, continue with existing logic
+    }
+
     if (API_ROOT_PROTOCOL === 'https:' && /^http:\/\//i.test(raw)) {
       try {
         const parsed = new URL(raw);
