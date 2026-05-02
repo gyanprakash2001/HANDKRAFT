@@ -35,9 +35,8 @@ async function main() {
   const created = [];
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i];
-    // Use Unsplash source to get relevant images (no API key required for Source)
-    const url = `https://source.unsplash.com/featured/${s.w}x${s.h}/?${encodeURIComponent(s.q)}`;
     const aspect = Number((s.w / s.h).toFixed(2));
+    const url = `https://picsum.photos/seed/${encodeURIComponent(s.q + '-' + i)}/${s.w}/${s.h}`;
 
     const p = new Product({
       title: `${s.q.split(',')[1] ? s.q.split(',')[1] : 'Handmade'} ${i + 1}`,
@@ -66,7 +65,7 @@ async function main() {
 
     await p.save();
     created.push(p);
-    console.log(`Created sample product ${p.title}`);
+    console.log(`Created sample product ${p.title} with remote image URL`);
   }
 
   console.log(`Done. Created ${created.length} sample products.`);
