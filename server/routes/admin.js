@@ -915,6 +915,39 @@ router.delete('/products/:id', auth, admin, async (req, res) => {
       return res.json({ message: 'Product soft deleted (deactivated)', mode: 'soft', product: updatedProduct });
     }
 
+    // Attempt to remove any locally stored uploaded files referenced by this product
+    try {
+      const referencedUrls = [];
+      if (Array.isArray(product.media)) {
+        product.media.forEach((m) => {
+          if (m && m.url) referencedUrls.push(m.url);
+        });
+      }
+      if (Array.isArray(product.images)) {
+        product.images.forEach((u) => {
+          if (u) referencedUrls.push(u);
+        });
+      }
+      if (product.thumbnailUrl) referencedUrls.push(product.thumbnailUrl);
+
+      for (const u of referencedUrls) {
+        try {
+          const idx = String(u || '').indexOf('/uploads/');
+          if (idx === -1) continue;
+          const rel = String(u).substring(idx + '/uploads/'.length);
+          const filePath = path.join(__dirname, '..', 'uploads', rel);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log('[ADMIN][DELETE_PRODUCT] removed file', filePath);
+          }
+        } catch (e) {
+          console.error('[ADMIN][DELETE_PRODUCT] failed removing file', u, e?.message || e);
+        }
+      }
+    } catch (e) {
+      console.error('[ADMIN][DELETE_PRODUCT] cleanup error', e?.message || e);
+    }
+
     await Product.findByIdAndDelete(productId);
     await writeAuditLog(req, {
       action: 'hard_delete_product',
