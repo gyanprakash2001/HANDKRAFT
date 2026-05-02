@@ -12,6 +12,12 @@ body,
 }
 
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: #f4f6fb;
+  font-family: Inter, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #060b14;
+  color: #edf4ff;
+  color-scheme: dark;
+}
+
+::selection {
+  background: rgba(124, 231, 255, 0.28);
 }

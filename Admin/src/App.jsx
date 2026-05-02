@@ -10,11 +10,13 @@ import {
   CircularProgress,
   Container,
   CssBaseline,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
+  Collapse,
   Drawer,
   FormControl,
   Grid,
@@ -114,12 +116,70 @@ function safeError(error, fallback = 'Request failed') {
   return error?.response?.data?.message || error?.message || fallback;
 }
 
+const defaultRowId = (row) => row?._id || row?.id;
+
 function promptDeletePayload(targetLabel) {
   // Simplified single-step confirmation flow used by default.
   // Keep this helper for backward compatibility, but default to a single confirm.
   const ok = window.confirm(`Are you sure you want to delete ${targetLabel}? This will permanently remove it.`);
   if (!ok) return null;
   return { deleteMode: 'hard', reason: 'Admin confirmed single-step delete', confirmationText: 'DELETE' };
+}
+
+function useBulkSelection(rows, getId = defaultRowId) {
+  const rowIds = useMemo(() => rows.map((row) => getId(row)).filter(Boolean), [rows, getId]);
+  const rowIdSet = useMemo(() => new Set(rowIds), [rowIds]);
+  const [selectedIdsState, setSelectedIdsState] = useState([]);
+
+  const selectedIds = useMemo(() => selectedIdsState.filter((id) => rowIdSet.has(id)), [selectedIdsState, rowIdSet]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const allSelected = rowIds.length > 0 && rowIds.every((id) => selectedSet.has(id));
+  const indeterminate = selectedIds.length > 0 && !allSelected;
+
+  const toggleOne = useCallback((id) => {
+    setSelectedIdsState((current) => (
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id]
+    ));
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    setSelectedIdsState(() => (allSelected ? [] : rowIds.filter(Boolean)));
+  }, [allSelected, rowIds]);
+
+  const clearSelection = useCallback(() => setSelectedIdsState([]), []);
+
+  return {
+    selectedIds,
+    selectedSet,
+    allSelected,
+    indeterminate,
+    toggleOne,
+    toggleAll,
+    clearSelection,
+  };
+}
+
+function BulkActionBar({ count, label, onClear, onDelete, deleting }) {
+  return (
+    <Collapse in={count > 0} mountOnEnter unmountOnExit>
+      <Paper className="admin-bulk-bar" sx={{ px: 2, py: 1.5, mb: 2, borderRadius: 3 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip label={`${count} selected`} color="primary" size="small" />
+            <Typography variant="body2" color="text.secondary">Bulk actions for {label}</Typography>
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            <Button variant="text" onClick={onClear}>Clear</Button>
+            <Button variant="contained" color="error" onClick={onDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : `Delete selected ${label}`}
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
+    </Collapse>
+  );
 }
 
 function useNotifier() {
@@ -190,7 +250,7 @@ function LoginPage({ onLoggedIn }) {
 
   return (
     <Container maxWidth="sm" sx={{ mt: 12 }}>
-      <Card>
+      <Card className="admin-panel">
         <CardContent>
           <Stack spacing={2} component="form" onSubmit={handleSubmit}>
             <Typography variant="h5" fontWeight={700}>HANDKRAFT Admin Login</Typography>
@@ -341,6 +401,8 @@ function UsersPage({ showToast }) {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
   const [editUser, setEditUser] = useState(null);
   const [form, setForm] = useState(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { selectedIds, selectedSet, allSelected, indeterminate, toggleOne, toggleAll, clearSelection } = useBulkSelection(rows);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -414,6 +476,27 @@ function UsersPage({ showToast }) {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const payload = promptDeletePayload(`${selectedIds.length} selected users`);
+    if (!payload) return;
+    setBulkDeleting(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        await deleteUser(id, payload);
+        successCount += 1;
+      }
+      showToast(`Deleted ${successCount} users`, 'success');
+      clearSelection();
+      load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to bulk delete users'), 'error');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <Box>
       <PageHeader
@@ -451,10 +534,15 @@ function UsersPage({ showToast }) {
         </FormControl>
       </Stack>
 
-      <TableContainer component={Paper}>
+      <BulkActionBar count={selectedIds.length} label="users" onClear={clearSelection} onDelete={handleBulkDelete} deleting={bulkDeleting} />
+
+      <TableContainer component={Paper} className="admin-table-wrap">
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox size="small" indeterminate={indeterminate} checked={allSelected} onChange={toggleAll} />
+              </TableCell>
               <TableCell>Name</TableCell>
               <TableCell>Email</TableCell>
               <TableCell>Status</TableCell>
@@ -466,11 +554,14 @@ function UsersPage({ showToast }) {
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={7} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={26} /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} align="center">No users found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} align="center">No users found</TableCell></TableRow>
             ) : rows.map((user) => (
-              <TableRow key={user._id} hover>
+              <TableRow key={user._id} hover selected={selectedSet.has(user._id)}>
+                <TableCell padding="checkbox">
+                  <Checkbox size="small" checked={selectedSet.has(user._id)} onChange={() => toggleOne(user._id)} />
+                </TableCell>
                 <TableCell>{user.name || '-'}</TableCell>
                 <TableCell>{user.email}</TableCell>
                 <TableCell>
@@ -570,6 +661,8 @@ function ProductsPage({ showToast }) {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
   const [editProduct, setEditProduct] = useState(null);
   const [form, setForm] = useState(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { selectedIds, selectedSet, allSelected, indeterminate, toggleOne, toggleAll, clearSelection } = useBulkSelection(rows);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -631,6 +724,27 @@ function ProductsPage({ showToast }) {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const payload = promptDeletePayload(`${selectedIds.length} selected products`);
+    if (!payload) return;
+    setBulkDeleting(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        await deleteProduct(id, payload);
+        successCount += 1;
+      }
+      showToast(`Deleted ${successCount} products`, 'success');
+      clearSelection();
+      load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to bulk delete products'), 'error');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <Box>
       <PageHeader
@@ -653,10 +767,15 @@ function ProductsPage({ showToast }) {
         </FormControl>
       </Stack>
 
-      <TableContainer component={Paper}>
+      <BulkActionBar count={selectedIds.length} label="products" onClear={clearSelection} onDelete={handleBulkDelete} deleting={bulkDeleting} />
+
+      <TableContainer component={Paper} className="admin-table-wrap">
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox size="small" indeterminate={indeterminate} checked={allSelected} onChange={toggleAll} />
+              </TableCell>
               <TableCell>Title</TableCell>
               <TableCell>Seller</TableCell>
               <TableCell>Price</TableCell>
@@ -668,11 +787,14 @@ function ProductsPage({ showToast }) {
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={7} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={26} /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} align="center">No products found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} align="center">No products found</TableCell></TableRow>
             ) : rows.map((product) => (
-              <TableRow key={product._id} hover>
+              <TableRow key={product._id} hover selected={selectedSet.has(product._id)}>
+                <TableCell padding="checkbox">
+                  <Checkbox size="small" checked={selectedSet.has(product._id)} onChange={() => toggleOne(product._id)} />
+                </TableCell>
                 <TableCell>{product.title}</TableCell>
                 <TableCell>{product?.seller?.name || product.sellerName || '-'}</TableCell>
                 <TableCell>{Number(product.price || 0).toFixed(2)}</TableCell>
@@ -734,6 +856,8 @@ function OrdersPage({ showToast }) {
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [selectedOrderForm, setSelectedOrderForm] = useState(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { selectedIds, selectedSet, allSelected, indeterminate, toggleOne, toggleAll, clearSelection } = useBulkSelection(rows);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -812,6 +936,30 @@ function OrdersPage({ showToast }) {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const payload = promptDeletePayload(`${selectedIds.length} selected orders`);
+    if (!payload) return;
+    setBulkDeleting(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        await deleteOrder(id, payload);
+        successCount += 1;
+      }
+      showToast(`Deleted ${successCount} orders`, 'success');
+      clearSelection();
+      if (selectedOrder && selectedIds.includes(selectedOrder._id)) {
+        setSelectedOrder(null);
+      }
+      load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to bulk delete orders'), 'error');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <Box>
       <PageHeader
@@ -840,10 +988,15 @@ function OrdersPage({ showToast }) {
         </FormControl>
       </Stack>
 
-      <TableContainer component={Paper}>
+      <BulkActionBar count={selectedIds.length} label="orders" onClear={clearSelection} onDelete={handleBulkDelete} deleting={bulkDeleting} />
+
+      <TableContainer component={Paper} className="admin-table-wrap">
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox size="small" indeterminate={indeterminate} checked={allSelected} onChange={toggleAll} />
+              </TableCell>
               <TableCell>Order ID</TableCell>
               <TableCell>Buyer</TableCell>
               <TableCell>Total</TableCell>
@@ -856,11 +1009,14 @@ function OrdersPage({ showToast }) {
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} align="center"><CircularProgress size={26} /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={8} align="center">No orders found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} align="center">No orders found</TableCell></TableRow>
             ) : rows.map((order) => (
-              <TableRow key={order._id} hover>
+              <TableRow key={order._id} hover selected={selectedSet.has(order._id)}>
+                <TableCell padding="checkbox">
+                  <Checkbox size="small" checked={selectedSet.has(order._id)} onChange={() => toggleOne(order._id)} />
+                </TableCell>
                 <TableCell>{order._id}</TableCell>
                 <TableCell>{order?.user?.name || order?.user?.email || '-'}</TableCell>
                 <TableCell>{Number(order.totalAmount || 0).toFixed(2)}</TableCell>
@@ -1133,6 +1289,8 @@ function ReviewsPage({ showToast }) {
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { selectedIds, selectedSet, allSelected, indeterminate, toggleOne, toggleAll, clearSelection } = useBulkSelection(rows);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1173,6 +1331,27 @@ function ReviewsPage({ showToast }) {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const payload = promptDeletePayload(`${selectedIds.length} selected reviews`);
+    if (!payload) return;
+    setBulkDeleting(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        await deleteReview(id, payload);
+        successCount += 1;
+      }
+      showToast(`Deleted ${successCount} reviews`, 'success');
+      clearSelection();
+      load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to bulk delete reviews'), 'error');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <Box>
       <PageHeader
@@ -1195,10 +1374,15 @@ function ReviewsPage({ showToast }) {
         </FormControl>
       </Stack>
 
-      <TableContainer component={Paper}>
+      <BulkActionBar count={selectedIds.length} label="reviews" onClear={clearSelection} onDelete={handleBulkDelete} deleting={bulkDeleting} />
+
+      <TableContainer component={Paper} className="admin-table-wrap">
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox size="small" indeterminate={indeterminate} checked={allSelected} onChange={toggleAll} />
+              </TableCell>
               <TableCell>Product</TableCell>
               <TableCell>User</TableCell>
               <TableCell>Rating</TableCell>
@@ -1210,11 +1394,14 @@ function ReviewsPage({ showToast }) {
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={7} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={26} /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} align="center">No reviews found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} align="center">No reviews found</TableCell></TableRow>
             ) : rows.map((review) => (
-              <TableRow key={review._id} hover>
+              <TableRow key={review._id} hover selected={selectedSet.has(review._id)}>
+                <TableCell padding="checkbox">
+                  <Checkbox size="small" checked={selectedSet.has(review._id)} onChange={() => toggleOne(review._id)} />
+                </TableCell>
                 <TableCell>{review?.product?.title || '-'}</TableCell>
                 <TableCell>{review?.user?.name || '-'}</TableCell>
                 <TableCell>{review.rating}</TableCell>
@@ -1245,6 +1432,8 @@ function ChatsPage({ showToast }) {
   const [loading, setLoading] = useState(true);
   const [conversationView, setConversationView] = useState(null);
   const [conversationMessages, setConversationMessages] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { selectedIds, selectedSet, allSelected, indeterminate, toggleOne, toggleAll, clearSelection } = useBulkSelection(rows, (conversation) => conversation?.id);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1304,6 +1493,31 @@ function ChatsPage({ showToast }) {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const payload = promptDeletePayload(`${selectedIds.length} selected conversations`);
+    if (!payload) return;
+    setBulkDeleting(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        await deleteConversation(id, payload);
+        successCount += 1;
+      }
+      showToast(`Deleted ${successCount} conversations`, 'success');
+      clearSelection();
+      if (conversationView && selectedIds.includes(conversationView.id)) {
+        setConversationView(null);
+        setConversationMessages([]);
+      }
+      load();
+    } catch (err) {
+      showToast(safeError(err, 'Failed to bulk delete conversations'), 'error');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <Box>
       <PageHeader
@@ -1318,10 +1532,15 @@ function ChatsPage({ showToast }) {
         <TextField label="Search messages, product title, participants" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
       </Stack>
 
-      <TableContainer component={Paper}>
+      <BulkActionBar count={selectedIds.length} label="conversations" onClear={clearSelection} onDelete={handleBulkDelete} deleting={bulkDeleting} />
+
+      <TableContainer component={Paper} className="admin-table-wrap">
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox size="small" indeterminate={indeterminate} checked={allSelected} onChange={toggleAll} />
+              </TableCell>
               <TableCell>Participants</TableCell>
               <TableCell>Product</TableCell>
               <TableCell>Last Message</TableCell>
@@ -1332,11 +1551,14 @@ function ChatsPage({ showToast }) {
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={6} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} align="center"><CircularProgress size={26} /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={6} align="center">No conversations found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} align="center">No conversations found</TableCell></TableRow>
             ) : rows.map((conversation) => (
-              <TableRow key={conversation.id} hover>
+              <TableRow key={conversation.id} hover selected={selectedSet.has(conversation.id)}>
+                <TableCell padding="checkbox">
+                  <Checkbox size="small" checked={selectedSet.has(conversation.id)} onChange={() => toggleOne(conversation.id)} />
+                </TableCell>
                 <TableCell>{(conversation.participants || []).map((p) => p.name || p.email).join(' | ') || '-'}</TableCell>
                 <TableCell>{conversation?.product?.title || '-'}</TableCell>
                 <TableCell sx={{ maxWidth: 360 }}><span className="truncate-inline">{conversation.lastMessage || '-'}</span></TableCell>
@@ -1701,12 +1923,19 @@ function AdminLayout({ profile, onLogout, showToast }) {
   ], []);
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f4f6fb' }}>
+    <Box className="admin-shell" sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
       <CssBaseline />
       <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
-        <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>HANDKRAFT Control Center</Typography>
-          <Stack direction="row" spacing={1} alignItems="center">
+        <Toolbar sx={{ minHeight: 76, px: { xs: 2, md: 3 } }}>
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexGrow: 1 }}>
+            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: 'primary.main', boxShadow: '0 0 0 6px rgba(124, 231, 255, 0.12)' }} />
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>HANDKRAFT Control Center</Typography>
+              <Typography variant="caption" color="text.secondary">Minimal, dark, and operations-first</Typography>
+            </Box>
+          </Stack>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Chip size="small" label={profile?.adminRole || 'admin'} color="primary" variant="outlined" />
             <Typography variant="body2" sx={{ opacity: 0.9 }}>{profile?.name || profile?.email || 'Admin'}</Typography>
             <IconButton color="inherit" onClick={onLogout}><LogoutIcon /></IconButton>
           </Stack>
@@ -1721,18 +1950,34 @@ function AdminLayout({ profile, onLogout, showToast }) {
           '& .MuiDrawer-paper': {
             width: drawerWidth,
             boxSizing: 'border-box',
-            borderRight: '1px solid rgba(0,0,0,0.08)',
+            borderRight: '1px solid rgba(148, 163, 184, 0.12)',
           },
         }}
       >
-        <Toolbar />
-        <List sx={{ mt: 1 }}>
+        <Toolbar sx={{ minHeight: 76 }} />
+        <Box sx={{ px: 2, pt: 2, pb: 1 }}>
+          <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: '0.18em' }}>Navigation</Typography>
+        </Box>
+        <List sx={{ px: 1.5, gap: 0.75, display: 'grid' }}>
           {menuItems.map((item) => {
             const active = item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
             return (
               <ListItem key={item.path} disablePadding>
-                <ListItemButton component={Link} to={item.path} selected={active}>
-                  <ListItemText primary={item.label} />
+                <ListItemButton
+                  component={Link}
+                  to={item.path}
+                  selected={active}
+                  sx={{
+                    borderRadius: 2,
+                    mb: 0.5,
+                    border: '1px solid transparent',
+                    '&.Mui-selected': {
+                      bgcolor: 'rgba(124, 231, 255, 0.12)',
+                      borderColor: 'rgba(124, 231, 255, 0.24)',
+                    },
+                  }}
+                >
+                  <ListItemText primary={item.label} primaryTypographyProps={{ fontWeight: active ? 700 : 600 }} />
                 </ListItemButton>
               </ListItem>
             );
@@ -1740,9 +1985,9 @@ function AdminLayout({ profile, onLogout, showToast }) {
         </List>
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 } }}>
         <Toolbar />
-        <Container maxWidth="xl">
+        <Container maxWidth="xl" sx={{ pb: 4 }}>
           <Routes>
             <Route path="/" element={<DashboardPage showToast={showToast} />} />
             <Route path="/users" element={<UsersPage showToast={showToast} />} />
