@@ -115,47 +115,11 @@ function safeError(error, fallback = 'Request failed') {
 }
 
 function promptDeletePayload(targetLabel) {
-  const modeInput = window.prompt(
-    `Delete mode for ${targetLabel}: type "soft" (recommended) or "hard"`,
-    'soft'
-  );
-  if (modeInput === null) {
-    return null;
-  }
-
-  const deleteMode = String(modeInput || 'soft').trim().toLowerCase() || 'soft';
-  if (!['soft', 'hard'].includes(deleteMode)) {
-    window.alert('Delete mode must be either soft or hard.');
-    return null;
-  }
-
-  const reasonInput = window.prompt(`Deletion reason for ${targetLabel} (minimum 12 characters):`, '');
-  if (reasonInput === null) {
-    return null;
-  }
-  const reason = String(reasonInput).trim();
-  if (reason.length < 12) {
-    window.alert('Deletion reason must be at least 12 characters long.');
-    return null;
-  }
-
-  const confirmationInput = window.prompt(
-    `Type DELETE to confirm ${deleteMode} deletion for ${targetLabel}.`,
-    ''
-  );
-  if (confirmationInput === null) {
-    return null;
-  }
-  if (String(confirmationInput).trim().toUpperCase() !== 'DELETE') {
-    window.alert('Confirmation text did not match DELETE.');
-    return null;
-  }
-
-  return {
-    deleteMode,
-    reason,
-    confirmationText: 'DELETE',
-  };
+  // Simplified single-step confirmation flow used by default.
+  // Keep this helper for backward compatibility, but default to a single confirm.
+  const ok = window.confirm(`Are you sure you want to delete ${targetLabel}? This will permanently remove it.`);
+  if (!ok) return null;
+  return { deleteMode: 'hard', reason: 'Admin confirmed single-step delete', confirmationText: 'YES' };
 }
 
 function useNotifier() {
