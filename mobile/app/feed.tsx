@@ -15,7 +15,7 @@ import LocalAvatar from '@/components/LocalAvatar';
 import currentUser from '@/utils/currentUser';
 import { normalizeProduct } from '@/utils/product';
 import { useCartNotification } from '@/contexts/cart-notification-context';
-import { getProfile, getProducts, ProductItem, ProductMediaItem, getChatConversations, getProfileDashboard } from '@/utils/api';
+import { getProfile, getProducts, ProductItem, ProductMediaItem, getChatConversations, getProfileDashboard, normalizeAssetUrl } from '@/utils/api';
 import { removeToken } from '@/utils/auth';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 
@@ -514,12 +514,9 @@ export default function FeedScreen() {
                   style={[styles.mediaSlideWrap, { width: slideWidth, height: mediaHeightPx }]}
                   onPress={() => openProductDetail(item._id)}>
                   <Image
-                    source={{ uri: entry.thumbnailUrl || entry.url }}
+                    source={{ uri: normalizeAssetUrl(entry.url) }}
                     style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
                     contentFit={imageFitMode}
-                    onError={() => {
-                      console.warn(`[Feed] Image failed to load: ${entry.url}`);
-                    }}
                   />
                 </Pressable>
               );
