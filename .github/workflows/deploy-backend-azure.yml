@@ -338,3 +338,43 @@ jobs:
 
           console.log('Integration readiness check passed.');
           NODE
+
+      - name: Seed feed products to production MongoDB
+        shell: bash
+        env:
+          AZURE_APP_SETTINGS_JSON: ${{ secrets[format('{0}', 'AZURE_APP_SETTINGS_JSON')] }}
+        run: |
+          set -euo pipefail
+
+          # Extract MONGO_URI from app settings
+          MONGO_URI=$(node - <<'NODE'
+          const payload = process.env.AZURE_APP_SETTINGS_JSON || '[]';
+          const parsed = JSON.parse(payload);
+          const settings = new Map();
+
+          for (const entry of Array.isArray(parsed) ? parsed : []) {
+            const name = String(entry?.name || '').trim();
+            if (name) {
+              settings.set(name, entry?.value == null ? '' : String(entry.value));
+            }
+          }
+
+          const mongoUri = String(settings.get('MONGO_URI') || '').trim();
+          if (!mongoUri) {
+            throw new Error('MONGO_URI not found in app settings');
+          }
+
+          console.log(mongoUri);
+          NODE
+          )
+
+          if [ -z "$MONGO_URI" ]; then
+            echo "Failed to extract MONGO_URI from app settings"
+            exit 1
+          fi
+
+          echo "Running seed script with production MongoDB..."
+          cd server
+          MONGO_URI="$MONGO_URI" node scripts/download-and-post-images.js
+
+          echo "✓ Production database seeding completed successfully"
