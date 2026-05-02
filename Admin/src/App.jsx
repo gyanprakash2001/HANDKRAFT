@@ -119,7 +119,7 @@ function promptDeletePayload(targetLabel) {
   // Keep this helper for backward compatibility, but default to a single confirm.
   const ok = window.confirm(`Are you sure you want to delete ${targetLabel}? This will permanently remove it.`);
   if (!ok) return null;
-  return { deleteMode: 'hard', reason: 'Admin confirmed single-step delete', confirmationText: 'YES' };
+  return { deleteMode: 'hard', reason: 'Admin confirmed single-step delete', confirmationText: 'DELETE' };
 }
 
 function useNotifier() {
