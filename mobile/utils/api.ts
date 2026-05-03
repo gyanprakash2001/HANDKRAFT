@@ -93,10 +93,13 @@ function normalizeAssetUrl(value?: string | null) {
     try {
       const parsed = new URL(raw);
       const hostname = parsed.hostname || parsed.host;
-      if (loopbackPatterns.includes(hostname)) {
+      if (loopbackPatterns.includes(hostname) && API_ROOT_HOST) {
         // Rewrite loopback host to current API root host, preserve path/query/hash
-        parsed.hostname = API_ROOT_HOST || 'localhost';
-        return parsed.toString();
+        const protocol = parsed.protocol;
+        const pathname = parsed.pathname;
+        const search = parsed.search;
+        const hash = parsed.hash;
+        return `${protocol}//${API_ROOT_HOST}${pathname}${search}${hash}`;
       }
     } catch {
       // URL parsing failed, fall through to other checks
