@@ -69,7 +69,7 @@ try {
 
 console.log(`[API] Base URL candidates: ${API_BASE_URLS.join(' -> ')}`);
 
-function normalizeAssetUrl(value?: string | null) {
+export function normalizeAssetUrl(value?: string | null) {
   const raw = String(value || '').trim();
   if (!raw) {
     return '';
