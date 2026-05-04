@@ -95,7 +95,7 @@ export function normalizeAssetUrl(value?: string | null) {
       const hostname = parsed.hostname || parsed.host;
       if (loopbackPatterns.includes(hostname) && API_ROOT_HOST) {
         // Rewrite loopback host to current API root host, preserve path/query/hash
-        const protocol = parsed.protocol;
+        const protocol = API_ROOT_PROTOCOL || parsed.protocol || 'https:';
         const pathname = parsed.pathname;
         const search = parsed.search;
         const hash = parsed.hash;
@@ -2350,7 +2350,7 @@ export async function uploadChatImage(conversationId: string, fileUri: string): 
   }
 }
 
-export async function uploadProductFile(fileUri: string): Promise<{ url: string }> {
+export async function uploadProductFile(fileUri: string): Promise<{ url: string; thumbnailUrl?: string }> {
   const headersObj = await authHeaders();
   const headers: Record<string, string> = {};
   if (headersObj && headersObj.Authorization) headers.Authorization = headersObj.Authorization;
@@ -2384,7 +2384,7 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string 
       if (res.status >= 200 && res.status < 300) {
         const data = res.body ? JSON.parse(res.body) : {};
         console.log('[uploadProductFile] upload response', { status: res.status, body: data });
-        return { url: data.url };
+        return { url: data.url, thumbnailUrl: data.thumbnailUrl };
       }
 
       // Primary upload returned non-2xx — try fetch fallback
@@ -2402,7 +2402,7 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string 
     // Fallback: try fetch + FormData
     const fallback = await fetchFormUpload(url, uploadTarget, 'file', headers);
     if (fallback && typeof fallback.url === 'string') {
-      return { url: fallback.url };
+      return { url: fallback.url, thumbnailUrl: fallback.thumbnailUrl };
     }
     throw new Error('Upload failed');
   } finally {

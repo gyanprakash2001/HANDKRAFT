@@ -224,7 +224,9 @@ function UploadVideoPreview({ uri, onVideoSize }: { uri: string; onVideoSize?: (
 
 export default function UploadScreen() {
   const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
-  const MAX_BASE64_CHARS = 20_000_000;
+  const MAX_BASE64_CHARS = 8_000_000;
+  const MAX_UPLOAD_EDGE_PX = 1600;
+  const IMAGE_UPLOAD_QUALITY = 0.82;
   const MAX_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -255,6 +257,18 @@ export default function UploadScreen() {
   const [pickupAddressSnapshot, setPickupAddressSnapshot] = useState<UserAddress | null>(null);
   const router = useRouter();
 
+  const buildResizeAction = (width: number, height: number) => {
+    const maxEdge = Math.max(width, height);
+    if (maxEdge <= MAX_UPLOAD_EDGE_PX) return null;
+    const scale = MAX_UPLOAD_EDGE_PX / maxEdge;
+    return {
+      resize: {
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+      },
+    };
+  };
+
   const imageToDataUri = async (uri: string, width: number, height: number, ratio: number) => {
     const safeRatio = clampAspectRatio(ratio);
     const sourceWidth = Math.max(1, Math.round(width || 1));
@@ -278,7 +292,7 @@ export default function UploadScreen() {
     const ext = extMatch ? (extMatch[1] || '').toLowerCase() : '';
     let saveFormat = ImageManipulator.SaveFormat.JPEG;
     let mime = 'image/jpeg';
-    let compress = 1;
+    let compress = IMAGE_UPLOAD_QUALITY;
     if (ext === 'png') {
       saveFormat = ImageManipulator.SaveFormat.PNG;
       mime = 'image/png';
@@ -286,10 +300,10 @@ export default function UploadScreen() {
     } else {
       saveFormat = ImageManipulator.SaveFormat.JPEG;
       mime = 'image/jpeg';
-      compress = 1;
+      compress = IMAGE_UPLOAD_QUALITY;
     }
 
-    const manipulated = await ImageManipulator.manipulateAsync(uri, [
+    const actions: any[] = [
       {
         crop: {
           originX,
@@ -298,7 +312,11 @@ export default function UploadScreen() {
           height: cropHeight,
         },
       },
-    ], {
+    ];
+    const resizeAction = buildResizeAction(cropWidth, cropHeight);
+    if (resizeAction) actions.push(resizeAction);
+
+    const manipulated = await ImageManipulator.manipulateAsync(uri, actions, {
       compress,
       format: saveFormat,
       base64: true,
@@ -309,6 +327,71 @@ export default function UploadScreen() {
     }
 
     return `data:${mime};base64,${manipulated.base64}`;
+  };
+
+  const imageToUploadFile = async (uri: string, width: number, height: number, ratio: number) => {
+    const safeRatio = clampAspectRatio(ratio);
+    const sourceWidth = Math.max(1, Math.round(width || 1));
+    const sourceHeight = Math.max(1, Math.round(height || 1));
+
+    let cropWidth = sourceWidth;
+    let cropHeight = Math.round(sourceWidth / safeRatio);
+
+    if (cropHeight > sourceHeight) {
+      cropHeight = sourceHeight;
+      cropWidth = Math.round(sourceHeight * safeRatio);
+    }
+
+    cropWidth = Math.max(1, Math.min(sourceWidth, cropWidth));
+    cropHeight = Math.max(1, Math.min(sourceHeight, cropHeight));
+
+    const originX = Math.max(0, Math.floor((sourceWidth - cropWidth) / 2));
+    const originY = Math.max(0, Math.floor((sourceHeight - cropHeight) / 2));
+
+    const prepared = await prepareLocalUploadUri(uri);
+    const uriToUse = prepared.uri;
+
+    const extMatch = String(uri).split('?')[0].match(/\.([a-z0-9]+)$/i);
+    const ext = extMatch ? (extMatch[1] || '').toLowerCase() : '';
+    let saveFormat = ImageManipulator.SaveFormat.JPEG;
+    let compress = IMAGE_UPLOAD_QUALITY;
+    if (ext === 'png') {
+      saveFormat = ImageManipulator.SaveFormat.PNG;
+      compress = 1;
+    } else {
+      saveFormat = ImageManipulator.SaveFormat.JPEG;
+      compress = IMAGE_UPLOAD_QUALITY;
+    }
+
+    const actions: any[] = [
+      {
+        crop: {
+          originX,
+          originY,
+          width: cropWidth,
+          height: cropHeight,
+        },
+      },
+    ];
+    const resizeAction = buildResizeAction(cropWidth, cropHeight);
+    if (resizeAction) actions.push(resizeAction);
+
+    const manipulated = await ImageManipulator.manipulateAsync(uriToUse, actions, {
+      compress,
+      format: saveFormat,
+      base64: false,
+    });
+
+    if (prepared?.tempPath) {
+      try {
+        await FileSystem.deleteAsync(prepared.tempPath, { idempotent: true });
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+
+    if (!manipulated?.uri) throw new Error('Crop failed');
+    return { uri: manipulated.uri, cleanupPath: manipulated.uri };
   };
 
   const rebuildMediaItems = async (sources: UploadMediaSource[], ratio: number) => {
@@ -636,13 +719,13 @@ export default function UploadScreen() {
     }
   };
 
-  async function cropImageWithTransform(item: UploadMediaItem, source: UploadMediaSource, containerWidth: number, containerHeight: number) {
+  async function cropImageWithTransformToFile(item: UploadMediaItem, source: UploadMediaSource, containerWidth: number, containerHeight: number) {
     try {
       const imgWRaw = Number((source as any).width || 1);
       const imgHRaw = Number((source as any).height || 1);
       if (!imgWRaw || !imgHRaw) {
         // fallback to center crop
-        return await imageToDataUri(source.uri, imgWRaw || 1, imgHRaw || 1, item.aspectRatio || imageAspectRatio);
+        return await imageToUploadFile(source.uri, imgWRaw || 1, imgHRaw || 1, item.aspectRatio || imageAspectRatio);
       }
 
       const rotation = normalizeRotationDeg(item.rotation || 0);
@@ -677,16 +760,13 @@ export default function UploadScreen() {
       const extMatch = String(source.uri).split('?')[0].match(/\.([a-z0-9]+)$/i);
       const ext = extMatch ? (extMatch[1] || '').toLowerCase() : '';
       let saveFormat = ImageManipulator.SaveFormat.JPEG;
-      let mime = 'image/jpeg';
-      let compress = 1;
+      let compress = IMAGE_UPLOAD_QUALITY;
       if (ext === 'png') {
         saveFormat = ImageManipulator.SaveFormat.PNG;
-        mime = 'image/png';
         compress = 1;
       } else {
         saveFormat = ImageManipulator.SaveFormat.JPEG;
-        mime = 'image/jpeg';
-        compress = 1;
+        compress = IMAGE_UPLOAD_QUALITY;
       }
 
       const actions: any[] = [];
@@ -700,7 +780,10 @@ export default function UploadScreen() {
         },
       });
 
-      const manipulated = await ImageManipulator.manipulateAsync(uriToUse, actions, { compress, format: saveFormat, base64: true });
+      const resizeAction = buildResizeAction(cw, ch);
+      if (resizeAction) actions.push(resizeAction);
+
+      const manipulated = await ImageManipulator.manipulateAsync(uriToUse, actions, { compress, format: saveFormat, base64: false });
 
       // cleanup temp copy if any
       if (prepared?.tempPath) {
@@ -711,12 +794,12 @@ export default function UploadScreen() {
         }
       }
 
-      if (!manipulated?.base64) throw new Error('Crop failed');
-      return `data:${mime};base64,${manipulated.base64}`;
+      if (!manipulated?.uri) throw new Error('Crop failed');
+      return { uri: manipulated.uri, cleanupPath: manipulated.uri };
     } catch (e) {
       // fallback to center crop
       try {
-        return await imageToDataUri(source.uri, (source as any).width || 1, (source as any).height || 1, item.aspectRatio || imageAspectRatio);
+        return await imageToUploadFile(source.uri, (source as any).width || 1, (source as any).height || 1, item.aspectRatio || imageAspectRatio);
       } catch {
         throw e;
       }
@@ -975,7 +1058,7 @@ export default function UploadScreen() {
       // Persist any active transforms before cropping/upload
       persistActiveTransform();
       // Pre-upload any local video files (content:// or file://) and crop images now according to user pan/zoom
-      const mediaForUpload = [] as { type: 'image' | 'video'; url: string; aspectRatio?: number }[];
+      const mediaForUpload = [] as { type: 'image' | 'video'; url: string; thumbnailUrl?: string; aspectRatio?: number }[];
       setProcessingMedia(true);
       try {
         for (let i = 0; i < mediaItems.length; i++) {
@@ -991,16 +1074,36 @@ export default function UploadScreen() {
               mediaForUpload.push({ type: 'video', url: uploaded.url, aspectRatio: item.aspectRatio });
             }
           } else {
-            // Images: if already a data URI (pre-cropped) use it, otherwise crop now using transform and include as base64 data URI
+            const rawUrl = String(item.url || '');
+            const isRemote = /^https?:\/\//i.test(rawUrl);
+            // Images: prefer file upload for speed; keep base64 only as fallback
             try {
-              if (String(item.url || '').startsWith('data:')) {
-                mediaForUpload.push({ type: 'image', url: item.url, aspectRatio: item.aspectRatio });
+              if (rawUrl.startsWith('data:')) {
+                mediaForUpload.push({ type: 'image', url: rawUrl, aspectRatio: item.aspectRatio });
+              } else if (isRemote) {
+                mediaForUpload.push({ type: 'image', url: rawUrl, aspectRatio: item.aspectRatio });
               } else {
-                const dataUri = await cropImageWithTransform(item, source, previewFrameWidth, previewFrameHeight);
-                mediaForUpload.push({ type: 'image', url: dataUri, aspectRatio: item.aspectRatio });
+                const prepared = await cropImageWithTransformToFile(item, source, previewFrameWidth, previewFrameHeight);
+                try {
+                  const uploaded = await uploadProductFile(prepared.uri);
+                  mediaForUpload.push({
+                    type: 'image',
+                    url: uploaded.url,
+                    thumbnailUrl: uploaded.thumbnailUrl,
+                    aspectRatio: item.aspectRatio,
+                  });
+                } finally {
+                  if (prepared?.cleanupPath) {
+                    try {
+                      await FileSystem.deleteAsync(prepared.cleanupPath, { idempotent: true });
+                    } catch {
+                      // ignore cleanup errors
+                    }
+                  }
+                }
               }
             } catch {
-              // As a fallback do a center crop similar to previous behavior
+              // As a fallback do a center crop and send as data URI
               try {
                 const fallback = await imageToDataUri(source.uri, (source as any).width || 1, (source as any).height || 1, item.aspectRatio || imageAspectRatio);
                 mediaForUpload.push({ type: 'image', url: fallback, aspectRatio: item.aspectRatio });

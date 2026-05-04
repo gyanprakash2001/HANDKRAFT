@@ -865,9 +865,25 @@ router.post('/media/upload-file', auth, mediaUpload.single('file'), async (req, 
     console.log('[UPLOAD FILE] multer req.file present?', !!req.file);
     // If multer parsed a multipart upload, return the stored file URL.
     if (req.file) {
-      const fileName = path.basename(req.file.path || req.file.filename || req.file.originalname);
-      const publicUrl = `${getPublicBaseUrl(req)}/uploads/products/${fileName}`;
-      return res.json({ url: normalizePublicUrl(req, publicUrl) || publicUrl });
+        const fileName = path.basename(req.file.path || req.file.filename || req.file.originalname);
+        const baseName = path.parse(fileName).name;
+        let thumbnailUrl = '';
+        try {
+          const thumbName = `${baseName}-thumb.jpg`;
+          const thumbPath = path.join(PRODUCT_UPLOAD_DIR, thumbName);
+          await sharp(req.file.path)
+            .resize({ width: 540, withoutEnlargement: true })
+            .jpeg({ quality: 72 })
+            .toFile(thumbPath);
+          thumbnailUrl = `${getPublicBaseUrl(req)}/uploads/products/${thumbName}`;
+        } catch {
+          // Keep upload resilient if thumbnail transform fails.
+        }
+
+        const publicUrl = `${getPublicBaseUrl(req)}/uploads/products/${fileName}`;
+        const normalizedUrl = normalizePublicUrl(req, publicUrl) || publicUrl;
+        const normalizedThumb = normalizePublicUrl(req, thumbnailUrl) || thumbnailUrl || normalizedUrl;
+        return res.json({ url: normalizedUrl, thumbnailUrl: normalizedThumb || normalizedUrl });
     }
 
     // Fallback: accept JSON uploads containing a Base64-encoded file.
@@ -1400,7 +1416,7 @@ router.post('/', auth, async (req, res) => {
     });
 
     await product.save();
-    res.status(201).json({ message: 'Item posted successfully', item: product });
+    res.status(201).json({ message: 'Item posted successfully', item: normalizeProductMediaForResponse(req, product) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

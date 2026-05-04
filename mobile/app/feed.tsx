@@ -177,6 +177,7 @@ function getPostMedia(item: ProductItem): ProductMediaItem[] {
       .map((entry) => ({
         type: entry.type === 'video' ? 'video' : 'image',
         url: entry.url,
+        thumbnailUrl: entry.thumbnailUrl,
         // Use explicit entry aspectRatio when available, otherwise fall back
         // to the product's imageAspectRatio so videos match image sizing in the feed.
         aspectRatio: entry.aspectRatio || item.imageAspectRatio,
@@ -184,7 +185,7 @@ function getPostMedia(item: ProductItem): ProductMediaItem[] {
   }
 
   if (Array.isArray(item.images) && item.images.length) {
-    return item.images.map((url) => ({ type: 'image', url, aspectRatio: item.imageAspectRatio }));
+    return item.images.map((url) => ({ type: 'image', url, thumbnailUrl: url, aspectRatio: item.imageAspectRatio }));
   }
 
   return [{ type: 'image', url: 'https://placehold.co/600x400?text=Handmade', aspectRatio: item.imageAspectRatio }];
@@ -514,7 +515,7 @@ export default function FeedScreen() {
                   style={[styles.mediaSlideWrap, { width: slideWidth, height: mediaHeightPx }]}
                   onPress={() => openProductDetail(item._id)}>
                   <Image
-                    source={{ uri: normalizeAssetUrl(entry.url) }}
+                    source={{ uri: normalizeAssetUrl(entry.thumbnailUrl || entry.url) }}
                     style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
                     contentFit={imageFitMode}
                   />
