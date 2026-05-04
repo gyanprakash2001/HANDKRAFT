@@ -43,7 +43,124 @@ function getPublicBaseUrl(req) {
   const protocol = forwardedProto || req.protocol || 'http';
   const host = forwardedHost || req.get('host');
 
-  return `${protocol}://${host}`.replace(/\/+$/, '');
+  let baseUrl = `${protocol}://${host}`.replace(/\/+$/, '');
+  if (process.env.NODE_ENV === 'production' && /^http:\/\//i.test(baseUrl)) {
+    baseUrl = baseUrl.replace(/^http:\/\//i, 'https://');
+  }
+
+  return baseUrl;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
+
+function isLoopbackHost(hostname = '') {
+  const normalized = String(hostname || '').trim().toLowerCase();
+  return LOOPBACK_HOSTS.has(normalized);
+}
+
+function normalizePublicUrl(req, value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  if (raw.startsWith('data:')) {
+    return raw;
+  }
+
+  if (raw.startsWith('file://') || raw.startsWith('content://')) {
+    return '';
+  }
+
+  const baseUrl = getPublicBaseUrl(req);
+
+  if (raw.startsWith('/')) {
+    return baseUrl ? `${baseUrl}${raw}` : raw;
+  }
+
+  if (raw.startsWith('//')) {
+    const protocol = baseUrl && baseUrl.startsWith('https:') ? 'https:' : 'http:';
+    return `${protocol}${raw}`;
+  }
+
+  if (!/^https?:\/\//i.test(raw)) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (isLoopbackHost(parsed.hostname)) {
+      if (!baseUrl) {
+        return '';
+      }
+      const base = new URL(baseUrl);
+      parsed.protocol = base.protocol;
+      parsed.host = base.host;
+      return parsed.toString();
+    }
+
+    if (baseUrl) {
+      const base = new URL(baseUrl);
+      if (base.protocol === 'https:' && parsed.protocol === 'http:' && parsed.host === base.host) {
+        parsed.protocol = 'https:';
+        return parsed.toString();
+      }
+    }
+
+    return raw;
+  } catch {
+    return raw;
+  }
+}
+
+function normalizeProductMediaForResponse(req, product) {
+  if (!product || typeof product !== 'object') {
+    return product;
+  }
+
+  const plain = typeof product.toObject === 'function' ? product.toObject() : { ...product };
+  const aspectRatio = Number(plain.imageAspectRatio || 1);
+  let normalizedImages = Array.isArray(plain.images)
+    ? plain.images.map((url) => normalizePublicUrl(req, url)).filter(Boolean)
+    : [];
+
+  let normalizedMedia = Array.isArray(plain.media)
+    ? plain.media
+        .map((entry) => {
+          const type = entry?.type === 'video' ? 'video' : 'image';
+          const url = normalizePublicUrl(req, entry?.url);
+          if (!url) return null;
+          const thumbnailUrl = normalizePublicUrl(req, entry?.thumbnailUrl || (type === 'image' ? url : ''));
+          return {
+            ...entry,
+            type,
+            url,
+            thumbnailUrl: thumbnailUrl || (type === 'image' ? url : ''),
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  if (normalizedMedia.length === 0 && normalizedImages.length > 0) {
+    normalizedMedia = normalizedImages.map((url) => ({
+      type: 'image',
+      url,
+      thumbnailUrl: url,
+      aspectRatio,
+    }));
+  }
+
+  if (normalizedImages.length === 0 && normalizedMedia.length > 0) {
+    normalizedImages = normalizedMedia
+      .filter((entry) => entry.type === 'image')
+      .map((entry) => entry.url);
+  }
+
+  return {
+    ...plain,
+    images: normalizedImages,
+    media: normalizedMedia,
+  };
 }
 
 function mapAddressToSellerPickup(addressDoc = {}, overrides = {}) {
@@ -155,9 +272,11 @@ async function persistImageDataUri(req, dataUri) {
   }
 
   const mediaUrl = `${getPublicBaseUrl(req)}/uploads/products/${fileName}`;
+  const normalizedMediaUrl = normalizePublicUrl(req, mediaUrl) || mediaUrl;
+  const normalizedThumbUrl = normalizePublicUrl(req, thumbnailUrl) || thumbnailUrl || normalizedMediaUrl;
   return {
-    url: mediaUrl,
-    thumbnailUrl: thumbnailUrl || mediaUrl,
+    url: normalizedMediaUrl,
+    thumbnailUrl: normalizedThumbUrl || normalizedMediaUrl,
   };
 }
 
@@ -520,7 +639,7 @@ router.get('/', async (req, res) => {
       const key = String(item._id);
       plain.monthlySold = soldByProduct.get(key) || 0;
       plain.monthlySaves = savesByProduct.get(key) || 0;
-      return plain;
+      return normalizeProductMediaForResponse(req, plain);
     });
 
     res.json({
@@ -710,10 +829,16 @@ router.post('/media/upload', auth, async (req, res) => {
         }
       }
 
+      const normalizedUrl = normalizePublicUrl(req, rawUrl);
+      if (!normalizedUrl) {
+        return res.status(400).json({ message: 'Invalid media URL. Please retry the upload.' });
+      }
+      const normalizedThumb = normalizePublicUrl(req, rawThumbnail || (type === 'image' ? normalizedUrl : ''));
+
       prepared.push({
         type,
-        url: rawUrl,
-        thumbnailUrl: rawThumbnail || (type === 'image' ? rawUrl : ''),
+        url: normalizedUrl,
+        thumbnailUrl: normalizedThumb || (type === 'image' ? normalizedUrl : ''),
         aspectRatio: safeRatio,
       });
     }
@@ -742,7 +867,7 @@ router.post('/media/upload-file', auth, mediaUpload.single('file'), async (req, 
     if (req.file) {
       const fileName = path.basename(req.file.path || req.file.filename || req.file.originalname);
       const publicUrl = `${getPublicBaseUrl(req)}/uploads/products/${fileName}`;
-      return res.json({ url: publicUrl });
+      return res.json({ url: normalizePublicUrl(req, publicUrl) || publicUrl });
     }
 
     // Fallback: accept JSON uploads containing a Base64-encoded file.
@@ -759,7 +884,7 @@ router.post('/media/upload-file', auth, mediaUpload.single('file'), async (req, 
         await fs.promises.mkdir(PRODUCT_UPLOAD_DIR, { recursive: true });
         await fs.promises.writeFile(destPath, Buffer.from(b64, 'base64'));
         const publicUrl = `${getPublicBaseUrl(req)}/uploads/products/${destName}`;
-        return res.json({ url: publicUrl });
+        return res.json({ url: normalizePublicUrl(req, publicUrl) || publicUrl });
       } catch (writeErr) {
         console.error('[UPLOAD FILE] failed to write base64 upload', writeErr);
         return res.status(500).json({ message: 'Failed to accept uploaded file' });
@@ -1001,7 +1126,7 @@ router.get('/:id', async (req, res) => {
   try {
     const product = await Product.findOne({ _id: req.params.id, isActive: true });
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    res.json(product);
+    res.json(normalizeProductMediaForResponse(req, product));
   } catch (err) {
     if (err.name === 'CastError') {
       return res.status(404).json({ message: 'Product not found' });
@@ -1214,13 +1339,36 @@ router.post('/', auth, async (req, res) => {
           .filter(Boolean)
       : [];
 
-    const finalMedia = sanitizedMedia.length > 0
-      ? sanitizedMedia
-      : sanitizedImages.map((url) => ({ type: 'image', url, thumbnailUrl: url, aspectRatio: parsedAspectRatio }));
+    const normalizedImages = sanitizedImages
+      .map((url) => normalizePublicUrl(req, url))
+      .filter(Boolean);
+
+    const normalizedMedia = sanitizedMedia
+      .map((item) => {
+        const url = normalizePublicUrl(req, item.url);
+        if (!url) return null;
+        const thumbnailUrl = normalizePublicUrl(req, item.thumbnailUrl || (item.type === 'image' ? url : ''));
+        return {
+          ...item,
+          url,
+          thumbnailUrl: thumbnailUrl || (item.type === 'image' ? url : ''),
+        };
+      })
+      .filter(Boolean);
+
+    const hadIncomingMedia = sanitizedMedia.length > 0 || sanitizedImages.length > 0;
+
+    const finalMedia = normalizedMedia.length > 0
+      ? normalizedMedia
+      : normalizedImages.map((url) => ({ type: 'image', url, thumbnailUrl: url, aspectRatio: parsedAspectRatio }));
 
     const finalImages = finalMedia
       .filter((item) => item.type === 'image')
       .map((item) => item.url);
+
+    if (hadIncomingMedia && finalImages.length === 0) {
+      return res.status(400).json({ message: 'Uploaded media must be a public URL or valid image data URI.' });
+    }
 
     const hasDiscount = parsedDiscountedPrice !== null && parsedDiscountedPrice < parsedPrice;
     const computedDiscountPercentage = hasDiscount
