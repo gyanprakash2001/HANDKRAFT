@@ -31,6 +31,9 @@ export function normalizeProductMedia(item: ProductItem): NormalizedProductMedia
       type: entry?.type === 'video' ? 'video' : 'image',
       url: String(entry?.url || '').trim(),
       thumbnailUrl: String(entry?.thumbnailUrl || '').trim() || undefined,
+      thumbnailDataUri: typeof entry?.thumbnailDataUri === 'string' && entry.thumbnailDataUri.trim().startsWith('data:')
+        ? entry.thumbnailDataUri.trim()
+        : undefined,
       aspectRatio: Number.isFinite(Number(entry?.aspectRatio)) ? Number(entry?.aspectRatio) : undefined,
     }))
     .filter((entry) => Boolean(entry.url));

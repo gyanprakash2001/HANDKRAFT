@@ -18,6 +18,7 @@ import {
   getProductReviews,
   getProducts,
   getProfileDashboard,
+  normalizeAssetUrl,
   ProductItem,
   ProductMediaItem,
   ProductReviewGalleryItem,
@@ -151,13 +152,15 @@ function getPostMedia(product: ProductItem | null): ProductMediaItem[] {
       .map((entry) => ({
         type: entry.type === 'video' ? 'video' : 'image',
         url: entry.url,
+        thumbnailUrl: entry.thumbnailUrl,
+        thumbnailDataUri: entry.thumbnailDataUri,
         // Keep video ratio as provided (original), while images can fall back
         // to product.imageAspectRatio.
         aspectRatio: entry.type === 'video' ? entry.aspectRatio : (entry.aspectRatio || product.imageAspectRatio),
       }));
   }
   if (Array.isArray(product.images) && product.images.length) {
-    return product.images.map((url) => ({ type: 'image', url, aspectRatio: product.imageAspectRatio }));
+    return product.images.map((url) => ({ type: 'image', url, thumbnailUrl: url, aspectRatio: product.imageAspectRatio }));
   }
   return [{ type: 'image', url: 'https://placehold.co/900x600?text=Handmade+Item', aspectRatio: product.imageAspectRatio }];
 }
@@ -720,6 +723,7 @@ export default function ProductDetailsScreen() {
                 setActiveMediaIndex(nextIndex);
               }}>
               {productMedia.map((entry, index) => {
+                const imageSource = entry.thumbnailDataUri || entry.thumbnailUrl || entry.url;
                 return entry.type === 'video' ? (
                   <View key={`${entry.url}-${index}`} style={[styles.heroSlide, { height: heroMediaHeight }]}>
                     <ProductVideoSlide uri={entry.url} />
@@ -727,7 +731,7 @@ export default function ProductDetailsScreen() {
                 ) : (
                   <View key={`${entry.url}-${index}`} style={[styles.heroSlide, { height: heroMediaHeight }]}>
                     <Image
-                      source={{ uri: entry.url }}
+                      source={{ uri: normalizeAssetUrl(imageSource) }}
                       style={styles.heroImage}
                       // Keep image look consistent with feed.
                       contentFit="cover"

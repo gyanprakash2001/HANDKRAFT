@@ -178,6 +178,7 @@ function getPostMedia(item: ProductItem): ProductMediaItem[] {
         type: entry.type === 'video' ? 'video' : 'image',
         url: entry.url,
         thumbnailUrl: entry.thumbnailUrl,
+        thumbnailDataUri: entry.thumbnailDataUri,
         // Use explicit entry aspectRatio when available, otherwise fall back
         // to the product's imageAspectRatio so videos match image sizing in the feed.
         aspectRatio: entry.aspectRatio || item.imageAspectRatio,
@@ -501,6 +502,7 @@ export default function FeedScreen() {
               // Feed cards use one fixed ratio per post (from image ratio), so
               // mixed portrait videos do not create large vertical gaps.
               const mediaHeightPx = Math.max(1, Math.round(slideWidth / feedRatio));
+              const imageSource = entry.thumbnailDataUri || entry.thumbnailUrl || entry.url;
 
               return entry.type === 'video' ? (
                 <Pressable
@@ -515,7 +517,7 @@ export default function FeedScreen() {
                   style={[styles.mediaSlideWrap, { width: slideWidth, height: mediaHeightPx }]}
                   onPress={() => openProductDetail(item._id)}>
                   <Image
-                    source={{ uri: normalizeAssetUrl(entry.thumbnailUrl || entry.url) }}
+                    source={{ uri: normalizeAssetUrl(imageSource) }}
                     style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
                     contentFit={imageFitMode}
                   />

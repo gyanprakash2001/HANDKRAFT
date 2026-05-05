@@ -125,7 +125,7 @@ export default function CsrScreen() {
                 <View style={styles.mediaRow}>
                   {item.media.slice(0, 6).map((media, index) => (
                     <Pressable key={`${item.id}-media-${index}`} style={styles.mediaTile} onPress={() => openViewer(media.url, media.type === 'video' ? 'video' : 'image')}>
-                      <Image source={{ uri: media.thumbnailUrl || media.url }} style={styles.mediaImage} contentFit="cover" />
+                      <Image source={{ uri: media.thumbnailDataUri || media.thumbnailUrl || media.url }} style={styles.mediaImage} contentFit="cover" />
                       {media.type === 'video' ? (
                         <View style={styles.videoBadge}>
                           <Ionicons name="play" size={12} color="#ffffff" />

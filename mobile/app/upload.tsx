@@ -1058,7 +1058,7 @@ export default function UploadScreen() {
       // Persist any active transforms before cropping/upload
       persistActiveTransform();
       // Pre-upload any local video files (content:// or file://) and crop images now according to user pan/zoom
-      const mediaForUpload = [] as { type: 'image' | 'video'; url: string; thumbnailUrl?: string; aspectRatio?: number }[];
+      const mediaForUpload = [] as { type: 'image' | 'video'; url: string; thumbnailUrl?: string; thumbnailDataUri?: string; aspectRatio?: number }[];
       setProcessingMedia(true);
       try {
         for (let i = 0; i < mediaItems.length; i++) {
@@ -1090,6 +1090,7 @@ export default function UploadScreen() {
                     type: 'image',
                     url: uploaded.url,
                     thumbnailUrl: uploaded.thumbnailUrl,
+                    thumbnailDataUri: uploaded.thumbnailDataUri,
                     aspectRatio: item.aspectRatio,
                   });
                 } finally {

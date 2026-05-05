@@ -25,6 +25,7 @@ const productSchema = new mongoose.Schema({
     },
     url: { type: String, required: true },
     thumbnailUrl: { type: String, default: '' },
+    thumbnailDataUri: { type: String, default: '' },
     aspectRatio: { type: Number, min: 0.5, max: 2 },
   }],
   customizable: { type: Boolean, default: false },

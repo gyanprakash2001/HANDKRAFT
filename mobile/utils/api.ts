@@ -137,11 +137,14 @@ function normalizeProductMediaEntry(entry: any, fallbackAspectRatio?: number): P
   const ratioCandidate = Number(entry.aspectRatio ?? fallbackAspectRatio);
   const hasValidRatio = Number.isFinite(ratioCandidate) && ratioCandidate > 0;
   const thumbnailCandidate = normalizeAssetUrl(entry.thumbnailUrl || (type === 'image' ? url : ''));
+  const rawThumbnailDataUri = typeof entry?.thumbnailDataUri === 'string' ? entry.thumbnailDataUri.trim() : '';
+  const thumbnailDataUri = rawThumbnailDataUri.startsWith('data:') ? rawThumbnailDataUri : '';
 
   return {
     type,
     url,
     thumbnailUrl: thumbnailCandidate || (type === 'image' ? url : ''),
+    thumbnailDataUri: thumbnailDataUri || undefined,
     aspectRatio: hasValidRatio ? ratioCandidate : undefined,
   };
 }
@@ -249,6 +252,7 @@ export interface ProductMediaItem {
   type: 'image' | 'video';
   url: string;
   thumbnailUrl?: string;
+  thumbnailDataUri?: string;
   aspectRatio?: number;
 }
 
@@ -2350,7 +2354,7 @@ export async function uploadChatImage(conversationId: string, fileUri: string): 
   }
 }
 
-export async function uploadProductFile(fileUri: string): Promise<{ url: string; thumbnailUrl?: string }> {
+export async function uploadProductFile(fileUri: string): Promise<{ url: string; thumbnailUrl?: string; thumbnailDataUri?: string }> {
   const headersObj = await authHeaders();
   const headers: Record<string, string> = {};
   if (headersObj && headersObj.Authorization) headers.Authorization = headersObj.Authorization;
@@ -2384,7 +2388,7 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
       if (res.status >= 200 && res.status < 300) {
         const data = res.body ? JSON.parse(res.body) : {};
         console.log('[uploadProductFile] upload response', { status: res.status, body: data });
-        return { url: data.url, thumbnailUrl: data.thumbnailUrl };
+        return { url: data.url, thumbnailUrl: data.thumbnailUrl, thumbnailDataUri: data.thumbnailDataUri };
       }
 
       // Primary upload returned non-2xx — try fetch fallback
@@ -2402,7 +2406,7 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
     // Fallback: try fetch + FormData
     const fallback = await fetchFormUpload(url, uploadTarget, 'file', headers);
     if (fallback && typeof fallback.url === 'string') {
-      return { url: fallback.url, thumbnailUrl: fallback.thumbnailUrl };
+      return { url: fallback.url, thumbnailUrl: fallback.thumbnailUrl, thumbnailDataUri: fallback.thumbnailDataUri };
     }
     throw new Error('Upload failed');
   } finally {

@@ -14,6 +14,10 @@ const auth = require('../middleware/auth');
 const PRODUCT_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'products');
 // Accept broader image data-URI formats (allow additional params like charset)
 const DATA_URI_IMAGE_REGEX = /^data:(image\/[a-zA-Z0-9+.-]+)(?:;[^,]*)?;base64,(.+)$/i;
+const THUMBNAIL_WIDTH = 540;
+const THUMBNAIL_QUALITY = 72;
+const THUMBNAIL_DATA_URI_MAX_BYTES = 140 * 1024;
+const THUMBNAIL_DATA_URI_MAX_CHARS = 200000;
 const MAX_REVIEW_MEDIA_PER_REVIEW = 10;
 
 const ALLOWED_PRODUCT_CATEGORIES = [
@@ -131,11 +135,13 @@ function normalizeProductMediaForResponse(req, product) {
           const url = normalizePublicUrl(req, entry?.url);
           if (!url) return null;
           const thumbnailUrl = normalizePublicUrl(req, entry?.thumbnailUrl || (type === 'image' ? url : ''));
+          const thumbnailDataUri = sanitizeThumbnailDataUri(entry?.thumbnailDataUri);
           return {
             ...entry,
             type,
             url,
             thumbnailUrl: thumbnailUrl || (type === 'image' ? url : ''),
+            thumbnailDataUri,
           };
         })
         .filter(Boolean)
@@ -244,6 +250,32 @@ function parseImageDataUri(value) {
   return { extension, buffer, mime };
 }
 
+function sanitizeThumbnailDataUri(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.length > THUMBNAIL_DATA_URI_MAX_CHARS) return '';
+  if (!DATA_URI_IMAGE_REGEX.test(trimmed)) return '';
+  return trimmed;
+}
+
+async function createThumbnailBuffer(source) {
+  try {
+    return await sharp(source)
+      .resize({ width: THUMBNAIL_WIDTH, withoutEnlargement: true })
+      .jpeg({ quality: THUMBNAIL_QUALITY })
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+function buildThumbnailDataUri(buffer) {
+  if (!buffer || !buffer.length) return '';
+  if (buffer.length > THUMBNAIL_DATA_URI_MAX_BYTES) return '';
+  return `data:image/jpeg;base64,${buffer.toString('base64')}`;
+}
+
 async function persistImageDataUri(req, dataUri) {
   const parsed = parseImageDataUri(dataUri);
   if (!parsed) {
@@ -261,12 +293,14 @@ async function persistImageDataUri(req, dataUri) {
   await fs.promises.writeFile(filePath, parsed.buffer);
 
   let thumbnailUrl = '';
+  let thumbnailDataUri = '';
   try {
-    await sharp(parsed.buffer)
-      .resize({ width: 540, withoutEnlargement: true })
-      .jpeg({ quality: 72 })
-      .toFile(thumbPath);
-    thumbnailUrl = `${getPublicBaseUrl(req)}/uploads/products/${thumbName}`;
+    const thumbBuffer = await createThumbnailBuffer(parsed.buffer);
+    if (thumbBuffer) {
+      await fs.promises.writeFile(thumbPath, thumbBuffer);
+      thumbnailUrl = `${getPublicBaseUrl(req)}/uploads/products/${thumbName}`;
+      thumbnailDataUri = buildThumbnailDataUri(thumbBuffer);
+    }
   } catch {
     // Keep upload resilient if thumbnail transform fails.
   }
@@ -274,9 +308,11 @@ async function persistImageDataUri(req, dataUri) {
   const mediaUrl = `${getPublicBaseUrl(req)}/uploads/products/${fileName}`;
   const normalizedMediaUrl = normalizePublicUrl(req, mediaUrl) || mediaUrl;
   const normalizedThumbUrl = normalizePublicUrl(req, thumbnailUrl) || thumbnailUrl || normalizedMediaUrl;
+  const normalizedThumbDataUri = sanitizeThumbnailDataUri(thumbnailDataUri);
   return {
     url: normalizedMediaUrl,
     thumbnailUrl: normalizedThumbUrl || normalizedMediaUrl,
+    thumbnailDataUri: normalizedThumbDataUri,
   };
 }
 
@@ -809,6 +845,8 @@ router.post('/media/upload', auth, async (req, res) => {
       const type = entry?.type === 'video' ? 'video' : 'image';
       const rawUrl = typeof entry?.url === 'string' ? entry.url.trim() : '';
       const rawThumbnail = typeof entry?.thumbnailUrl === 'string' ? entry.thumbnailUrl.trim() : '';
+      const rawThumbnailDataUri = typeof entry?.thumbnailDataUri === 'string' ? entry.thumbnailDataUri.trim() : '';
+      const safeThumbnailDataUri = type === 'image' ? sanitizeThumbnailDataUri(rawThumbnailDataUri) : '';
       const ratio = Number(entry?.aspectRatio || 1);
       const safeRatio = Number.isNaN(ratio) ? 1 : Math.max(0.5, Math.min(2, ratio));
 
@@ -823,6 +861,7 @@ router.post('/media/upload', auth, async (req, res) => {
             type: 'image',
             url: persisted.url,
             thumbnailUrl: persisted.thumbnailUrl,
+            thumbnailDataUri: persisted.thumbnailDataUri,
             aspectRatio: safeRatio,
           });
           continue;
@@ -839,6 +878,7 @@ router.post('/media/upload', auth, async (req, res) => {
         type,
         url: normalizedUrl,
         thumbnailUrl: normalizedThumb || (type === 'image' ? normalizedUrl : ''),
+        thumbnailDataUri: safeThumbnailDataUri,
         aspectRatio: safeRatio,
       });
     }
@@ -868,14 +908,16 @@ router.post('/media/upload-file', auth, mediaUpload.single('file'), async (req, 
         const fileName = path.basename(req.file.path || req.file.filename || req.file.originalname);
         const baseName = path.parse(fileName).name;
         let thumbnailUrl = '';
+        let thumbnailDataUri = '';
         try {
           const thumbName = `${baseName}-thumb.jpg`;
           const thumbPath = path.join(PRODUCT_UPLOAD_DIR, thumbName);
-          await sharp(req.file.path)
-            .resize({ width: 540, withoutEnlargement: true })
-            .jpeg({ quality: 72 })
-            .toFile(thumbPath);
-          thumbnailUrl = `${getPublicBaseUrl(req)}/uploads/products/${thumbName}`;
+          const thumbBuffer = await createThumbnailBuffer(req.file.path);
+          if (thumbBuffer) {
+            await fs.promises.writeFile(thumbPath, thumbBuffer);
+            thumbnailUrl = `${getPublicBaseUrl(req)}/uploads/products/${thumbName}`;
+            thumbnailDataUri = buildThumbnailDataUri(thumbBuffer);
+          }
         } catch {
           // Keep upload resilient if thumbnail transform fails.
         }
@@ -883,7 +925,11 @@ router.post('/media/upload-file', auth, mediaUpload.single('file'), async (req, 
         const publicUrl = `${getPublicBaseUrl(req)}/uploads/products/${fileName}`;
         const normalizedUrl = normalizePublicUrl(req, publicUrl) || publicUrl;
         const normalizedThumb = normalizePublicUrl(req, thumbnailUrl) || thumbnailUrl || normalizedUrl;
-        return res.json({ url: normalizedUrl, thumbnailUrl: normalizedThumb || normalizedUrl });
+        return res.json({
+          url: normalizedUrl,
+          thumbnailUrl: normalizedThumb || normalizedUrl,
+          thumbnailDataUri: sanitizeThumbnailDataUri(thumbnailDataUri),
+        });
     }
 
     // Fallback: accept JSON uploads containing a Base64-encoded file.
@@ -899,8 +945,30 @@ router.post('/media/upload-file', auth, mediaUpload.single('file'), async (req, 
         const destPath = path.join(PRODUCT_UPLOAD_DIR, destName);
         await fs.promises.mkdir(PRODUCT_UPLOAD_DIR, { recursive: true });
         await fs.promises.writeFile(destPath, Buffer.from(b64, 'base64'));
+
+        let thumbnailUrl = '';
+        let thumbnailDataUri = '';
+        try {
+          const thumbName = `${path.parse(destName).name}-thumb.jpg`;
+          const thumbPath = path.join(PRODUCT_UPLOAD_DIR, thumbName);
+          const thumbBuffer = await createThumbnailBuffer(destPath);
+          if (thumbBuffer) {
+            await fs.promises.writeFile(thumbPath, thumbBuffer);
+            thumbnailUrl = `${getPublicBaseUrl(req)}/uploads/products/${thumbName}`;
+            thumbnailDataUri = buildThumbnailDataUri(thumbBuffer);
+          }
+        } catch {
+          // Keep upload resilient if thumbnail transform fails.
+        }
+
         const publicUrl = `${getPublicBaseUrl(req)}/uploads/products/${destName}`;
-        return res.json({ url: normalizePublicUrl(req, publicUrl) || publicUrl });
+        const normalizedUrl = normalizePublicUrl(req, publicUrl) || publicUrl;
+        const normalizedThumb = normalizePublicUrl(req, thumbnailUrl) || thumbnailUrl || normalizedUrl;
+        return res.json({
+          url: normalizedUrl,
+          thumbnailUrl: normalizedThumb || normalizedUrl,
+          thumbnailDataUri: sanitizeThumbnailDataUri(thumbnailDataUri),
+        });
       } catch (writeErr) {
         console.error('[UPLOAD FILE] failed to write base64 upload', writeErr);
         return res.status(500).json({ message: 'Failed to accept uploaded file' });
@@ -1343,12 +1411,14 @@ router.post('/', auth, async (req, res) => {
             const type = item?.type === 'video' ? 'video' : 'image';
             const url = typeof item?.url === 'string' ? item.url.trim() : '';
             const thumbnailUrl = typeof item?.thumbnailUrl === 'string' ? item.thumbnailUrl.trim() : '';
+            const thumbnailDataUri = sanitizeThumbnailDataUri(item?.thumbnailDataUri);
             const ratio = Number(item?.aspectRatio || parsedAspectRatio || 1);
             if (!url) return null;
             return {
               type,
               url,
               thumbnailUrl,
+              thumbnailDataUri,
               aspectRatio: Number.isNaN(ratio) ? parsedAspectRatio : Math.max(0.5, Math.min(2, ratio)),
             };
           })
@@ -1364,10 +1434,12 @@ router.post('/', auth, async (req, res) => {
         const url = normalizePublicUrl(req, item.url);
         if (!url) return null;
         const thumbnailUrl = normalizePublicUrl(req, item.thumbnailUrl || (item.type === 'image' ? url : ''));
+        const thumbnailDataUri = sanitizeThumbnailDataUri(item.thumbnailDataUri);
         return {
           ...item,
           url,
           thumbnailUrl: thumbnailUrl || (item.type === 'image' ? url : ''),
+          thumbnailDataUri,
         };
       })
       .filter(Boolean);
