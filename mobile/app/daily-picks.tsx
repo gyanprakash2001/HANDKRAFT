@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { getProducts, getProfileDashboard, getUserOrderHistory, Order, ProductItem } from '@/utils/api';
+import { getProducts, getProfileDashboard, getUserOrderHistory, normalizeAssetUrl, Order, ProductItem } from '@/utils/api';
 import { getFeedBehavior, recordFeedInteraction } from '@/utils/feed-behavior';
 
 const FALLBACK_ASPECT_RATIOS = [1, 0.8, 0.75, 0.67, 1.25];
@@ -61,6 +61,14 @@ function resolveAspectRatio(item: ProductItem) {
 function getSocialProof(item: ProductItem) {
   const sold = Math.max(0, Number(item.monthlySold) || 0);
   return `${sold} sold this month`;
+}
+
+function resolveProductImageSource(item: ProductItem) {
+  const mediaImage = Array.isArray(item.media)
+    ? item.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
+    : null;
+  const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || item.images?.[0] || '';
+  return normalizeAssetUrl(candidate) || 'https://placehold.co/600x400?text=Handmade';
 }
 
 type PickContext = {
@@ -314,7 +322,7 @@ export default function DailyPicksScreen() {
       <View key={item._id} style={styles.feedCard}>
         <Pressable onPress={() => openProduct(item._id)}>
           <Image
-            source={{ uri: item.images?.[0] || 'https://placehold.co/600x400?text=Handmade' }}
+            source={{ uri: resolveProductImageSource(item) }}
             style={[styles.feedCardImage, { aspectRatio: ratio }]}
             contentFit="cover"
           />

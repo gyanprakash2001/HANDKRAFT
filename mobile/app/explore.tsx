@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import LocalAvatar from '@/components/LocalAvatar';
-import { getProducts, ProductItem, getProfile } from '@/utils/api';
+import { getProducts, normalizeAssetUrl, ProductItem, getProfile } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 
@@ -88,6 +88,14 @@ function resolveAspectRatio(item: ProductItem) {
 function getSocialProof(item: ProductItem) {
   const sold = Math.max(0, Number(item.monthlySold) || 0);
   return `${sold} sold this month`;
+}
+
+function resolveProductImageSource(item: ProductItem) {
+  const mediaImage = Array.isArray(item.media)
+    ? item.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
+    : null;
+  const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || item.images?.[0] || '';
+  return normalizeAssetUrl(candidate) || 'https://placehold.co/600x400?text=Handmade';
 }
 
 function normalizeText(value: string) {
@@ -526,7 +534,7 @@ export default function ExploreScreen() {
       <View key={item._id} style={styles.feedCard}>
         <Pressable onPress={() => openProduct(item)}>
           <Image
-            source={{ uri: item.images?.[0] || 'https://placehold.co/600x400?text=Handmade' }}
+            source={{ uri: resolveProductImageSource(item) }}
             style={[styles.feedCardImage, { aspectRatio: ratio }]}
             contentFit="cover"
           />
