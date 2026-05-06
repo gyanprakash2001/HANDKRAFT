@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
-import { ProductItem } from '@/utils/api';
+import { normalizeAssetUrl, ProductItem } from '@/utils/api';
 
 function getEffectiveProductPrice(product: ProductItem) {
   const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
@@ -13,6 +13,14 @@ function getEffectiveProductPrice(product: ProductItem) {
     && discountedPrice < realPrice;
 
   return hasDiscount ? discountedPrice : realPrice;
+}
+
+function resolveProductImageSource(product: ProductItem, fallbackUri: string) {
+  const mediaImage = Array.isArray(product?.media)
+    ? product.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
+    : null;
+  const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || product.images?.[0] || '';
+  return normalizeAssetUrl(candidate) || fallbackUri;
 }
 
 export interface CartNotificationItem {
@@ -67,7 +75,7 @@ export function CartNotification({
                 <Ionicons name="close" size={14} color="#fff" />
               </Pressable>
               <Image
-                source={{ uri: entry.product.images?.[0] || 'https://placehold.co/60x60' }}
+                source={{ uri: resolveProductImageSource(entry.product, 'https://placehold.co/60x60') }}
                 style={styles.itemImage}
                 contentFit="cover"
               />

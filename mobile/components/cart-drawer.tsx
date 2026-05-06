@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
-import { CartItem } from '@/utils/api';
+import { CartItem, normalizeAssetUrl } from '@/utils/api';
 
 function getEffectiveProductPrice(product: CartItem['product']) {
   const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
@@ -13,6 +13,14 @@ function getEffectiveProductPrice(product: CartItem['product']) {
     && discountedPrice < realPrice;
 
   return hasDiscount ? discountedPrice : realPrice;
+}
+
+function resolveProductImageSource(product: CartItem['product'], fallbackUri: string) {
+  const mediaImage = Array.isArray(product?.media)
+    ? product.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
+    : null;
+  const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || product.images?.[0] || '';
+  return normalizeAssetUrl(candidate) || fallbackUri;
 }
 
 interface CartDrawerProps {
@@ -66,7 +74,7 @@ export function CartDrawer({
               {cartItems.map((item) => (
                 <View key={item.product._id} style={styles.cartItem}>
                   <Image
-                    source={{ uri: item.product.images?.[0] || 'https://placehold.co/80x60' }}
+                    source={{ uri: resolveProductImageSource(item.product, 'https://placehold.co/80x60') }}
                     style={styles.itemThumbnail}
                     contentFit="cover"
                   />
