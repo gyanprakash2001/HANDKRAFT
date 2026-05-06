@@ -15,12 +15,12 @@ function getEffectiveProductPrice(product: ProductItem) {
   return hasDiscount ? discountedPrice : realPrice;
 }
 
-function resolveProductImageSource(product: ProductItem, fallbackUri: string) {
+function resolveCartImageSource(product: ProductItem) {
   const mediaImage = Array.isArray(product?.media)
     ? product.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
     : null;
   const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || product.images?.[0] || '';
-  return normalizeAssetUrl(candidate) || fallbackUri;
+  return normalizeAssetUrl(candidate) || 'https://placehold.co/60x60';
 }
 
 export interface CartNotificationItem {
@@ -75,7 +75,7 @@ export function CartNotification({
                 <Ionicons name="close" size={14} color="#fff" />
               </Pressable>
               <Image
-                source={{ uri: resolveProductImageSource(entry.product, 'https://placehold.co/60x60') }}
+                source={{ uri: resolveCartImageSource(entry.product) }}
                 style={styles.itemImage}
                 contentFit="cover"
               />

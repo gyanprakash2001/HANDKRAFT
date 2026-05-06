@@ -15,12 +15,12 @@ function getEffectiveProductPrice(product: CartItem['product']) {
   return hasDiscount ? discountedPrice : realPrice;
 }
 
-function resolveProductImageSource(product: CartItem['product'], fallbackUri: string) {
+function resolveCartImageSource(product: CartItem['product']) {
   const mediaImage = Array.isArray(product?.media)
     ? product.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
     : null;
   const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || product.images?.[0] || '';
-  return normalizeAssetUrl(candidate) || fallbackUri;
+  return normalizeAssetUrl(candidate) || 'https://placehold.co/80x60';
 }
 
 interface CartDrawerProps {
@@ -74,7 +74,7 @@ export function CartDrawer({
               {cartItems.map((item) => (
                 <View key={item.product._id} style={styles.cartItem}>
                   <Image
-                    source={{ uri: resolveProductImageSource(item.product, 'https://placehold.co/80x60') }}
+                    source={{ uri: resolveCartImageSource(item.product) }}
                     style={styles.itemThumbnail}
                     contentFit="cover"
                   />
