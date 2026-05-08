@@ -935,7 +935,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   categoryChip: {
-    borderRadius: 999,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#444',
     backgroundColor: '#181818',
@@ -1090,7 +1090,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#122a1b',
     borderColor: '#2f724b',
     borderWidth: 1,
-    borderRadius: 99,
+    borderRadius: 4,
     overflow: 'hidden',
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1129,7 +1129,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffebee', // light red background
     borderColor: '#e53935', // strong red border
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
