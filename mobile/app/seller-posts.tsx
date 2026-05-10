@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { deleteProduct, getSellerListedItems, ProductItem, normalizeAssetUrl } from '@/utils/api';
+import { deleteProduct, getSellerListedItems, ProductItem } from '@/utils/api';
 import { normalizeProduct } from '@/utils/product';
 
 function formatPrice(value: number) {
@@ -23,14 +23,6 @@ function resolvePostPricing(item: ProductItem) {
     discountedPrice: hasDiscount ? discountedPrice : null,
     effectivePrice: hasDiscount ? discountedPrice : realPrice,
   };
-}
-
-function resolvePostImageSource(item: ProductItem) {
-  const mediaImage = Array.isArray(item?.media)
-    ? item.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
-    : null;
-  const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || item.images?.[0] || '';
-  return normalizeAssetUrl(candidate) || 'https://placehold.co/600x600?text=Handmade';
 }
 
 export default function SellerPostsScreen() {
@@ -126,7 +118,7 @@ export default function SellerPostsScreen() {
       <View key={item._id} style={[styles.postCard, { width: cardWidth }]}>
         <View style={styles.postImageWrap}>
           <Image
-            source={{ uri: resolvePostImageSource(item) }}
+            source={{ uri: item.images?.[0] || 'https://placehold.co/600x600?text=Handmade' }}
             style={styles.postImage}
             contentFit="cover"
           />
@@ -331,6 +323,7 @@ const styles = StyleSheet.create({
   },
   postBody: {
     padding: 10,
+    backgroundColor: '#000000',
   },
   postTitleRow: {
     flexDirection: 'row',
@@ -344,13 +337,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   postBadge: {
-    fontSize: 9,
+    fontSize: 7,
     fontWeight: '700',
     color: '#ffcf85',
     backgroundColor: 'rgba(255, 207, 133, 0.1)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 2,
   },
   postPrice: {
     color: '#9df0a2',
