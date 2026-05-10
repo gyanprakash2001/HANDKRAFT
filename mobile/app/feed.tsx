@@ -928,35 +928,37 @@ const styles = StyleSheet.create({
   },
   categoryScroller: {
     maxHeight: 42,
+    backgroundColor: '#0a0a0a',
   },
   categoryRow: {
     paddingHorizontal: 10,
     paddingBottom: 8,
     gap: 8,
+    backgroundColor: '#0a0a0a',
   },
   categoryChip: {
-    borderRadius: 999,
+    borderRadius: 2,
     borderWidth: 1,
-    borderColor: '#444',
-    backgroundColor: '#181818',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   categoryChipActive: {
-    backgroundColor: '#fff',
-    borderColor: '#fff',
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
   },
   categoryChipPressed: {
     opacity: 0.82,
     transform: [{ scale: 0.97 }],
   },
   categoryChipText: {
-    color: '#ccc',
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
   },
   categoryChipTextActive: {
-    color: '#000',
+    color: '#000000',
   },
   feedContent: {
     paddingHorizontal: FEED_SIDE_PADDING,
