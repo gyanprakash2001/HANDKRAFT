@@ -85,17 +85,17 @@ function resolveAspectRatio(item: ProductItem) {
   return FALLBACK_ASPECT_RATIOS[hash % FALLBACK_ASPECT_RATIOS.length];
 }
 
-function getSocialProof(item: ProductItem) {
-  const sold = Math.max(0, Number(item.monthlySold) || 0);
-  return `${sold} sold this month`;
-}
-
 function resolveProductImageSource(item: ProductItem) {
-  const mediaImage = Array.isArray(item.media)
+  const mediaImage = Array.isArray(item?.media)
     ? item.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
     : null;
   const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || item.images?.[0] || '';
-  return normalizeAssetUrl(candidate) || 'https://placehold.co/600x400?text=Handmade';
+  return normalizeAssetUrl(candidate) || 'https://placehold.co/600x600?text=Handmade';
+}
+
+function getSocialProof(item: ProductItem) {
+  const sold = Math.max(0, Number(item.monthlySold) || 0);
+  return `${sold} sold this month`;
 }
 
 function normalizeText(value: string) {
@@ -935,17 +935,17 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   feedCustomBadge: {
-    fontSize: 9,
+    fontSize: 7,
     fontWeight: '800',
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
     color: '#c7fbd2',
     backgroundColor: '#122a1b',
     borderColor: '#2f724b',
     borderWidth: 1,
-    borderRadius: 99,
+    borderRadius: 2,
     overflow: 'hidden',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
   },
   feedCardTitle: {
     flex: 1,
@@ -978,16 +978,16 @@ const styles = StyleSheet.create({
     top: 8,
     right: 8,
     zIndex: 5,
-    backgroundColor: '#2a1d08',
-    borderColor: '#d89a2b',
+    backgroundColor: '#ffebee',
+    borderColor: '#e53935',
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 2,
     paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingVertical: 2,
   },
   discountBadgeText: {
-    color: '#ffd88a',
-    fontSize: 9,
+    color: '#e53935',
+    fontSize: 8,
     fontWeight: '800',
     letterSpacing: 0.3,
   },

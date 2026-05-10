@@ -937,7 +937,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
   },
   categoryChip: {
-    borderRadius: 2,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#ffffff',
     backgroundColor: '#000000',
