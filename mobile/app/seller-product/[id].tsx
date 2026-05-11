@@ -13,6 +13,7 @@ import {
   SellerProductInsights,
   normalizeAssetUrl,
 } from '@/utils/api';
+import { Theme } from '@/utils/theme';
 
 type Params = {
   id?: string;
@@ -290,9 +291,9 @@ const styles = StyleSheet.create({
   heroCard: {
     borderRadius: 14,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
+    borderWidth: Theme.GlobalCard.borderWidth,
+    borderColor: Theme.GlobalCard.borderColor,
+    backgroundColor: Theme.GlobalCard.backgroundColor,
   },
   heroImage: {
     width: '100%',
@@ -348,12 +349,7 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     width: '48.8%',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
-    paddingHorizontal: 10,
-    paddingVertical: 12,
+    ...Theme.CompactCard,
   },
   metricValue: {
     color: '#fff',
@@ -367,12 +363,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sectionCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    ...Theme.GlobalCard,
   },
   sectionTitle: {
     color: '#fff',

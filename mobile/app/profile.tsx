@@ -35,6 +35,7 @@ import {
   getDefaultAvatars,
 } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
+import { Theme } from '@/utils/theme';
 
 // Local in-app avatar manifest (emoji + gradient) — non-human, neutral
 const LOCAL_MANIFEST: string[] = Array.from({ length: 30 }, (_, i) => `local:avatar${String(i + 1).padStart(2, '0')}`);
@@ -1716,18 +1717,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f1824',
   },
   buyerProfileCard: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    ...Theme.GlobalCard,
     marginHorizontal: 12,
     marginTop: 8,
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#223346',
-    backgroundColor: '#0f1824',
+    padding: 12,
   },
   avatar: {
     width: 76,
@@ -1884,13 +1881,9 @@ const styles = StyleSheet.create({
   },
   // Order Styles
   orderCard: {
+    ...Theme.GlobalCard,
     marginHorizontal: 0,
     marginBottom: 12,
-    padding: 12,
-    backgroundColor: '#101a27',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#24364a',
   },
   orderHeader: {
     flexDirection: 'row',
@@ -1970,12 +1963,8 @@ const styles = StyleSheet.create({
     color: '#d7e7fb',
   },
   addressCard: {
+    ...Theme.GlobalCard,
     marginBottom: 10,
-    padding: 12,
-    backgroundColor: '#101a27',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#24364a',
   },
   addressHeader: {
     flexDirection: 'row',
@@ -2464,13 +2453,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sellerInsightCard: {
+    ...Theme.GlobalCard,
     marginHorizontal: 0,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
     gap: 7,
   },
   sellerInsightHeader: {
@@ -2508,7 +2492,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#ffffff',
+    borderColor: Theme.Colors.White,
+    backgroundColor: Theme.Colors.DarkBg,
     paddingVertical: 12,
   },
   sellerAlertHeaderRow: {
@@ -2531,8 +2516,8 @@ const styles = StyleSheet.create({
   sellerAlertCountPill: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
+    borderColor: Theme.Colors.White,
+    backgroundColor: Theme.Colors.Black,
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
@@ -2548,7 +2533,7 @@ const styles = StyleSheet.create({
   sellerAlertSlideCard: {
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#ffffff',
+    borderColor: Theme.Colors.White,
     paddingHorizontal: 10,
     paddingVertical: 10,
     marginRight: 10,
@@ -2615,14 +2600,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sellerOrderCard: {
+    ...Theme.CompactCard,
     marginHorizontal: 2,
     marginBottom: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2a3850',
-    backgroundColor: '#111a28',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   sellerOrderHeaderRow: {
     flexDirection: 'row',
@@ -2675,12 +2655,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   sellerAddressDetailCard: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#334963',
-    backgroundColor: '#152234',
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    ...Theme.CompactCard,
   },
   sellerAddressDetailTitle: {
     color: '#f0f6ff',
@@ -2694,13 +2669,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sellerOrderItemCard: {
+    ...Theme.CompactCard,
     marginTop: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#334963',
-    backgroundColor: '#152234',
-    paddingHorizontal: 10,
-    paddingVertical: 9,
   },
   sellerOrderItemTopRow: {
     flexDirection: 'row',
@@ -2838,14 +2808,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   card: {
+    ...Theme.CompactCard,
     flex: 1,
     marginHorizontal: 4,
     marginBottom: 10,
-    borderColor: '#24364a',
-    borderWidth: 1,
-    borderRadius: 13,
-    backgroundColor: '#101a27',
-    overflow: 'hidden',
   },
   cardImage: {
     width: '100%',

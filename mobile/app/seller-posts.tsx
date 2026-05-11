@@ -8,6 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { deleteProduct, getSellerListedItems, ProductItem, normalizeAssetUrl } from '@/utils/api';
 import { normalizeProduct } from '@/utils/product';
+import { Theme } from '@/utils/theme';
 
 function formatPrice(value: number) {
   return `₹${Number(value || 0).toLocaleString('en-IN')}`;
@@ -283,17 +284,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   summaryRow: {
+    ...Theme.CompactCard,
     marginTop: 4,
     marginBottom: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#233247',
-    backgroundColor: '#111a27',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   summaryTitle: {
     color: '#a9b5c4',
@@ -314,10 +310,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   postCard: {
-    borderRadius: 10,
-    backgroundColor: '#000000',
-    borderWidth: 1,
-    borderColor: '#ffffff',
+    ...Theme.CompactCard,
     overflow: 'hidden',
   },
   postImageWrap: {
@@ -344,13 +337,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   postBadge: {
-    fontSize: 7,
-    fontWeight: '700',
-    color: '#ffcf85',
-    backgroundColor: 'rgba(255, 207, 133, 0.1)',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 2,
+    ...Theme.PostTag,
+    ...Theme.PostTagText,
   },
   postPrice: {
     color: '#9df0a2',
