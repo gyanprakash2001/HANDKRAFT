@@ -13,7 +13,6 @@ import LocalAvatar from '@/components/LocalAvatar';
 import { getProducts, normalizeAssetUrl, ProductItem, getProfile } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
-import { Theme } from '@/utils/theme';
 
 const RECENT_SEARCHES_KEY = 'HANDKRAFT_RECENT_SEARCHES';
 const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
@@ -873,10 +872,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   categoryChip: {
-    ...Theme.CategoryChip,
-    minHeight: 32,
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  categoryChipText: Theme.CategoryChipText,
+  categoryChipText: {
+    color: '#dcecff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   loaderWrap: {
     flex: 1,
     alignItems: 'center',
@@ -904,10 +914,10 @@ const styles = StyleSheet.create({
   },
   feedCard: {
     position: 'relative',
-    borderRadius: 12,
+    borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: Theme.Colors.Black,
-    borderColor: Theme.Colors.White,
+    backgroundColor: '#0f1724',
+    borderColor: '#243449',
     borderWidth: 1,
   },
   feedCardImage: {
@@ -918,7 +928,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 8,
     paddingBottom: 10,
-    backgroundColor: Theme.Colors.Black,
   },
   feedTitleRow: {
     flexDirection: 'row',
@@ -926,17 +935,28 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   feedCustomBadge: {
-    ...Theme.PostTag,
-    ...Theme.PostTagText,
+    fontSize: 7,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    color: '#c7fbd2',
+    backgroundColor: '#122a1b',
+    borderColor: '#2f724b',
+    borderWidth: 1,
+    borderRadius: 2,
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
   },
   feedCardTitle: {
     flex: 1,
-    ...Theme.HeadingText,
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
     lineHeight: 18,
   },
   feedPriceText: {
-    color: Theme.Colors.GreenAccent,
-    fontSize: 18,
+    color: '#e7efe9',
+    fontSize: 20,
     fontWeight: '800',
     letterSpacing: 0.2,
   },
@@ -947,7 +967,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   originalPriceText: {
-    color: Theme.Colors.SubtleGray,
+    color: '#8ea1b6',
     fontSize: 11,
     fontWeight: '700',
     textDecorationLine: 'line-through',
@@ -958,14 +978,24 @@ const styles = StyleSheet.create({
     top: 8,
     right: 8,
     zIndex: 5,
-    ...Theme.DiscountBadge,
+    backgroundColor: '#ffebee',
+    borderColor: '#e53935',
+    borderWidth: 1,
+    borderRadius: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   discountBadgeText: {
-    ...Theme.DiscountBadgeText,
+    color: '#e53935',
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   feedSocialProofText: {
     marginTop: 4,
-    ...Theme.SubtleText,
+    color: '#7d8fa6',
+    fontSize: 12,
+    fontWeight: '600',
   },
   resultHighlightStrong: {
     backgroundColor: '#29486d',

@@ -221,6 +221,38 @@ function PageHeader({ title, subtitle, actions }) {
   );
 }
 
+function SurfaceCard({ title, children, sx, action }) {
+  return (
+    <Card className="admin-panel" sx={{ ...sx }}>
+      <CardContent sx={{ '&:last-child': { pb: 2 } }}>
+        {title || action ? (
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+            {title ? <Typography variant="h6">{title}</Typography> : <span />}
+            {action || null}
+          </Stack>
+        ) : null}
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatCard({ label, value, detail, accent = false }) {
+  return (
+    <Card className="admin-panel admin-stat-card" sx={{ height: '100%' }}>
+      <CardContent sx={{ '&:last-child': { pb: 2 } }}>
+        <Typography color="text.secondary" variant="body2" sx={{ mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {label}
+        </Typography>
+        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.04em', color: accent ? 'primary.main' : 'text.primary' }}>
+          {value}
+        </Typography>
+        {detail ? <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{detail}</Typography> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function LoginPage({ onLoggedIn }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -349,45 +381,39 @@ function DashboardPage({ showToast }) {
         <Stack spacing={2.5}>
           <Grid container spacing={2}>
             <Grid item xs={12} md={3}>
-              <Card><CardContent><Typography color="text.secondary">Users</Typography><Typography variant="h4">{overview.users?.total || 0}</Typography><Typography variant="body2">Active: {overview.users?.active || 0} | Suspended: {overview.users?.suspended || 0}</Typography></CardContent></Card>
+              <StatCard label="Users" value={overview.users?.total || 0} detail={`Active: ${overview.users?.active || 0} | Suspended: ${overview.users?.suspended || 0}`} accent />
             </Grid>
             <Grid item xs={12} md={3}>
-              <Card><CardContent><Typography color="text.secondary">Products</Typography><Typography variant="h4">{overview.products?.total || 0}</Typography><Typography variant="body2">Active: {overview.products?.active || 0} | Inactive: {overview.products?.inactive || 0}</Typography></CardContent></Card>
+              <StatCard label="Products" value={overview.products?.total || 0} detail={`Active: ${overview.products?.active || 0} | Inactive: ${overview.products?.inactive || 0}`} />
             </Grid>
             <Grid item xs={12} md={3}>
-              <Card><CardContent><Typography color="text.secondary">Orders</Typography><Typography variant="h4">{overview.orders?.total || 0}</Typography><Typography variant="body2">Total order records in MongoDB</Typography></CardContent></Card>
+              <StatCard label="Orders" value={overview.orders?.total || 0} detail="Total order records in MongoDB" />
             </Grid>
             <Grid item xs={12} md={3}>
-              <Card><CardContent><Typography color="text.secondary">Conversations</Typography><Typography variant="h4">{overview.chats?.conversations || 0}</Typography><Typography variant="body2">Messages: {overview.chats?.messages || 0}</Typography></CardContent></Card>
+              <StatCard label="Conversations" value={overview.chats?.conversations || 0} detail={`Messages: ${overview.chats?.messages || 0}`} />
             </Grid>
           </Grid>
 
-          <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 1.5 }}>Integration Readiness</Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Chip label={`Health: ${health?.ok ? 'OK' : 'Unknown'}`} color={health?.ok ? 'success' : 'default'} />
-                <Chip label={`Razorpay: ${readiness?.readiness?.razorpay?.ready ? 'Ready' : 'Not Ready'}`} color={readiness?.readiness?.razorpay?.ready ? 'success' : 'warning'} />
-                <Chip label={`NimbusPost: ${readiness?.readiness?.nimbuspost?.ready ? 'Ready' : 'Not Ready'}`} color={readiness?.readiness?.nimbuspost?.ready ? 'success' : 'warning'} />
-                <Chip label={`Nimbus Mode: ${readiness?.readiness?.nimbuspost?.mode || '-'}`} variant="outlined" />
-                <Chip label={`Mongo ReadyState: ${overview.system?.mongoReadyState ?? '-'}`} variant="outlined" />
-                <Chip label={`Uptime: ${overview.system?.uptimeSeconds || 0}s`} variant="outlined" />
-              </Stack>
-            </CardContent>
-          </Card>
+          <SurfaceCard title="Integration Readiness">
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Chip label={`Health: ${health?.ok ? 'OK' : 'Unknown'}`} color={health?.ok ? 'success' : 'default'} />
+              <Chip label={`Razorpay: ${readiness?.readiness?.razorpay?.ready ? 'Ready' : 'Not Ready'}`} color={readiness?.readiness?.razorpay?.ready ? 'success' : 'warning'} />
+              <Chip label={`NimbusPost: ${readiness?.readiness?.nimbuspost?.ready ? 'Ready' : 'Not Ready'}`} color={readiness?.readiness?.nimbuspost?.ready ? 'success' : 'warning'} />
+              <Chip label={`Nimbus Mode: ${readiness?.readiness?.nimbuspost?.mode || '-'}`} variant="outlined" />
+              <Chip label={`Mongo ReadyState: ${overview.system?.mongoReadyState ?? '-'}`} variant="outlined" />
+              <Chip label={`Uptime: ${overview.system?.uptimeSeconds || 0}s`} variant="outlined" />
+            </Stack>
+          </SurfaceCard>
 
-          <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 1.5 }}>Payout Status Snapshot</Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {Object.entries(overview.payouts || {}).length === 0 ? (
-                  <Typography color="text.secondary">No payout records yet</Typography>
-                ) : Object.entries(overview.payouts || {}).map(([status, count]) => (
-                  <Chip key={status} label={`${status}: ${count}`} />
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
+          <SurfaceCard title="Payout Status Snapshot">
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {Object.entries(overview.payouts || {}).length === 0 ? (
+                <Typography color="text.secondary">No payout records yet</Typography>
+              ) : Object.entries(overview.payouts || {}).map(([status, count]) => (
+                <Chip key={status} label={`${status}: ${count}`} />
+              ))}
+            </Stack>
+          </SurfaceCard>
         </Stack>
       ) : null}
     </Box>
@@ -507,7 +533,7 @@ function UsersPage({ showToast }) {
         ]}
       />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
         <TextField label="Search name/email/phone" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
         <FormControl sx={{ minWidth: 140 }}>
           <InputLabel>Status</InputLabel>
@@ -755,7 +781,7 @@ function ProductsPage({ showToast }) {
         ]}
       />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
         <TextField label="Search title/description/seller" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
         <FormControl sx={{ minWidth: 160 }}>
           <InputLabel>Status</InputLabel>
@@ -970,7 +996,7 @@ function OrdersPage({ showToast }) {
         ]}
       />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
         <TextField label="Search order ID / buyer" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
         <FormControl sx={{ minWidth: 160 }}>
           <InputLabel>Order Status</InputLabel>
@@ -1192,7 +1218,7 @@ function PayoutsPage({ showToast }) {
         ]}
       />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
         <FormControl sx={{ minWidth: 220 }}>
           <InputLabel>Status</InputLabel>
           <Select label="Status" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value, page: 1 }))}>
@@ -1362,7 +1388,7 @@ function ReviewsPage({ showToast }) {
         ]}
       />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
         <TextField label="Search title/comment" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
         <FormControl sx={{ minWidth: 160 }}>
           <InputLabel>Visibility</InputLabel>
@@ -1528,7 +1554,7 @@ function ChatsPage({ showToast }) {
         ]}
       />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
         <TextField label="Search messages, product title, participants" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
       </Stack>
 
@@ -1804,19 +1830,17 @@ function CsrPage({ showToast }) {
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} md={4}>
-          <Card><CardContent><Typography color="text.secondary">CSR Collected</Typography><Typography variant="h4">₹{Number(summary?.totalContributionAmount || 0).toLocaleString('en-IN')}</Typography></CardContent></Card>
+          <StatCard label="CSR Collected" value={`₹${Number(summary?.totalContributionAmount || 0).toLocaleString('en-IN')}`} />
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card><CardContent><Typography color="text.secondary">Paid Orders Counted</Typography><Typography variant="h4">{Number(summary?.totalPaidOrdersCounted || 0).toLocaleString('en-IN')}</Typography></CardContent></Card>
+          <StatCard label="Paid Orders Counted" value={Number(summary?.totalPaidOrdersCounted || 0).toLocaleString('en-IN')} />
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card><CardContent><Typography color="text.secondary">Completed Milestones</Typography><Typography variant="h4">{Number(summary?.completedMilestones || 0)}</Typography></CardContent></Card>
+          <StatCard label="Completed Milestones" value={Number(summary?.completedMilestones || 0)} />
         </Grid>
       </Grid>
 
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6" sx={{ mb: 1.5 }}>{editingActivity ? 'Edit CSR Activity' : 'Create CSR Activity'}</Typography>
+      <SurfaceCard title={editingActivity ? 'Edit CSR Activity' : 'Create CSR Activity'} sx={{ mb: 2 }}>
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={6}>
               <TextField label="Title" fullWidth value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} />
@@ -1853,10 +1877,9 @@ function CsrPage({ showToast }) {
             <Button variant="contained" onClick={handleSubmit} disabled={saving}>{saving ? 'Saving...' : (editingActivity ? 'Update Activity' : 'Create Activity')}</Button>
             <Button variant="text" onClick={resetForm} disabled={saving}>Clear</Button>
           </Stack>
-        </CardContent>
-      </Card>
+      </SurfaceCard>
 
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} className="admin-table-wrap">
         <Table size="small">
           <TableHead>
             <TableRow>

@@ -52,3 +52,27 @@
   background: rgba(12, 18, 30, 0.76);
   backdrop-filter: blur(14px);
 }
+
+.admin-stat-card {
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.admin-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(124, 231, 255, 0.22);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.32);
+}
+
+.admin-filter-row {
+  padding: 0.25rem 0.1rem 0.5rem;
+}
+
+.admin-filter-row .MuiTextField-root,
+.admin-filter-row .MuiFormControl-root {
+  background: rgba(12, 18, 30, 0.72);
+  border-radius: 14px;
+}
+
+.admin-filter-row .MuiInputBase-root {
+  border-radius: 14px;
+}
