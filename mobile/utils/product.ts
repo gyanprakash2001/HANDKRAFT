@@ -1,4 +1,4 @@
-import { ProductItem, ProductMediaItem } from '@/utils/api';
+import { normalizeAssetUrl, ProductItem, ProductMediaItem } from '@/utils/api';
 
 export type NormalizedProductMediaItem = ProductMediaItem & {
   url: string;
@@ -46,6 +46,19 @@ export function normalizeProductMedia(item: ProductItem): NormalizedProductMedia
   return images
     .map((url) => ({ type: 'image' as const, url: String(url || '').trim(), aspectRatio: Number.isFinite(Number(item.imageAspectRatio)) ? Number(item.imageAspectRatio) : undefined }))
     .filter((entry) => Boolean(entry.url));
+}
+
+export function resolveProductImageUri(item: ProductItem): string {
+  const media = Array.isArray(item.media) ? item.media : [];
+  const imageEntry = media.find(
+    (entry) => entry?.type === 'image' && (entry.thumbnailDataUri || entry.thumbnailUrl || entry.url)
+  );
+  const candidate = imageEntry?.thumbnailDataUri
+    || imageEntry?.thumbnailUrl
+    || imageEntry?.url
+    || item.images?.[0];
+
+  return normalizeAssetUrl(candidate) || '';
 }
 
 export function normalizeProduct(item: ProductItem): NormalizedProduct {

@@ -4,6 +4,21 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const INVALID_ASSET_VALUES = new Set(['null', 'undefined', 'nan']);
+
+function sanitizeAssetValue(value: unknown) {
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const lowered = raw.toLowerCase();
+  if (INVALID_ASSET_VALUES.has(lowered)) {
+    return '';
+  }
+
+  return raw;
+}
 
 function isIpv4Host(host: string) {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
@@ -70,7 +85,7 @@ try {
 console.log(`[API] Base URL candidates: ${API_BASE_URLS.join(' -> ')}`);
 
 export function normalizeAssetUrl(value?: string | null) {
-  const raw = String(value || '').trim();
+  const raw = sanitizeAssetValue(value);
   if (!raw) {
     return '';
   }

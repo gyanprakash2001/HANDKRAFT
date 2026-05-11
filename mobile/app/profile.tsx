@@ -35,10 +35,12 @@ import {
   getDefaultAvatars,
 } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
+import { resolveProductImageUri } from '@/utils/product';
 
 // Local in-app avatar manifest (emoji + gradient) — non-human, neutral
 const LOCAL_MANIFEST: string[] = Array.from({ length: 30 }, (_, i) => `local:avatar${String(i + 1).padStart(2, '0')}`);
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const PRODUCT_FALLBACK_IMAGE = require('../assets/handkraft_logo_trimmed.png');
 
 function resolveFileBaseUrl() {
   if (ENV_BASE_URL) return ENV_BASE_URL.replace(/\/api\/?$/, '');
@@ -198,6 +200,7 @@ export default function ProfileScreen() {
   const [stockUpdatingId, setStockUpdatingId] = useState<string | null>(null);
   const [stockPromptItem, setStockPromptItem] = useState<ProductItem | null>(null);
   const [stockPromptValue, setStockPromptValue] = useState('1');
+  const [failedProductImageIds, setFailedProductImageIds] = useState<Record<string, true>>({});
   const [sellerSeenCount, setSellerSeenCount] = useState(0);
   const [newOrdersTabSeenCount, setNewOrdersTabSeenCount] = useState(0);
   const [pendingSellerBadgeClear, setPendingSellerBadgeClear] = useState(false);
@@ -931,7 +934,17 @@ export default function ProfileScreen() {
     };
   };
 
-  const renderProductCard = (item: ProductItem, sellerModeCard = false) => (
+  const handleProductImageError = useCallback((id: string) => {
+    if (!id) return;
+    setFailedProductImageIds((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+  }, []);
+
+  const renderProductCard = (item: ProductItem, sellerModeCard = false) => {
+    const imageUri = resolveProductImageUri(item);
+    const imageKey = String(item._id || item.title || '');
+    const useFallback = !imageUri || Boolean(imageKey && failedProductImageIds[imageKey]);
+
+    return (
     <Pressable
       style={sellerModeCard ? styles.card : styles.buyerSavedCard}
       onPress={() =>
@@ -941,9 +954,10 @@ export default function ProfileScreen() {
         })
       }>
       <Image
-        source={{ uri: item.images?.[0] || 'https://placehold.co/600x400?text=Handmade' }}
+        source={useFallback ? PRODUCT_FALLBACK_IMAGE : { uri: imageUri }}
         style={sellerModeCard ? styles.cardImage : styles.buyerSavedCardImage}
         contentFit="cover"
+        onError={() => handleProductImageError(imageKey)}
       />
       <View style={sellerModeCard ? styles.cardBody : styles.buyerSavedCardBody}>
         <ThemedText numberOfLines={2} style={sellerModeCard ? styles.cardTitle : styles.buyerSavedCardTitle}>{item.title}</ThemedText>
@@ -982,7 +996,8 @@ export default function ProfileScreen() {
         ) : null}
       </View>
     </Pressable>
-  );
+    );
+  };
 
   const renderOrderItem = ({ item }: { item: Order }) => (
     <Pressable
