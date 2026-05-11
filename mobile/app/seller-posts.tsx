@@ -324,8 +324,6 @@ const styles = StyleSheet.create({
   postBody: {
     padding: 10,
     backgroundColor: '#000000',
-    borderTopWidth: 1,
-    borderTopColor: '#ffffff',
   },
   postTitleRow: {
     flexDirection: 'row',

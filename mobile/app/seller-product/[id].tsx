@@ -11,6 +11,7 @@ import {
   getSellerProductInsights,
   ProductItem,
   SellerProductInsights,
+  normalizeAssetUrl,
 } from '@/utils/api';
 
 type Params = {
@@ -64,6 +65,17 @@ export default function SellerProductInsightsScreen() {
     if (insights.stockStatus === 'low') return styles.stockBadgeLow;
     return styles.stockBadgeHealthy;
   }, [insights]);
+
+  function resolveProductImageSource(it?: ProductItem | null) {
+    try {
+      if (!it) return 'https://placehold.co/900x600?text=Handmade+Item';
+      const rawThumb = (it as any)?.thumbnailDataUri || (it as any)?.thumbnailUrl || (it.images && it.images[0]) || (it as any)?.url || '';
+      const normalized = normalizeAssetUrl(rawThumb);
+      return normalized || String(rawThumb || '').trim() || 'https://placehold.co/900x600?text=Handmade+Item';
+    } catch {
+      return 'https://placehold.co/900x600?text=Handmade+Item';
+    }
+  }
 
   const stockBadgeText = useMemo(() => {
     if (!insights) return 'HEALTHY';
@@ -135,11 +147,11 @@ export default function SellerProductInsightsScreen() {
 
         {item ? (
           <View style={styles.heroCard}>
-            <Image
-              source={{ uri: item.images?.[0] || 'https://placehold.co/900x600?text=Handmade+Item' }}
-              style={styles.heroImage}
-              contentFit="cover"
-            />
+              <Image
+                source={{ uri: resolveProductImageSource(item) }}
+                style={styles.heroImage}
+                contentFit="cover"
+              />
             <View style={styles.heroBody}>
               <ThemedText numberOfLines={2} style={styles.titleText}>{item.title}</ThemedText>
               <View style={styles.titleMetaRow}>
@@ -281,8 +293,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2b3545',
-    backgroundColor: '#121822',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
   },
   heroImage: {
     width: '100%',
@@ -340,8 +352,8 @@ const styles = StyleSheet.create({
     width: '48.8%',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#293446',
-    backgroundColor: '#121b29',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
     paddingHorizontal: 10,
     paddingVertical: 12,
   },
@@ -359,8 +371,8 @@ const styles = StyleSheet.create({
   sectionCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#273245',
-    backgroundColor: '#131a25',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
