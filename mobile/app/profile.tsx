@@ -1712,8 +1712,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
+    borderColor: '#223346',
+    backgroundColor: '#0f1824',
   },
   buyerProfileCard: {
     paddingHorizontal: 12,
@@ -1726,8 +1726,8 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
+    borderColor: '#223346',
+    backgroundColor: '#0f1824',
   },
   avatar: {
     width: 76,
@@ -2392,10 +2392,10 @@ const styles = StyleSheet.create({
   },
   sellerMetricCard: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#131a25',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#ffffff',
+    borderColor: '#273245',
     paddingVertical: 10,
     paddingHorizontal: 8,
     alignItems: 'center',
@@ -2508,7 +2508,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2a3f56',
+    borderColor: '#ffffff',
     paddingVertical: 12,
   },
   sellerAlertHeaderRow: {
@@ -2531,8 +2531,8 @@ const styles = StyleSheet.create({
   sellerAlertCountPill: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#31475f',
-    backgroundColor: '#0f1a28',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
@@ -2548,7 +2548,7 @@ const styles = StyleSheet.create({
   sellerAlertSlideCard: {
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#2b4158',
+    borderColor: '#ffffff',
     paddingHorizontal: 10,
     paddingVertical: 10,
     marginRight: 10,

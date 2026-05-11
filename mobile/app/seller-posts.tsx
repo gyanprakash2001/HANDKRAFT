@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { deleteProduct, getSellerListedItems, ProductItem } from '@/utils/api';
+import { deleteProduct, getSellerListedItems, ProductItem, normalizeAssetUrl } from '@/utils/api';
 import { normalizeProduct } from '@/utils/product';
 
 function formatPrice(value: number) {
@@ -23,6 +23,13 @@ function resolvePostPricing(item: ProductItem) {
     discountedPrice: hasDiscount ? discountedPrice : null,
     effectivePrice: hasDiscount ? discountedPrice : realPrice,
   };
+}
+
+function resolvePostImageSource(item: ProductItem) {
+  const media = Array.isArray(item.media) ? item.media : [];
+  const img = media.find((m) => m.type === 'image' && (m.thumbnailDataUri || m.thumbnailUrl || m.url));
+  const candidate = img?.thumbnailDataUri || img?.thumbnailUrl || img?.url || item.images?.[0] || '';
+  return normalizeAssetUrl(candidate) || 'https://placehold.co/600x600?text=Handmade';
 }
 
 export default function SellerPostsScreen() {
@@ -118,7 +125,7 @@ export default function SellerPostsScreen() {
       <View key={item._id} style={[styles.postCard, { width: cardWidth }]}>
         <View style={styles.postImageWrap}>
           <Image
-            source={{ uri: item.images?.[0] || 'https://placehold.co/600x600?text=Handmade' }}
+            source={{ uri: resolvePostImageSource(item) }}
             style={styles.postImage}
             contentFit="cover"
           />
@@ -308,9 +315,9 @@ const styles = StyleSheet.create({
   },
   postCard: {
     borderRadius: 10,
-    backgroundColor: '#141922',
+    backgroundColor: '#000000',
     borderWidth: 1,
-    borderColor: '#2a3a4f',
+    borderColor: '#ffffff',
     overflow: 'hidden',
   },
   postImageWrap: {

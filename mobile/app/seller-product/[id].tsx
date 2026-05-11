@@ -66,23 +66,21 @@ export default function SellerProductInsightsScreen() {
     return styles.stockBadgeHealthy;
   }, [insights]);
 
-  function resolveProductImageSource(it?: ProductItem | null) {
-    try {
-      if (!it) return 'https://placehold.co/900x600?text=Handmade+Item';
-      const rawThumb = (it as any)?.thumbnailDataUri || (it as any)?.thumbnailUrl || (it.images && it.images[0]) || (it as any)?.url || '';
-      const normalized = normalizeAssetUrl(rawThumb);
-      return normalized || String(rawThumb || '').trim() || 'https://placehold.co/900x600?text=Handmade+Item';
-    } catch {
-      return 'https://placehold.co/900x600?text=Handmade+Item';
-    }
-  }
-
   const stockBadgeText = useMemo(() => {
     if (!insights) return 'HEALTHY';
     if (insights.stockStatus === 'out_of_stock') return 'OUT OF STOCK';
     if (insights.stockStatus === 'low') return 'LOW STOCK';
     return 'HEALTHY STOCK';
   }, [insights]);
+
+  const heroImageUri = useMemo(() => {
+    if (!item) return 'https://placehold.co/900x600?text=Handmade+Item';
+    const media = Array.isArray(item.media) ? item.media : [];
+    const imgEntry = media.find((m) => m.type === 'image' && (m.thumbnailDataUri || m.thumbnailUrl || m.url)) || null;
+    const candidate = imgEntry?.thumbnailDataUri || imgEntry?.thumbnailUrl || imgEntry?.url || item.images?.[0] || '';
+    const normalized = normalizeAssetUrl(candidate);
+    return normalized || 'https://placehold.co/900x600?text=Handmade+Item';
+  }, [item]);
 
   const handleAddStock = async (qty: number) => {
     if (!item || updatingStock) return;
@@ -147,11 +145,11 @@ export default function SellerProductInsightsScreen() {
 
         {item ? (
           <View style={styles.heroCard}>
-              <Image
-                source={{ uri: resolveProductImageSource(item) }}
-                style={styles.heroImage}
-                contentFit="cover"
-              />
+            <Image
+              source={{ uri: heroImageUri }}
+              style={styles.heroImage}
+              contentFit="cover"
+            />
             <View style={styles.heroBody}>
               <ThemedText numberOfLines={2} style={styles.titleText}>{item.title}</ThemedText>
               <View style={styles.titleMetaRow}>
