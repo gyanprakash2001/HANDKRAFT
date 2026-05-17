@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -17,6 +18,7 @@ import { createProduct, uploadProductMedia, uploadProductFile, getProfile, updat
 import AddressPickerModal from '@/components/AddressPickerModal';
 import type { UserAddress } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
+import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
 
 const RATIO_OPTIONS = [
   { label: '1:1', value: 1 },
@@ -223,6 +225,7 @@ function UploadVideoPreview({ uri, onVideoSize }: { uri: string; onVideoSize?: (
 }
 
 export default function UploadScreen() {
+  const insets = useSafeAreaInsets();
   const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
   const MAX_BASE64_CHARS = 8_000_000;
   const MAX_UPLOAD_EDGE_PX = 1600;
@@ -1290,11 +1293,15 @@ export default function UploadScreen() {
 
   const isLocalTabAvatar = useMemo(() => Boolean(userAvatar && String(userAvatar).startsWith('local:')), [userAvatar]);
   const tabAvatarSource = useMemo(() => (isLocalTabAvatar ? null : resolveAvatarSource(userAvatar)), [userAvatar, isLocalTabAvatar]);
+  const headerTopPadding = Math.max(insets.top + 20, 54);
+  const formBottomPadding = getTabBarContentPadding(insets, 20);
+  const tabBarHeight = getCustomTabBarHeight(insets);
+  const tabBarBottomPadding = tabBarHeight - CUSTOM_TAB_BAR_HEIGHT;
 
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
         <View>
           <ThemedText type="title" style={styles.headerTitle}>Sell Item</ThemedText>
           <ThemedText style={styles.headerSubtitle}>Create a listing buyers will love</ThemedText>
@@ -1306,7 +1313,7 @@ export default function UploadScreen() {
 
       <ScrollView
         style={styles.formWrap}
-        contentContainerStyle={styles.formContent}
+        contentContainerStyle={[styles.formContent, { paddingBottom: formBottomPadding }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={formScrollEnabled}>
@@ -1833,7 +1840,7 @@ export default function UploadScreen() {
       />
 
     {/* Bottom Tab Navigation */}
-    <View style={styles.tabBar}>
+    <View style={[styles.tabBar, { height: tabBarHeight, paddingBottom: tabBarBottomPadding }]}>
       <Pressable style={styles.tabItem} onPress={() => router.push('/feed')}>
         <Ionicons name="home-outline" size={26} color="#fff" />
       </Pressable>
@@ -2346,7 +2353,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    height: '100%',
+    height: CUSTOM_TAB_BAR_HEIGHT,
   },
   tabAvatar: {
     width: 30,

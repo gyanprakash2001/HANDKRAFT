@@ -9,24 +9,24 @@ const adminTheme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
-      main: '#7ce7ff',
-      contrastText: '#07111b',
+      main: '#38bdf8',
+      contrastText: '#071015',
     },
     secondary: {
-      main: '#ffb86b',
+      main: '#f59e0b',
     },
     background: {
-      default: '#060b14',
-      paper: '#0d1522',
+      default: '#0b0d10',
+      paper: '#11151b',
     },
     text: {
-      primary: '#edf4ff',
-      secondary: '#8fa3bf',
+      primary: '#f3f6fb',
+      secondary: '#9aa5b1',
     },
     divider: alpha('#d6e0f0', 0.12),
   },
   shape: {
-    borderRadius: 16,
+    borderRadius: 8,
   },
   typography: {
     fontFamily: 'Inter, Segoe UI, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
@@ -37,17 +37,17 @@ const adminTheme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: '#060b14',
-          backgroundImage: 'radial-gradient(circle at top left, rgba(124,231,255,0.08), transparent 28%), radial-gradient(circle at top right, rgba(255,184,107,0.06), transparent 22%), linear-gradient(180deg, #08101c 0%, #060b14 45%, #050910 100%)',
+          backgroundColor: '#0b0d10',
+          backgroundImage: 'linear-gradient(180deg, #10141a 0%, #0b0d10 48%, #090b0e 100%)',
         },
       },
     },
     MuiAppBar: {
       styleOverrides: {
         root: {
-          background: 'rgba(8, 13, 22, 0.86)',
+          background: 'rgba(13, 16, 21, 0.92)',
           backdropFilter: 'blur(18px)',
-          borderBottom: '1px solid rgba(148, 163, 184, 0.15)',
+          borderBottom: '1px solid rgba(176, 186, 201, 0.14)',
           boxShadow: 'none',
         },
       },
@@ -55,8 +55,8 @@ const adminTheme = createTheme({
     MuiDrawer: {
       styleOverrides: {
         paper: {
-          background: 'linear-gradient(180deg, rgba(10,16,27,0.98), rgba(6,10,18,0.98))',
-          borderRight: '1px solid rgba(148, 163, 184, 0.12)',
+          background: '#0d1015',
+          borderRight: '1px solid rgba(176, 186, 201, 0.12)',
         },
       },
     },
@@ -87,14 +87,14 @@ const adminTheme = createTheme({
           fontWeight: 700,
           textTransform: 'uppercase',
           fontSize: '0.72rem',
-          letterSpacing: '0.08em',
+          letterSpacing: 0,
         },
       },
     },
     MuiButton: {
       styleOverrides: {
         root: {
-          borderRadius: 999,
+          borderRadius: 8,
           textTransform: 'none',
           fontWeight: 700,
         },
@@ -103,7 +103,7 @@ const adminTheme = createTheme({
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: 999,
+          borderRadius: 6,
           fontWeight: 700,
         },
       },

@@ -27,15 +27,20 @@ function toFiniteNumber(value: unknown, fallback = 0) {
 export function normalizeProductMedia(item: ProductItem): NormalizedProductMediaItem[] {
   const media = Array.isArray(item.media) ? item.media : [];
   const normalized = media
-    .map((entry): NormalizedProductMediaItem => ({
-      type: entry?.type === 'video' ? 'video' : 'image',
-      url: String(entry?.url || '').trim(),
-      thumbnailUrl: String(entry?.thumbnailUrl || '').trim() || undefined,
-      thumbnailDataUri: typeof entry?.thumbnailDataUri === 'string' && entry.thumbnailDataUri.trim().startsWith('data:')
-        ? entry.thumbnailDataUri.trim()
-        : undefined,
-      aspectRatio: Number.isFinite(Number(entry?.aspectRatio)) ? Number(entry?.aspectRatio) : undefined,
-    }))
+    .map((entry): NormalizedProductMediaItem => {
+      const type = entry?.type === 'video' ? 'video' : 'image';
+      const url = normalizeAssetUrl(entry?.url);
+      const thumbnailUrl = normalizeAssetUrl(entry?.thumbnailUrl || (type === 'image' ? entry?.url : ''));
+      const rawThumbnailDataUri = typeof entry?.thumbnailDataUri === 'string' ? entry.thumbnailDataUri.trim() : '';
+
+      return {
+        type,
+        url,
+        thumbnailUrl: thumbnailUrl || undefined,
+        thumbnailDataUri: rawThumbnailDataUri.startsWith('data:image/') ? rawThumbnailDataUri : undefined,
+        aspectRatio: Number.isFinite(Number(entry?.aspectRatio)) ? Number(entry?.aspectRatio) : undefined,
+      };
+    })
     .filter((entry) => Boolean(entry.url));
 
   if (normalized.length > 0) {
@@ -44,7 +49,12 @@ export function normalizeProductMedia(item: ProductItem): NormalizedProductMedia
 
   const images = Array.isArray(item.images) ? item.images : [];
   return images
-    .map((url) => ({ type: 'image' as const, url: String(url || '').trim(), aspectRatio: Number.isFinite(Number(item.imageAspectRatio)) ? Number(item.imageAspectRatio) : undefined }))
+    .map((url) => ({
+      type: 'image' as const,
+      url: normalizeAssetUrl(url),
+      thumbnailUrl: normalizeAssetUrl(url),
+      aspectRatio: Number.isFinite(Number(item.imageAspectRatio)) ? Number(item.imageAspectRatio) : undefined,
+    }))
     .filter((entry) => Boolean(entry.url));
 }
 
@@ -53,23 +63,27 @@ export function resolveProductImageUri(item: ProductItem): string {
   const imageEntry = media.find(
     (entry) => entry?.type === 'image' && (entry.thumbnailDataUri || entry.thumbnailUrl || entry.url)
   );
-  const candidate = imageEntry?.thumbnailDataUri
-    || imageEntry?.thumbnailUrl
+  const candidate = imageEntry?.thumbnailUrl
     || imageEntry?.url
-    || item.images?.[0];
+    || item.images?.[0]
+    || imageEntry?.thumbnailDataUri;
 
   return normalizeAssetUrl(candidate) || '';
 }
 
 export function normalizeProduct(item: ProductItem): NormalizedProduct {
   const rawImages = Array.isArray(item.images) ? item.images : [];
-  const images = rawImages.map((url) => String(url || '').trim()).filter(Boolean);
+  const images = rawImages.map((url) => normalizeAssetUrl(url)).filter(Boolean);
   const media = normalizeProductMedia(item);
   const price = Math.max(0, toFiniteNumber(item.price, 0));
   const realPrice = Math.max(0, toFiniteNumber(item.realPrice ?? item.price, price));
   const discountedPrice = Number.isFinite(Number(item.discountedPrice)) ? Math.max(0, Number(item.discountedPrice)) : undefined;
   const stock = Math.max(0, toFiniteNumber(item.stock, 0));
   const category = String(item.category || 'Uncategorized').trim() || 'Uncategorized';
+  const mediaImages = media.filter((entry) => entry.type === 'image').map((entry) => entry.url).filter(Boolean);
+  const normalizedImages = images.length > 0
+    ? images
+    : (mediaImages.length > 0 ? mediaImages : ['https://placehold.co/600x400?text=Handmade']);
 
   return {
     ...item,
@@ -80,7 +94,7 @@ export function normalizeProduct(item: ProductItem): NormalizedProduct {
     realPrice,
     discountedPrice,
     stock,
-    images: images.length > 0 ? images : ['https://placehold.co/600x400?text=Handmade'],
+    images: normalizedImages,
     media,
     imageAspectRatio: Number.isFinite(Number(item.imageAspectRatio)) ? Number(item.imageAspectRatio) : undefined,
   };

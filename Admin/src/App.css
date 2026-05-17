@@ -16,41 +16,40 @@
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(circle at top left, rgba(124, 231, 255, 0.08), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(255, 184, 107, 0.05), transparent 24%);
-  opacity: 0.9;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 260px);
+  opacity: 1;
 }
 
 .admin-panel {
   position: relative;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(12, 18, 30, 0.72);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(176, 186, 201, 0.14);
+  background: rgba(17, 21, 27, 0.88);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  border-radius: 8px;
 }
 
 .admin-table-wrap {
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 8px;
 }
 
 .admin-table-wrap .MuiTableHead-root .MuiTableCell-root {
-  background: rgba(15, 23, 42, 0.96);
+  background: rgba(18, 23, 31, 0.98);
 }
 
 .admin-subtle-divider {
-  border-color: rgba(148, 163, 184, 0.12);
+  border-color: rgba(176, 186, 201, 0.12);
 }
 
 .admin-bulk-bar {
-  border: 1px solid rgba(124, 231, 255, 0.18);
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(10, 17, 30, 0.95));
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  background: rgba(17, 21, 27, 0.96);
 }
 
 .admin-glass {
-  background: rgba(12, 18, 30, 0.76);
-  backdrop-filter: blur(14px);
+  background: rgba(17, 21, 27, 0.86);
+  backdrop-filter: blur(12px);
 }
 
 .admin-stat-card {
@@ -59,8 +58,8 @@
 
 .admin-stat-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(124, 231, 255, 0.22);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.32);
+  border-color: rgba(56, 189, 248, 0.24);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
 }
 
 .admin-filter-row {
@@ -69,10 +68,29 @@
 
 .admin-filter-row .MuiTextField-root,
 .admin-filter-row .MuiFormControl-root {
-  background: rgba(12, 18, 30, 0.72);
-  border-radius: 14px;
+  background: rgba(17, 21, 27, 0.72);
+  border-radius: 8px;
 }
 
 .admin-filter-row .MuiInputBase-root {
-  border-radius: 14px;
+  border-radius: 8px;
+}
+
+.admin-mini-stat {
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(13, 16, 21, 0.62);
+}
+
+.admin-mini-stat-warning {
+  border-color: rgba(245, 158, 11, 0.36);
+}
+
+.admin-mini-stat-danger {
+  border-color: rgba(239, 68, 68, 0.36);
+}
+
+.mono-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  word-break: break-all;
 }

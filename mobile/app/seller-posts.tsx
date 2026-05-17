@@ -3,11 +3,13 @@ import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleS
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { deleteProduct, getSellerListedItems, ProductItem } from '@/utils/api';
 import { normalizeProduct, resolveProductImageUri } from '@/utils/product';
+import { getScreenBottomPadding } from '@/utils/safe-area';
 
 function formatPrice(value: number) {
   return `₹${Number(value || 0).toLocaleString('en-IN')}`;
@@ -29,6 +31,7 @@ const POST_FALLBACK_IMAGE = require('../assets/handkraft_logo_trimmed.png');
 
 export default function SellerPostsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
@@ -67,6 +70,8 @@ export default function SellerPostsScreen() {
   }, []);
 
   const cardWidth = useMemo(() => (screenWidth - 32) / 2, [screenWidth]);
+  const headerTopPadding = Math.max(insets.top + 18, 48);
+  const contentBottomPadding = getScreenBottomPadding(insets, 26);
 
   const postColumns = useMemo(() => {
     if (posts.length === 0) {
@@ -198,7 +203,7 @@ export default function SellerPostsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
         <Pressable style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={18} color="#d9e6f8" />
         </Pressable>
@@ -214,7 +219,7 @@ export default function SellerPostsScreen() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadPosts(true)} tintColor="#9df0a2" />}>
           <View style={styles.summaryRow}>
             <ThemedText style={styles.summaryTitle}>Total Listings</ThemedText>

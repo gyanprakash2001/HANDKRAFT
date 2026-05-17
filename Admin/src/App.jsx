@@ -25,6 +25,7 @@ import {
   List,
   ListItem,
   ListItemButton,
+  ListItemIcon,
   ListItemText,
   MenuItem,
   Pagination,
@@ -43,11 +44,37 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
+import ChatIcon from '@mui/icons-material/Chat';
+import DashboardIcon from '@mui/icons-material/Dashboard';
 import LogoutIcon from '@mui/icons-material/Logout';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import ManageSearchIcon from '@mui/icons-material/ManageSearch';
+import MenuIcon from '@mui/icons-material/Menu';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import PaymentsIcon from '@mui/icons-material/Payments';
+import PeopleIcon from '@mui/icons-material/People';
+import RateReviewIcon from '@mui/icons-material/RateReview';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import ShoppingBagIcon from '@mui/icons-material/ShoppingBag';
+import VolunteerActivismIcon from '@mui/icons-material/VolunteerActivism';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   BrowserRouter,
   HashRouter,
@@ -77,11 +104,15 @@ import {
   fetchCsrSummary,
   fetchConversationMessages,
   fetchConversations,
+  fetchInventoryControl,
   fetchOrderDetail,
   fetchOrders,
+  fetchPaymentReconciliations,
   fetchPayouts,
   fetchProducts,
+  fetchRevenueAnalytics,
   fetchReviews,
+  fetchShipments,
   fetchSystemHealth,
   fetchUsers,
   processDuePayouts,
@@ -100,9 +131,12 @@ const drawerWidth = 260;
 const ORDER_STATUS_OPTIONS = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
 const PAYMENT_STATUS_OPTIONS = ['pending', 'completed', 'failed', 'refunded'];
 const ITEM_STATUS_OPTIONS = ['new', 'processing', 'packed', 'shipped', 'delivered', 'cancelled'];
+const SHIPMENT_STATUS_OPTIONS = ['pending', 'ready_for_booking', 'booked', 'awb_assigned', 'pickup_scheduled', 'in_transit', 'delivered', 'cancelled', 'failed'];
 const PAYOUT_STATUS_OPTIONS = ['awaiting_delivery', 'on_hold', 'ready_for_payout', 'paid', 'failed', 'reversed', 'cancelled'];
 const KYC_STATUS_OPTIONS = ['pending', 'verified', 'rejected'];
 const ADMIN_ROLE_OPTIONS = ['support', 'ops', 'finance', 'superadmin'];
+const RECONCILIATION_EVENT_OPTIONS = ['payment_captured', 'payout_record_created', 'payout_hold_started', 'payout_released', 'payout_claimed', 'payout_failed', 'payout_cancelled', 'reserve_released', 'refund_issued', 'split_recalculated'];
+const RECONCILIATION_SOURCE_OPTIONS = ['system', 'admin', 'seller', 'scheduler', 'webhook'];
 const AppRouter = import.meta.env.PROD ? HashRouter : BrowserRouter;
 
 function formatDate(value) {
@@ -110,6 +144,37 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString();
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat('en-IN').format(Number(value || 0));
+}
+
+function statusLabel(value) {
+  return String(value || '-').replace(/_/g, ' ');
+}
+
+function statusColor(value) {
+  const normalized = String(value || '').toLowerCase();
+  if (['completed', 'delivered', 'paid', 'ready_for_payout', 'active', 'success', 'ok'].includes(normalized)) return 'success';
+  if (['failed', 'cancelled', 'refunded', 'inactive', 'suspended'].includes(normalized)) return 'error';
+  if (['shipped', 'in_transit', 'booked', 'awb_assigned', 'pickup_scheduled', 'confirmed'].includes(normalized)) return 'info';
+  if (['pending', 'awaiting_delivery', 'on_hold', 'ready_for_booking'].includes(normalized)) return 'warning';
+  return 'default';
+}
+
+function firstImageFromProduct(product) {
+  if (Array.isArray(product?.images) && product.images[0]) return product.images[0];
+  if (Array.isArray(product?.media) && product.media[0]?.url) return product.media[0].url;
+  return '';
 }
 
 function safeError(error, fallback = 'Request failed') {
@@ -241,15 +306,102 @@ function StatCard({ label, value, detail, accent = false }) {
   return (
     <Card className="admin-panel admin-stat-card" sx={{ height: '100%' }}>
       <CardContent sx={{ '&:last-child': { pb: 2 } }}>
-        <Typography color="text.secondary" variant="body2" sx={{ mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <Typography color="text.secondary" variant="body2" sx={{ mb: 0.75, textTransform: 'uppercase', letterSpacing: 0 }}>
           {label}
         </Typography>
-        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.04em', color: accent ? 'primary.main' : 'text.primary' }}>
+        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: 0, color: accent ? 'primary.main' : 'text.primary' }}>
           {value}
         </Typography>
         {detail ? <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{detail}</Typography> : null}
       </CardContent>
     </Card>
+  );
+}
+
+function MiniStat({ label, value, detail, tone = 'default' }) {
+  const toneClass = tone === 'danger' ? 'admin-mini-stat-danger' : tone === 'warning' ? 'admin-mini-stat-warning' : '';
+  return (
+    <Paper className={`admin-mini-stat ${toneClass}`} variant="outlined">
+      <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0 }}>{label}</Typography>
+      <Typography variant="h6" sx={{ mt: 0.25 }}>{value}</Typography>
+      {detail ? <Typography variant="caption" color="text.secondary">{detail}</Typography> : null}
+    </Paper>
+  );
+}
+
+function ProductImage({ src, alt, size = 44 }) {
+  return src ? (
+    <Box
+      component="img"
+      src={src}
+      alt={alt || 'Product'}
+      sx={{ width: size, height: size, borderRadius: 1.5, objectFit: 'cover', bgcolor: 'action.hover', display: 'block' }}
+      onError={(event) => { event.currentTarget.style.display = 'none'; }}
+    />
+  ) : (
+    <Box sx={{ width: size, height: size, borderRadius: 1.5, bgcolor: 'action.hover', display: 'grid', placeItems: 'center' }}>
+      <Inventory2Icon fontSize="small" color="disabled" />
+    </Box>
+  );
+}
+
+function StatusPills({ counts = {}, order = [] }) {
+  const keys = order.length ? order : Object.keys(counts || {});
+  if (!keys.length) {
+    return <Typography color="text.secondary">No status data yet</Typography>;
+  }
+
+  return (
+    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+      {keys.map((key) => (
+        <Chip
+          key={key}
+          size="small"
+          label={`${statusLabel(key)}: ${Number(counts?.[key] || 0)}`}
+          color={statusColor(key)}
+          variant={Number(counts?.[key] || 0) > 0 ? 'filled' : 'outlined'}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function RevenueChart({ data = [], compact = false }) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return <Typography color="text.secondary">No paid order data for this period.</Typography>;
+  }
+
+  return (
+    <Box sx={{ height: compact ? 220 : 320, width: '100%' }}>
+      <ResponsiveContainer>
+        <AreaChart data={data} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#2f80ed" stopOpacity={0.34} />
+              <stop offset="95%" stopColor="#2f80ed" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="rgba(148, 163, 184, 0.18)" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: '#8fa3bf', fontSize: 11 }} tickMargin={8} minTickGap={24} />
+          <YAxis tick={{ fill: '#8fa3bf', fontSize: 11 }} width={58} tickFormatter={(value) => `Rs ${Number(value || 0)}`} />
+          <RechartsTooltip
+            formatter={(value, name) => (name === 'revenue' ? [formatCurrency(value), 'Revenue'] : [value, 'Orders'])}
+            contentStyle={{ background: '#111827', border: '1px solid rgba(148, 163, 184, 0.22)', borderRadius: 8 }}
+          />
+          <Area type="monotone" dataKey="revenue" stroke="#2f80ed" strokeWidth={2} fill="url(#revenueFill)" />
+        </AreaChart>
+      </ResponsiveContainer>
+    </Box>
+  );
+}
+
+function EmptyTableRow({ colSpan, label }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={colSpan} align="center">
+        <Typography color="text.secondary">{label}</Typography>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -319,6 +471,8 @@ function LoginPage({ onLoggedIn }) {
 function DashboardPage({ showToast }) {
   const [overview, setOverview] = useState(null);
   const [systemData, setSystemData] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [inventory, setInventory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -326,9 +480,11 @@ function DashboardPage({ showToast }) {
     setLoading(true);
     setError('');
     try {
-      const [overviewRes, systemRes] = await Promise.allSettled([
+      const [overviewRes, systemRes, analyticsRes, inventoryRes] = await Promise.allSettled([
         fetchAdminOverview(),
         fetchSystemHealth(),
+        fetchRevenueAnalytics({ days: 30 }),
+        fetchInventoryControl({ threshold: 10, limit: 5 }),
       ]);
 
       if (overviewRes.status === 'fulfilled') {
@@ -346,6 +502,20 @@ function DashboardPage({ showToast }) {
         });
         showToast('System readiness check is currently unavailable', 'warning');
       }
+
+      if (analyticsRes.status === 'fulfilled') {
+        setAnalytics(analyticsRes.value);
+      } else {
+        setAnalytics(null);
+        showToast('Revenue analytics are currently unavailable', 'warning');
+      }
+
+      if (inventoryRes.status === 'fulfilled') {
+        setInventory(inventoryRes.value);
+      } else {
+        setInventory(null);
+        showToast('Inventory controls are currently unavailable', 'warning');
+      }
     } catch (err) {
       const message = safeError(err, 'Failed to load dashboard');
       setError(message);
@@ -361,12 +531,17 @@ function DashboardPage({ showToast }) {
 
   const readiness = systemData?.readiness;
   const health = systemData?.health;
+  const shipmentCounts = analytics?.statusCounts?.shipments || {};
+  const openShipmentCount = Object.entries(shipmentCounts)
+    .filter(([status]) => !['delivered', 'cancelled'].includes(status))
+    .reduce((sum, [, count]) => sum + Number(count || 0), 0);
+  const failedShipmentCount = Number(shipmentCounts.failed || 0);
 
   return (
     <Box>
       <PageHeader
         title="Operations Dashboard"
-        subtitle="Live control summary for your online HANDKRAFT platform"
+        subtitle="Live control summary for orders, revenue, shipment health, inventory, and payouts"
         actions={[
           <Button key="refresh" startIcon={<RefreshIcon />} variant="outlined" onClick={load} disabled={loading}>Refresh</Button>,
         ]}
@@ -379,18 +554,93 @@ function DashboardPage({ showToast }) {
 
       {!loading && overview ? (
         <Stack spacing={2.5}>
-          <Grid container spacing={2}>
+          <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' } }}>
             <Grid item xs={12} md={3}>
-              <StatCard label="Users" value={overview.users?.total || 0} detail={`Active: ${overview.users?.active || 0} | Suspended: ${overview.users?.suspended || 0}`} accent />
+              <StatCard label="Revenue Today" value={formatCurrency(analytics?.totals?.todayRevenue || 0)} detail={`${formatNumber(analytics?.totals?.todayOrders || 0)} paid orders today`} accent />
             </Grid>
             <Grid item xs={12} md={3}>
-              <StatCard label="Products" value={overview.products?.total || 0} detail={`Active: ${overview.products?.active || 0} | Inactive: ${overview.products?.inactive || 0}`} />
+              <StatCard label="Orders" value={overview.orders?.total || 0} detail={`${formatCurrency(analytics?.totals?.lifetimeRevenue || 0)} lifetime paid revenue`} />
             </Grid>
             <Grid item xs={12} md={3}>
-              <StatCard label="Orders" value={overview.orders?.total || 0} detail="Total order records in MongoDB" />
+              <StatCard label="Shipments Needing Attention" value={openShipmentCount} detail={`${failedShipmentCount} failed bookings or syncs`} />
             </Grid>
             <Grid item xs={12} md={3}>
-              <StatCard label="Conversations" value={overview.chats?.conversations || 0} detail={`Messages: ${overview.chats?.messages || 0}`} />
+              <StatCard label="Low Stock Products" value={inventory?.summary?.lowStockProducts || 0} detail={`${inventory?.summary?.outOfStockProducts || 0} out of stock`} />
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '2fr 1fr' } }}>
+            <Grid item xs={12} lg={8}>
+              <SurfaceCard title="30-Day Revenue">
+                <RevenueChart data={analytics?.dailySales || []} compact />
+              </SurfaceCard>
+            </Grid>
+            <Grid item xs={12} lg={4}>
+              <SurfaceCard title="Order Flow">
+                <Stack spacing={1.5}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Order status</Typography>
+                    <StatusPills counts={analytics?.statusCounts?.orders || {}} order={ORDER_STATUS_OPTIONS} />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Payment status</Typography>
+                    <StatusPills counts={analytics?.statusCounts?.payments || {}} order={PAYMENT_STATUS_OPTIONS} />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Shipment status</Typography>
+                    <StatusPills counts={shipmentCounts} order={SHIPMENT_STATUS_OPTIONS} />
+                  </Box>
+                </Stack>
+              </SurfaceCard>
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(3, minmax(0, 1fr))' } }}>
+            <Grid item xs={12} lg={4}>
+              <SurfaceCard title="Top Products">
+                <Stack spacing={1.25}>
+                  {(analytics?.topProducts || []).length === 0 ? (
+                    <Typography color="text.secondary">No paid product sales yet</Typography>
+                  ) : analytics.topProducts.slice(0, 5).map((product) => (
+                    <Stack key={product.productId || product.title} direction="row" spacing={1.25} alignItems="center">
+                      <ProductImage src={product.image} alt={product.title} />
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography fontWeight={700} noWrap>{product.title}</Typography>
+                        <Typography variant="caption" color="text.secondary">{formatNumber(product.quantity)} sold</Typography>
+                      </Box>
+                      <Typography fontWeight={800}>{formatCurrency(product.revenue)}</Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+              </SurfaceCard>
+            </Grid>
+            <Grid item xs={12} lg={4}>
+              <SurfaceCard title="Inventory Alerts">
+                <Stack spacing={1.25}>
+                  {(inventory?.lowStockProducts || []).length === 0 ? (
+                    <Typography color="text.secondary">No low stock products under this threshold</Typography>
+                  ) : inventory.lowStockProducts.map((product) => (
+                    <Stack key={product.id} direction="row" spacing={1.25} alignItems="center">
+                      <ProductImage src={product.image} alt={product.title} />
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography fontWeight={700} noWrap>{product.title}</Typography>
+                        <Typography variant="caption" color="text.secondary">{product.sellerName || 'No seller'} - {product.category || 'Uncategorized'}</Typography>
+                      </Box>
+                      <Chip size="small" icon={<WarningAmberIcon />} label={`${product.stock} left`} color={product.stock <= 0 ? 'error' : 'warning'} />
+                    </Stack>
+                  ))}
+                </Stack>
+              </SurfaceCard>
+            </Grid>
+            <Grid item xs={12} lg={4}>
+              <SurfaceCard title="Platform Snapshot">
+                <Grid container spacing={1.25} sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                  <Grid item xs={6}><MiniStat label="Users" value={overview.users?.total || 0} detail={`${overview.users?.active || 0} active`} /></Grid>
+                  <Grid item xs={6}><MiniStat label="Products" value={overview.products?.total || 0} detail={`${overview.products?.active || 0} active`} /></Grid>
+                  <Grid item xs={6}><MiniStat label="Reviews" value={overview.reviews?.total || 0} detail={`${overview.reviews?.hidden || 0} hidden`} /></Grid>
+                  <Grid item xs={6}><MiniStat label="Chats" value={overview.chats?.conversations || 0} detail={`${overview.chats?.messages || 0} messages`} /></Grid>
+                </Grid>
+              </SurfaceCard>
             </Grid>
           </Grid>
 
@@ -410,12 +660,496 @@ function DashboardPage({ showToast }) {
               {Object.entries(overview.payouts || {}).length === 0 ? (
                 <Typography color="text.secondary">No payout records yet</Typography>
               ) : Object.entries(overview.payouts || {}).map(([status, count]) => (
-                <Chip key={status} label={`${status}: ${count}`} />
+                <Chip key={status} label={`${statusLabel(status)}: ${count}`} color={statusColor(status)} />
               ))}
             </Stack>
           </SurfaceCard>
         </Stack>
       ) : null}
+    </Box>
+  );
+}
+
+function AnalyticsPage({ showToast }) {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetchRevenueAnalytics({ days });
+      setData(response);
+    } catch (err) {
+      showToast(safeError(err, 'Failed to load analytics'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [days, showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <Box>
+      <PageHeader
+        title="Revenue Analytics"
+        subtitle="Sales trend, paid order value, top products, and live order/payment status"
+        actions={[
+          <FormControl key="days" size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Period</InputLabel>
+            <Select label="Period" value={days} onChange={(event) => setDays(Number(event.target.value))}>
+              <MenuItem value={7}>Last 7 days</MenuItem>
+              <MenuItem value={30}>Last 30 days</MenuItem>
+              <MenuItem value={90}>Last 90 days</MenuItem>
+            </Select>
+          </FormControl>,
+          <Button key="refresh" startIcon={<RefreshIcon />} variant="outlined" onClick={load} disabled={loading}>Refresh</Button>,
+        ]}
+      />
+
+      {loading ? <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box> : null}
+      {!loading && data ? (
+        <Stack spacing={2.5}>
+          <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' } }}>
+            <Grid item xs={12} md={3}><StatCard label="Period Revenue" value={formatCurrency(data?.totals?.recentRevenue || 0)} detail={`${formatNumber(data?.totals?.recentOrders || 0)} paid orders`} accent /></Grid>
+            <Grid item xs={12} md={3}><StatCard label="Average Order Value" value={formatCurrency(data?.totals?.recentAverageOrderValue || 0)} detail={`Last ${data.days || days} days`} /></Grid>
+            <Grid item xs={12} md={3}><StatCard label="This Month" value={formatCurrency(data?.totals?.monthRevenue || 0)} detail={`${formatNumber(data?.totals?.monthOrders || 0)} paid orders`} /></Grid>
+            <Grid item xs={12} md={3}><StatCard label="Lifetime Revenue" value={formatCurrency(data?.totals?.lifetimeRevenue || 0)} detail={`${formatNumber(data?.totals?.lifetimeOrders || 0)} paid orders`} /></Grid>
+          </Grid>
+
+          <SurfaceCard title="Sales Trend">
+            <RevenueChart data={data.dailySales || []} />
+          </SurfaceCard>
+
+          <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '7fr 5fr' } }}>
+            <Grid item xs={12} lg={7}>
+              <SurfaceCard title="Top Product Revenue">
+                {(data.topProducts || []).length === 0 ? (
+                  <Typography color="text.secondary">No product sales yet for this period.</Typography>
+                ) : (
+                  <Box sx={{ height: 300 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={data.topProducts || []} layout="vertical" margin={{ top: 8, right: 18, left: 18, bottom: 8 }}>
+                        <CartesianGrid stroke="rgba(148, 163, 184, 0.18)" horizontal={false} />
+                        <XAxis type="number" tick={{ fill: '#8fa3bf', fontSize: 11 }} tickFormatter={(value) => `Rs ${Number(value || 0)}`} />
+                        <YAxis type="category" dataKey="title" width={130} tick={{ fill: '#8fa3bf', fontSize: 11 }} />
+                        <RechartsTooltip
+                          formatter={(value) => [formatCurrency(value), 'Revenue']}
+                          contentStyle={{ background: '#111827', border: '1px solid rgba(148, 163, 184, 0.22)', borderRadius: 8 }}
+                        />
+                        <Bar dataKey="revenue" fill="#20b486" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
+                )}
+              </SurfaceCard>
+            </Grid>
+            <Grid item xs={12} lg={5}>
+              <SurfaceCard title="Live Status Counts">
+                <Stack spacing={1.5}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Orders</Typography>
+                    <StatusPills counts={data.statusCounts?.orders || {}} order={ORDER_STATUS_OPTIONS} />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Payments</Typography>
+                    <StatusPills counts={data.statusCounts?.payments || {}} order={PAYMENT_STATUS_OPTIONS} />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Shipments</Typography>
+                    <StatusPills counts={data.statusCounts?.shipments || {}} order={SHIPMENT_STATUS_OPTIONS} />
+                  </Box>
+                </Stack>
+              </SurfaceCard>
+            </Grid>
+          </Grid>
+        </Stack>
+      ) : null}
+    </Box>
+  );
+}
+
+function ShipmentsPage({ showToast }) {
+  const [filters, setFilters] = useState({ search: '', status: '', page: 1, limit: 20 });
+  const [rows, setRows] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchShipments(filters);
+      setRows(data.shipments || []);
+      setPagination(data.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 });
+    } catch (err) {
+      showToast(safeError(err, 'Failed to load shipments'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <Box>
+      <PageHeader
+        title="Shipment Tracking"
+        subtitle="AWB, courier, delivery state, tracking links, failed booking reason, and item context per order"
+        actions={[
+          <Button key="refresh" startIcon={<RefreshIcon />} onClick={load} variant="outlined" disabled={loading}>Refresh</Button>,
+        ]}
+      />
+
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+        <TextField label="Search order, AWB, courier, ref, or error" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
+        <FormControl sx={{ minWidth: 220 }}>
+          <InputLabel>Shipment Status</InputLabel>
+          <Select label="Shipment Status" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value, page: 1 }))}>
+            <MenuItem value="">All</MenuItem>
+            {SHIPMENT_STATUS_OPTIONS.map((status) => (<MenuItem key={status} value={status}>{statusLabel(status)}</MenuItem>))}
+          </Select>
+        </FormControl>
+      </Stack>
+
+      <TableContainer component={Paper} className="admin-table-wrap">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Shipment</TableCell>
+              <TableCell>Order</TableCell>
+              <TableCell>Buyer / Seller</TableCell>
+              <TableCell>Courier</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Items</TableCell>
+              <TableCell>Updated</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+            ) : rows.length === 0 ? (
+              <EmptyTableRow colSpan={8} label="No shipments found" />
+            ) : rows.map((shipment) => (
+              <TableRow key={shipment.id} hover>
+                <TableCell>
+                  <Typography fontWeight={800}>{shipment.localShipmentRef || '-'}</Typography>
+                  <Typography variant="caption" color="text.secondary">{shipment.awbNumber ? `AWB ${shipment.awbNumber}` : 'AWB not assigned'}</Typography>
+                  {shipment.lastError ? <Typography variant="caption" color="error" sx={{ display: 'block', maxWidth: 260 }}>{shipment.lastError}</Typography> : null}
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" className="mono-id">{shipment.orderId}</Typography>
+                  <Typography variant="caption" color="text.secondary">{formatCurrency(shipment.totalAmount)}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2">{shipment.buyer?.name || shipment.buyer?.email || '-'}</Typography>
+                  <Typography variant="caption" color="text.secondary">Seller: {shipment.seller?.name || shipment.seller?.email || '-'}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2">{shipment.courierName || shipment.preferredCourierName || '-'}</Typography>
+                  <Typography variant="caption" color="text.secondary">{shipment.provider || 'manual / pending'} {shipment.remoteStatus ? `- ${shipment.remoteStatus}` : ''}</Typography>
+                </TableCell>
+                <TableCell><Chip label={statusLabel(shipment.status)} size="small" color={statusColor(shipment.status)} /></TableCell>
+                <TableCell>
+                  <Stack spacing={0.5}>
+                    {(shipment.items || []).slice(0, 2).map((item, index) => (
+                      <Typography key={`${shipment.id}-${index}`} variant="caption">{item.quantity}x {item.title || 'Item'} ({statusLabel(item.fulfillmentStatus)})</Typography>
+                    ))}
+                    {(shipment.items || []).length > 2 ? <Typography variant="caption" color="text.secondary">+{shipment.items.length - 2} more</Typography> : null}
+                  </Stack>
+                </TableCell>
+                <TableCell>{formatDate(shipment.updatedAt)}</TableCell>
+                <TableCell align="right">
+                  <Button
+                    size="small"
+                    startIcon={<OpenInNewIcon />}
+                    href={shipment.trackingUrl || undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    disabled={!shipment.trackingUrl}
+                  >
+                    Track
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1.5 }}>
+        <Typography variant="body2" color="text.secondary">Total: {pagination.total || 0}</Typography>
+        <Pagination page={pagination.page || 1} count={pagination.totalPages || 1} onChange={(_, page) => setFilters((prev) => ({ ...prev, page }))} color="primary" />
+      </Stack>
+    </Box>
+  );
+}
+
+function ReconciliationPage({ showToast }) {
+  const [filters, setFilters] = useState({ search: '', event: '', source: '', page: 1, limit: 20 });
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(true);
+  const [selectedRow, setSelectedRow] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchPaymentReconciliations(filters);
+      setRows(data.reconciliations || []);
+      setSummary(data.summary || null);
+      setPagination(data.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 });
+    } catch (err) {
+      showToast(safeError(err, 'Failed to load payment reconciliation'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <Box>
+      <PageHeader
+        title="Payment Reconciliation"
+        subtitle="Trace payment captures, payout splits, gateway IDs, reserves, and payout lifecycle events"
+        actions={[
+          <Button key="refresh" startIcon={<RefreshIcon />} onClick={load} variant="outlined" disabled={loading}>Refresh</Button>,
+        ]}
+      />
+
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+        <TextField label="Search order, seller, gateway, payout" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
+        <FormControl sx={{ minWidth: 240 }}>
+          <InputLabel>Event</InputLabel>
+          <Select label="Event" value={filters.event} onChange={(e) => setFilters((prev) => ({ ...prev, event: e.target.value, page: 1 }))}>
+            <MenuItem value="">All</MenuItem>
+            {RECONCILIATION_EVENT_OPTIONS.map((event) => (<MenuItem key={event} value={event}>{statusLabel(event)}</MenuItem>))}
+          </Select>
+        </FormControl>
+        <FormControl sx={{ minWidth: 160 }}>
+          <InputLabel>Source</InputLabel>
+          <Select label="Source" value={filters.source} onChange={(e) => setFilters((prev) => ({ ...prev, source: e.target.value, page: 1 }))}>
+            <MenuItem value="">All</MenuItem>
+            {RECONCILIATION_SOURCE_OPTIONS.map((source) => (<MenuItem key={source} value={source}>{source}</MenuItem>))}
+          </Select>
+        </FormControl>
+      </Stack>
+
+      <SurfaceCard title="Reconciliation Summary" sx={{ mb: 2 }}>
+        <Stack spacing={1.25}>
+          <StatusPills counts={(summary?.byEvent || []).reduce((acc, item) => ({ ...acc, [item.event]: item.count }), {})} />
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {(summary?.bySource || []).map((item) => (
+              <Chip key={item.source} label={`${item.source}: ${item.count}`} variant="outlined" />
+            ))}
+          </Stack>
+        </Stack>
+      </SurfaceCard>
+
+      <TableContainer component={Paper} className="admin-table-wrap">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Time</TableCell>
+              <TableCell>Event</TableCell>
+              <TableCell>Order</TableCell>
+              <TableCell>Seller</TableCell>
+              <TableCell>Gateway</TableCell>
+              <TableCell>Payout</TableCell>
+              <TableCell align="right">Amount</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={26} /></TableCell></TableRow>
+            ) : rows.length === 0 ? (
+              <EmptyTableRow colSpan={8} label="No reconciliation rows found" />
+            ) : rows.map((row) => (
+              <TableRow key={row.id} hover>
+                <TableCell>{formatDate(row.createdAt)}</TableCell>
+                <TableCell><Chip label={statusLabel(row.event)} size="small" color={statusColor(row.event)} /></TableCell>
+                <TableCell>
+                  <Typography className="mono-id" variant="body2">{row.order?.id || '-'}</Typography>
+                  <Typography variant="caption" color="text.secondary">{statusLabel(row.order?.paymentStatus)} - {formatCurrency(row.order?.totalAmount)}</Typography>
+                </TableCell>
+                <TableCell>{row.seller?.name || row.seller?.email || '-'}</TableCell>
+                <TableCell>
+                  <Typography variant="caption" className="mono-id">{row.gatewayPaymentId || row.gatewayOrderId || '-'}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Chip size="small" label={statusLabel(row.payoutStatus || row.payout?.status || 'not linked')} color={statusColor(row.payoutStatus || row.payout?.status)} />
+                </TableCell>
+                <TableCell align="right">{formatCurrency(row.amount || row.payout?.netPayoutAmount || 0)}</TableCell>
+                <TableCell align="right"><IconButton size="small" onClick={() => setSelectedRow(row)}><VisibilityIcon fontSize="small" /></IconButton></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1.5 }}>
+        <Typography variant="body2" color="text.secondary">Total: {pagination.total || 0}</Typography>
+        <Pagination page={pagination.page || 1} count={pagination.totalPages || 1} onChange={(_, page) => setFilters((prev) => ({ ...prev, page }))} color="primary" />
+      </Stack>
+
+      <Dialog open={Boolean(selectedRow)} onClose={() => setSelectedRow(null)} fullWidth maxWidth="md">
+        <DialogTitle>Reconciliation Detail</DialogTitle>
+        <DialogContent dividers>
+          {selectedRow ? (
+            <Stack spacing={2}>
+              <Grid container spacing={1.5} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' } }}>
+                <Grid item xs={12} md={4}><MiniStat label="Event" value={statusLabel(selectedRow.event)} detail={selectedRow.source} /></Grid>
+                <Grid item xs={12} md={4}><MiniStat label="Order Total" value={formatCurrency(selectedRow.order?.totalAmount || 0)} detail={selectedRow.order?.id} /></Grid>
+                <Grid item xs={12} md={4}><MiniStat label="Net Payout" value={formatCurrency(selectedRow.payout?.netPayoutAmount || selectedRow.amount || 0)} detail={`Reserve ${formatCurrency(selectedRow.payout?.reserveAmount || 0)}`} /></Grid>
+              </Grid>
+              <TextField
+                label="Snapshot"
+                value={JSON.stringify(selectedRow.snapshot || {}, null, 2)}
+                multiline
+                minRows={10}
+                fullWidth
+                InputProps={{ readOnly: true }}
+              />
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setSelectedRow(null)}>Close</Button></DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+function InventoryPage({ showToast }) {
+  const [filters, setFilters] = useState({ search: '', status: '', threshold: 10, page: 1, limit: 20 });
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetchInventoryControl(filters);
+      setData(response);
+    } catch (err) {
+      showToast(safeError(err, 'Failed to load inventory controls'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const pagination = data?.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 };
+
+  return (
+    <Box>
+      <PageHeader
+        title="Inventory Control"
+        subtitle="Low stock alerts, product availability, and the exact stock movement history"
+        actions={[
+          <Button key="refresh" startIcon={<RefreshIcon />} onClick={load} variant="outlined" disabled={loading}>Refresh</Button>,
+        ]}
+      />
+
+      <Grid container spacing={2} sx={{ mb: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' } }}>
+        <Grid item xs={12} md={3}><StatCard label="Total Stock Units" value={formatNumber(data?.summary?.totalStockUnits || 0)} detail={`${formatNumber(data?.summary?.totalProducts || 0)} products`} /></Grid>
+        <Grid item xs={12} md={3}><StatCard label="Low Stock" value={formatNumber(data?.summary?.lowStockProducts || 0)} detail={`Threshold ${data?.threshold || filters.threshold}`} accent /></Grid>
+        <Grid item xs={12} md={3}><StatCard label="Out Of Stock" value={formatNumber(data?.summary?.outOfStockProducts || 0)} detail="Needs immediate action" /></Grid>
+        <Grid item xs={12} md={3}><StatCard label="Inactive Products" value={formatNumber(data?.summary?.inactiveProducts || 0)} detail={`${formatNumber(data?.summary?.activeProducts || 0)} active`} /></Grid>
+      </Grid>
+
+      <Stack className="admin-filter-row" direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+        <TextField label="Search title, category, seller" value={filters.search} onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))} fullWidth />
+        <TextField label="Low stock threshold" type="number" value={filters.threshold} onChange={(e) => setFilters((prev) => ({ ...prev, threshold: Math.max(1, Number(e.target.value || 1)), page: 1 }))} sx={{ minWidth: 190 }} />
+        <FormControl sx={{ minWidth: 160 }}>
+          <InputLabel>Status</InputLabel>
+          <Select label="Status" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value, page: 1 }))}>
+            <MenuItem value="">All</MenuItem>
+            <MenuItem value="active">Active</MenuItem>
+            <MenuItem value="inactive">Inactive</MenuItem>
+          </Select>
+        </FormControl>
+      </Stack>
+
+      <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '7fr 5fr' } }}>
+        <Grid item xs={12} lg={7}>
+          <SurfaceCard title="Low Stock Products">
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Product</TableCell>
+                    <TableCell>Seller</TableCell>
+                    <TableCell>Price</TableCell>
+                    <TableCell>Stock</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {loading ? (
+                    <TableRow><TableCell colSpan={5} align="center"><CircularProgress size={24} /></TableCell></TableRow>
+                  ) : (data?.lowStockProducts || []).length === 0 ? (
+                    <EmptyTableRow colSpan={5} label="No low stock products at this threshold" />
+                  ) : data.lowStockProducts.map((product) => (
+                    <TableRow key={product.id} hover>
+                      <TableCell>
+                        <Stack direction="row" spacing={1.25} alignItems="center">
+                          <ProductImage src={product.image} alt={product.title} />
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography fontWeight={800} noWrap>{product.title}</Typography>
+                            <Typography variant="caption" color="text.secondary">{product.category || '-'}</Typography>
+                          </Box>
+                        </Stack>
+                      </TableCell>
+                      <TableCell>{product.sellerName || product.sellerEmail || '-'}</TableCell>
+                      <TableCell>{formatCurrency(product.price)}</TableCell>
+                      <TableCell><Chip size="small" label={product.stock} color={product.stock <= 0 ? 'error' : 'warning'} /></TableCell>
+                      <TableCell><Chip size="small" label={product.isActive ? 'active' : 'inactive'} color={product.isActive ? 'success' : 'default'} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">Total: {pagination.total || 0}</Typography>
+              <Pagination page={pagination.page || 1} count={pagination.totalPages || 1} onChange={(_, page) => setFilters((prev) => ({ ...prev, page }))} color="primary" />
+            </Stack>
+          </SurfaceCard>
+        </Grid>
+        <Grid item xs={12} lg={5}>
+          <SurfaceCard title="Recent Stock Movements">
+            <Stack spacing={1.25}>
+              {loading ? <CircularProgress size={24} /> : null}
+              {!loading && (data?.recentTransactions || []).length === 0 ? <Typography color="text.secondary">No stock transactions yet</Typography> : null}
+              {!loading && (data?.recentTransactions || []).slice(0, 12).map((entry) => (
+                <Paper key={entry.id} variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                  <Stack direction="row" spacing={1.25} alignItems="flex-start">
+                    <ProductImage src={entry.product?.image} alt={entry.product?.title} size={38} />
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography fontWeight={800} noWrap>{entry.product?.title || 'Product'}</Typography>
+                      <Typography variant="caption" color={entry.quantityChange < 0 ? 'error' : 'success.main'}>
+                        {entry.quantityChange > 0 ? '+' : ''}{entry.quantityChange} units - {statusLabel(entry.type)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.reason || 'No reason recorded'}</Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">{formatDate(entry.createdAt)}</Typography>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          </SurfaceCard>
+        </Grid>
+      </Grid>
     </Box>
   );
 }
@@ -905,7 +1639,15 @@ function OrdersPage({ showToast }) {
   const openOrder = async (row) => {
     try {
       const data = await fetchOrderDetail(row._id);
-      const order = data.order;
+      const order = {
+        ...data.order,
+        _admin: {
+          orderAuditLog: data.orderAuditLog || [],
+          shipmentEvents: data.shipmentEvents || [],
+          reconciliations: data.reconciliations || [],
+          payouts: data.payouts || [],
+        },
+      };
       setSelectedOrder(order);
       setSelectedOrderForm({
         status: order.status,
@@ -985,6 +1727,8 @@ function OrdersPage({ showToast }) {
       setBulkDeleting(false);
     }
   };
+
+  const selectedOrderAdmin = selectedOrder?._admin || {};
 
   return (
     <Box>
@@ -1068,7 +1812,7 @@ function OrdersPage({ showToast }) {
       </Stack>
 
       <Dialog open={Boolean(selectedOrder)} onClose={() => setSelectedOrder(null)} fullWidth maxWidth="lg">
-        <DialogTitle>Order Detail — {selectedOrder?._id}</DialogTitle>
+        <DialogTitle>Order Detail - {selectedOrder?._id}</DialogTitle>
         <DialogContent dividers>
           {selectedOrder && selectedOrderForm ? (
             <Stack spacing={2}>
@@ -1088,78 +1832,98 @@ function OrdersPage({ showToast }) {
               </Stack>
               <TextField label="Notes" value={selectedOrderForm.notes} onChange={(e) => setSelectedOrderForm((prev) => ({ ...prev, notes: e.target.value }))} fullWidth multiline minRows={2} />
 
-              {/* Shipment Tracking Section */}
               {Array.isArray(selectedOrder.sellerShipments) && selectedOrder.sellerShipments.length > 0 ? (
                 <>
                   <Divider />
-                  <Typography variant="h6">📦 Shipment Tracking</Typography>
-                  {selectedOrder.sellerShipments.map((shipment, sIdx) => (
-                    <Paper key={sIdx} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                      <Stack spacing={1}>
-                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                          <Chip
-                            label={`Status: ${String(shipment.status || 'pending').replace(/_/g, ' ')}`}
-                            color={shipment.status === 'delivered' ? 'success' : shipment.status === 'in_transit' ? 'info' : 'default'}
-                            size="small"
-                          />
-                          {(shipment.carrier?.courierName || shipment.courierName) ? (
-                            <Chip label={`Courier: ${shipment.carrier?.courierName || shipment.courierName}`} variant="outlined" size="small" />
-                          ) : null}
-                          {shipment.localShipmentRef ? (
-                            <Chip label={`Ref: ${shipment.localShipmentRef}`} variant="outlined" size="small" />
-                          ) : null}
-                        </Stack>
-                        {(shipment.carrier?.awbNumber || shipment.awbNumber) ? (
-                          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                            AWB / Tracking ID: {shipment.carrier?.awbNumber || shipment.awbNumber}
-                          </Typography>
-                        ) : (
-                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                            Tracking ID not yet assigned
-                          </Typography>
-                        )}
-                        {(shipment.carrier?.trackingUrl || shipment.trackingUrl) ? (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            href={shipment.carrier?.trackingUrl || shipment.trackingUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            sx={{ alignSelf: 'flex-start' }}
-                          >
-                            Open Tracking Link ↗
-                          </Button>
-                        ) : null}
-                      </Stack>
-                    </Paper>
-                  ))}
+                  <Typography variant="h6">Shipment Tracking</Typography>
+                  <Grid container spacing={1.5} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
+                    {selectedOrder.sellerShipments.map((shipment, sIdx) => {
+                      const carrier = shipment.carrier || {};
+                      const trackingUrl = carrier.trackingUrl || shipment.trackingUrl || '';
+                      return (
+                        <Grid item xs={12} md={6} key={`${shipment.localShipmentRef || sIdx}`}>
+                          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: '100%' }}>
+                            <Stack spacing={1}>
+                              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                <Chip label={statusLabel(shipment.status || 'pending')} color={statusColor(shipment.status)} size="small" />
+                                <Chip label={`Ref ${shipment.localShipmentRef || '-'}`} variant="outlined" size="small" />
+                                <Chip label={`Courier ${carrier.courierName || shipment.preferredCourierName || '-'}`} variant="outlined" size="small" />
+                              </Stack>
+                              <Typography variant="body2" className="mono-id" fontWeight={800}>
+                                AWB: {carrier.awbNumber || shipment.awbNumber || 'Not assigned'}
+                              </Typography>
+                              {shipment.lastError ? <Alert severity="error">{shipment.lastError}</Alert> : null}
+                              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                <Button size="small" variant="outlined" startIcon={<OpenInNewIcon />} href={trackingUrl || undefined} target="_blank" rel="noopener noreferrer" disabled={!trackingUrl}>
+                                  Tracking
+                                </Button>
+                                <Button size="small" variant="outlined" startIcon={<OpenInNewIcon />} href={carrier.labelUrl || undefined} target="_blank" rel="noopener noreferrer" disabled={!carrier.labelUrl}>
+                                  Label
+                                </Button>
+                              </Stack>
+                              {(shipment.timeline || []).slice(-3).map((entry, index) => (
+                                <Typography key={`${shipment.localShipmentRef}-${index}`} variant="caption" color="text.secondary">
+                                  {formatDate(entry.at)} - {statusLabel(entry.status)} {entry.note ? `- ${entry.note}` : ''}
+                                </Typography>
+                              ))}
+                            </Stack>
+                          </Paper>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
                 </>
               ) : null}
 
-              {/* Pricing Summary */}
               <Divider />
-              <Typography variant="h6">💰 Pricing Breakdown</Typography>
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                <Stack spacing={0.5}>
-                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Subtotal</Typography><Typography variant="body2">₹{Number(selectedOrder.subtotal || 0).toFixed(2)}</Typography></Stack>
-                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Shipping</Typography><Typography variant="body2">₹{Number(selectedOrder.shippingCost || 0).toFixed(2)}</Typography></Stack>
-                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Platform Fee</Typography><Typography variant="body2">₹{Number(selectedOrder.platformFee || selectedOrder.tax || 8).toFixed(2)}</Typography></Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>Includes ₹{Number(selectedOrder.csrContributionAmount || 1).toFixed(0)} CSR contribution</Typography>
-                  <Divider sx={{ my: 0.5 }} />
-                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2" fontWeight={700}>Total</Typography><Typography variant="body2" fontWeight={700} color="success.main">₹{Number(selectedOrder.totalAmount || 0).toFixed(2)}</Typography></Stack>
-                </Stack>
-              </Paper>
+              <Typography variant="h6">Payment, Payout, And Pricing</Typography>
+              <Grid container spacing={1.5} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' } }}>
+                <Grid item xs={12} md={4}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: '100%' }}>
+                    <Stack spacing={0.75}>
+                      <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Subtotal</Typography><Typography variant="body2">{formatCurrency(selectedOrder.subtotal || 0)}</Typography></Stack>
+                      <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Shipping</Typography><Typography variant="body2">{formatCurrency(selectedOrder.shippingCost || 0)}</Typography></Stack>
+                      <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Platform Fee</Typography><Typography variant="body2">{formatCurrency(selectedOrder.platformFee || selectedOrder.tax || 8)}</Typography></Stack>
+                      <Typography variant="caption" color="text.secondary">CSR contribution: {formatCurrency(selectedOrder.csrContributionAmount || 1)}</Typography>
+                      <Divider sx={{ my: 0.5 }} />
+                      <Stack direction="row" justifyContent="space-between"><Typography variant="body2" fontWeight={700}>Total</Typography><Typography variant="body2" fontWeight={700} color="success.main">{formatCurrency(selectedOrder.totalAmount || 0)}</Typography></Stack>
+                    </Stack>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: '100%' }}>
+                    <Typography variant="caption" color="text.secondary">Gateway</Typography>
+                    <Typography variant="body2" fontWeight={800}>{selectedOrder.paymentGateway?.provider || selectedOrder.paymentMethod || '-'}</Typography>
+                    <Typography variant="caption" className="mono-id" sx={{ display: 'block' }}>Order: {selectedOrder.paymentGateway?.gatewayOrderId || '-'}</Typography>
+                    <Typography variant="caption" className="mono-id" sx={{ display: 'block' }}>Payment: {selectedOrder.paymentGateway?.gatewayPaymentId || selectedOrder.transactionId || '-'}</Typography>
+                    <Chip sx={{ mt: 1 }} size="small" label={statusLabel(selectedOrder.paymentStatus)} color={statusColor(selectedOrder.paymentStatus)} />
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: '100%' }}>
+                    <Typography variant="caption" color="text.secondary">Payout Split</Typography>
+                    {(selectedOrderAdmin.payouts || []).length === 0 ? (
+                      <Typography color="text.secondary">No payout record linked yet</Typography>
+                    ) : selectedOrderAdmin.payouts.map((payout) => (
+                      <Stack key={payout.id} spacing={0.5} sx={{ mt: 0.75 }}>
+                        <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Net payout</Typography><Typography variant="body2" fontWeight={800}>{formatCurrency(payout.split?.netPayoutAmount || 0)}</Typography></Stack>
+                        <Typography variant="caption" color="text.secondary">Reserve {formatCurrency(payout.split?.reserveAmount || 0)} - Deduction {formatCurrency(payout.split?.deductionsTotal || 0)}</Typography>
+                        <Chip size="small" label={statusLabel(payout.status)} color={statusColor(payout.status)} sx={{ alignSelf: 'flex-start' }} />
+                      </Stack>
+                    ))}
+                  </Paper>
+                </Grid>
+              </Grid>
 
-              {/* Shipping Address */}
               {selectedOrder.shippingAddress ? (
                 <>
-                  <Typography variant="h6">📍 Shipping Address</Typography>
+                  <Typography variant="h6">Shipping Address</Typography>
                   <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
                     <Typography variant="body2" fontWeight={700}>{selectedOrder.shippingAddress.fullName}</Typography>
                     <Typography variant="body2">{selectedOrder.shippingAddress.street}</Typography>
                     <Typography variant="body2">{selectedOrder.shippingAddress.city}, {selectedOrder.shippingAddress.state} {selectedOrder.shippingAddress.postalCode}</Typography>
                     <Typography variant="body2">{selectedOrder.shippingAddress.country}</Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>📱 {selectedOrder.shippingAddress.phoneNumber} • 📧 {selectedOrder.shippingAddress.email}</Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>{selectedOrder.shippingAddress.phoneNumber} - {selectedOrder.shippingAddress.email}</Typography>
                   </Paper>
                 </>
               ) : null}
@@ -1174,6 +1938,7 @@ function OrdersPage({ showToast }) {
                       <TableCell>Item</TableCell>
                       <TableCell>Price</TableCell>
                       <TableCell>Qty</TableCell>
+                      <TableCell>Stock</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="right">Action</TableCell>
                     </TableRow>
@@ -1181,24 +1946,15 @@ function OrdersPage({ showToast }) {
                   <TableBody>
                     {(selectedOrder.items || []).map((item, index) => (
                       <TableRow key={`${selectedOrder._id}-${index}`}>
+                        <TableCell><ProductImage src={item.image || firstImageFromProduct(item.product)} alt={item.title || item?.product?.title} size={48} /></TableCell>
                         <TableCell>
-                          {item.image ? (
-                            <img
-                              src={item.image.startsWith('/') ? `https://handkraft-api-gyan-akgwc4bwesczdage.centralindia-01.azurewebsites.net${item.image}` : item.image}
-                              alt={item.title || 'Product'}
-                              style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover' }}
-                              onError={(e) => { e.target.style.display = 'none'; }}
-                            />
-                          ) : (
-                            <Box sx={{ width: 48, height: 48, borderRadius: 1.5, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <Typography variant="caption" color="text.secondary">—</Typography>
-                            </Box>
-                          )}
+                          <Typography fontWeight={800}>{item?.product?.title || item?.title || '-'}</Typography>
+                          <Typography variant="caption" color="text.secondary">{item?.seller?.name || item?.seller || 'Seller not populated'}</Typography>
                         </TableCell>
-                        <TableCell>{item?.product?.title || item?.title || '-'}</TableCell>
-                        <TableCell>₹{Number(item.price || 0).toFixed(2)}</TableCell>
+                        <TableCell>{formatCurrency(item.price || 0)}</TableCell>
                         <TableCell>{item.quantity || 0}</TableCell>
-                        <TableCell><Chip label={item.fulfillmentStatus} size="small" /></TableCell>
+                        <TableCell>{item?.product?.stock ?? '-'}</TableCell>
+                        <TableCell><Chip label={statusLabel(item.fulfillmentStatus)} size="small" color={statusColor(item.fulfillmentStatus)} /></TableCell>
                         <TableCell align="right">
                           <FormControl size="small" sx={{ minWidth: 180 }}>
                             <InputLabel>Status</InputLabel>
@@ -1216,6 +1972,68 @@ function OrdersPage({ showToast }) {
                   </TableBody>
                 </Table>
               </TableContainer>
+
+              <Grid container spacing={2} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: '100%' }}>
+                    <Typography variant="h6" sx={{ mb: 1 }}>Payment Reconciliation</Typography>
+                    {(selectedOrderAdmin.reconciliations || []).length === 0 ? (
+                      <Typography color="text.secondary">No reconciliation events linked to this order yet.</Typography>
+                    ) : (
+                      <Stack spacing={1}>
+                        {selectedOrderAdmin.reconciliations.map((row) => (
+                          <Stack key={row.id} direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="body2" fontWeight={800}>{statusLabel(row.event)}</Typography>
+                              <Typography variant="caption" color="text.secondary">{formatDate(row.createdAt)} - {row.source}</Typography>
+                            </Box>
+                            <Chip size="small" label={formatCurrency(row.amount || row.payout?.netPayoutAmount || 0)} />
+                          </Stack>
+                        ))}
+                      </Stack>
+                    )}
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: '100%' }}>
+                    <Typography variant="h6" sx={{ mb: 1 }}>Shipment Events</Typography>
+                    {(selectedOrderAdmin.shipmentEvents || []).length === 0 ? (
+                      <Typography color="text.secondary">No shipment events linked to this order yet.</Typography>
+                    ) : (
+                      <Stack spacing={1}>
+                        {selectedOrderAdmin.shipmentEvents.slice(0, 6).map((event) => (
+                          <Box key={event.id}>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Chip size="small" label={statusLabel(event.event)} color={statusColor(event.newStatus || event.event)} />
+                              <Typography variant="caption" color="text.secondary">{formatDate(event.createdAt)}</Typography>
+                            </Stack>
+                            {event.errorMessage ? <Typography variant="caption" color="error">{event.errorMessage}</Typography> : null}
+                          </Box>
+                        ))}
+                      </Stack>
+                    )}
+                  </Paper>
+                </Grid>
+              </Grid>
+
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="h6" sx={{ mb: 1 }}>Order Lifecycle Timeline</Typography>
+                {(selectedOrderAdmin.orderAuditLog || []).length === 0 ? (
+                  <Typography color="text.secondary">No lifecycle events recorded yet.</Typography>
+                ) : (
+                  <Stack spacing={1}>
+                    {selectedOrderAdmin.orderAuditLog.map((entry) => (
+                      <Stack key={entry.id} direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between">
+                        <Box>
+                          <Typography variant="body2" fontWeight={800}>{statusLabel(entry.event)}</Typography>
+                          <Typography variant="caption" color="text.secondary">{entry.note || entry.actorRole}</Typography>
+                        </Box>
+                        <Typography variant="caption" color="text.secondary">{formatDate(entry.createdAt)}</Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
+              </Paper>
             </Stack>
           ) : null}
         </DialogContent>
@@ -1915,7 +2733,7 @@ function CsrPage({ showToast }) {
     <Box>
       <PageHeader
         title="CSR Activities"
-        subtitle="Publish social impact updates funded by ₹1 from each paid order"
+        subtitle="Publish social impact updates funded by the CSR contribution from each paid order"
         actions={[
           <Button key="refresh" startIcon={<RefreshIcon />} variant="outlined" onClick={load} disabled={loading}>Refresh</Button>,
         ]}
@@ -1923,7 +2741,7 @@ function CsrPage({ showToast }) {
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} md={4}>
-          <StatCard label="CSR Collected" value={`₹${Number(summary?.totalContributionAmount || 0).toLocaleString('en-IN')}`} />
+          <StatCard label="CSR Collected" value={formatCurrency(summary?.totalContributionAmount || 0)} />
         </Grid>
         <Grid item xs={12} md={4}>
           <StatCard label="Paid Orders Counted" value={Number(summary?.totalPaidOrdersCounted || 0).toLocaleString('en-IN')} />
@@ -2025,87 +2843,126 @@ function CsrPage({ showToast }) {
 
 function AdminLayout({ profile, onLogout, showToast }) {
   const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const menuItems = useMemo(() => [
-    { label: 'Dashboard', path: '/' },
-    { label: 'Users', path: '/users' },
-    { label: 'Products', path: '/products' },
-    { label: 'Orders', path: '/orders' },
-    { label: 'Payouts', path: '/payouts' },
-    { label: 'Reviews', path: '/reviews' },
-    { label: 'Chats', path: '/chats' },
-    { label: 'CSR', path: '/csr' },
-    { label: 'Audit Logs', path: '/audit' },
+    { label: 'Dashboard', path: '/', icon: <DashboardIcon /> },
+    { label: 'Analytics', path: '/analytics', icon: <AnalyticsIcon /> },
+    { label: 'Shipments', path: '/shipments', icon: <LocalShippingIcon /> },
+    { label: 'Reconciliation', path: '/reconciliation', icon: <PaymentsIcon /> },
+    { label: 'Inventory', path: '/inventory', icon: <Inventory2Icon /> },
+    { label: 'Users', path: '/users', icon: <PeopleIcon /> },
+    { label: 'Products', path: '/products', icon: <ShoppingBagIcon /> },
+    { label: 'Orders', path: '/orders', icon: <ReceiptLongIcon /> },
+    { label: 'Payouts', path: '/payouts', icon: <PaymentsIcon /> },
+    { label: 'Reviews', path: '/reviews', icon: <RateReviewIcon /> },
+    { label: 'Chats', path: '/chats', icon: <ChatIcon /> },
+    { label: 'CSR', path: '/csr', icon: <VolunteerActivismIcon /> },
+    { label: 'Audit Logs', path: '/audit', icon: <ManageSearchIcon /> },
   ], []);
+
+  const drawerContent = (
+    <>
+      <Toolbar sx={{ minHeight: 76 }} />
+      <Box sx={{ px: 2, pt: 2, pb: 1 }}>
+        <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 0 }}>Navigation</Typography>
+      </Box>
+      <List sx={{ px: 1.5, gap: 0.75, display: 'grid' }}>
+        {menuItems.map((item) => {
+          const active = item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
+          return (
+            <ListItem key={item.path} disablePadding>
+              <ListItemButton
+                component={Link}
+                to={item.path}
+                selected={active}
+                onClick={() => setMobileOpen(false)}
+                sx={{
+                  borderRadius: 1,
+                  mb: 0.5,
+                  border: '1px solid transparent',
+                  '&.Mui-selected': {
+                    bgcolor: 'rgba(56, 189, 248, 0.12)',
+                    borderColor: 'rgba(56, 189, 248, 0.24)',
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 34, color: active ? 'primary.main' : 'text.secondary' }}>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText primary={item.label} primaryTypographyProps={{ fontWeight: active ? 700 : 600 }} />
+              </ListItemButton>
+            </ListItem>
+          );
+        })}
+      </List>
+    </>
+  );
 
   return (
     <Box className="admin-shell" sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
       <CssBaseline />
       <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
         <Toolbar sx={{ minHeight: 76, px: { xs: 2, md: 3 } }}>
+          <IconButton color="inherit" onClick={() => setMobileOpen(true)} sx={{ display: { xs: 'inline-flex', md: 'none' }, mr: 1 }}>
+            <MenuIcon />
+          </IconButton>
           <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexGrow: 1 }}>
-            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: 'primary.main', boxShadow: '0 0 0 6px rgba(124, 231, 255, 0.12)' }} />
+            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: 'primary.main', boxShadow: '0 0 0 6px rgba(56, 189, 248, 0.12)' }} />
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>HANDKRAFT Control Center</Typography>
-              <Typography variant="caption" color="text.secondary">Minimal, dark, and operations-first</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0 }}>HANDKRAFT Control Center</Typography>
+              <Typography variant="caption" color="text.secondary">Minimal operations control</Typography>
             </Box>
           </Stack>
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Chip size="small" label={profile?.adminRole || 'admin'} color="primary" variant="outlined" />
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>{profile?.name || profile?.email || 'Admin'}</Typography>
+            <Typography variant="body2" sx={{ opacity: 0.9, display: { xs: 'none', sm: 'block' } }}>{profile?.name || profile?.email || 'Admin'}</Typography>
             <IconButton color="inherit" onClick={onLogout}><LogoutIcon /></IconButton>
           </Stack>
         </Toolbar>
       </AppBar>
 
       <Drawer
+        variant="temporary"
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        ModalProps={{ keepMounted: true }}
+        sx={{
+          display: { xs: 'block', md: 'none' },
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+          },
+        }}
+      >
+        {drawerContent}
+      </Drawer>
+
+      <Drawer
         variant="permanent"
         sx={{
+          display: { xs: 'none', md: 'block' },
           width: drawerWidth,
           flexShrink: 0,
           '& .MuiDrawer-paper': {
             width: drawerWidth,
             boxSizing: 'border-box',
-            borderRight: '1px solid rgba(148, 163, 184, 0.12)',
+            borderRight: '1px solid rgba(176, 186, 201, 0.12)',
           },
         }}
       >
-        <Toolbar sx={{ minHeight: 76 }} />
-        <Box sx={{ px: 2, pt: 2, pb: 1 }}>
-          <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: '0.18em' }}>Navigation</Typography>
-        </Box>
-        <List sx={{ px: 1.5, gap: 0.75, display: 'grid' }}>
-          {menuItems.map((item) => {
-            const active = item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
-            return (
-              <ListItem key={item.path} disablePadding>
-                <ListItemButton
-                  component={Link}
-                  to={item.path}
-                  selected={active}
-                  sx={{
-                    borderRadius: 2,
-                    mb: 0.5,
-                    border: '1px solid transparent',
-                    '&.Mui-selected': {
-                      bgcolor: 'rgba(124, 231, 255, 0.12)',
-                      borderColor: 'rgba(124, 231, 255, 0.24)',
-                    },
-                  }}
-                >
-                  <ListItemText primary={item.label} primaryTypographyProps={{ fontWeight: active ? 700 : 600 }} />
-                </ListItemButton>
-              </ListItem>
-            );
-          })}
-        </List>
+        {drawerContent}
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 } }}>
+      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: { xs: 1.5, md: 3 } }}>
         <Toolbar />
         <Container maxWidth="xl" sx={{ pb: 4 }}>
           <Routes>
             <Route path="/" element={<DashboardPage showToast={showToast} />} />
+            <Route path="/analytics" element={<AnalyticsPage showToast={showToast} />} />
+            <Route path="/shipments" element={<ShipmentsPage showToast={showToast} />} />
+            <Route path="/reconciliation" element={<ReconciliationPage showToast={showToast} />} />
+            <Route path="/inventory" element={<InventoryPage showToast={showToast} />} />
             <Route path="/users" element={<UsersPage showToast={showToast} />} />
             <Route path="/products" element={<ProductsPage showToast={showToast} />} />
             <Route path="/orders" element={<OrdersPage showToast={showToast} />} />

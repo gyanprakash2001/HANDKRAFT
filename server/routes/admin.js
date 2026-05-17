@@ -339,6 +339,88 @@ function mapPayoutForAdmin(payout) {
   };
 }
 
+function formatMoneyValue(value) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
+}
+
+function buildCountMap(rows = []) {
+  const result = {};
+  for (const row of rows || []) {
+    const key = String(row?._id || 'unknown');
+    result[key] = Number(row?.count || 0);
+  }
+  return result;
+}
+
+function mapReconciliationForAdmin(row) {
+  const seller = row?.seller && typeof row.seller === 'object' ? row.seller : null;
+  const order = row?.order && typeof row.order === 'object' ? row.order : null;
+  const payout = row?.payoutId && typeof row.payoutId === 'object' ? row.payoutId : null;
+  const snapshot = row?.snapshot && typeof row.snapshot === 'object' ? row.snapshot : null;
+
+  return {
+    id: String(row?._id || ''),
+    event: String(row?.event || ''),
+    source: String(row?.source || ''),
+    currency: String(row?.currency || 'INR').toUpperCase(),
+    amount: formatMoneyValue(row?.amount || snapshot?.netPayoutAmount || snapshot?.grossAmount || 0),
+    gatewayPaymentId: String(row?.gatewayPaymentId || ''),
+    gatewayOrderId: String(row?.gatewayOrderId || ''),
+    payoutStatus: String(row?.payoutStatus || payout?.status || ''),
+    note: String(row?.note || ''),
+    order: {
+      id: String(order?._id || row?.order || ''),
+      totalAmount: formatMoneyValue(order?.totalAmount || snapshot?.orderTotalAmount || 0),
+      status: String(order?.status || ''),
+      paymentStatus: String(order?.paymentStatus || ''),
+      createdAt: order?.createdAt || null,
+    },
+    seller: {
+      id: String(seller?._id || row?.seller || ''),
+      name: String(seller?.name || seller?.sellerDisplayName || ''),
+      email: String(seller?.email || ''),
+    },
+    payout: {
+      id: String(payout?._id || row?.payoutId || ''),
+      status: String(payout?.status || row?.payoutStatus || ''),
+      sellerShipmentRef: String(payout?.sellerShipmentRef || ''),
+      netPayoutAmount: formatMoneyValue(payout?.split?.netPayoutAmount || snapshot?.netPayoutAmount || 0),
+      reserveAmount: formatMoneyValue(payout?.split?.reserveAmount || snapshot?.reserveAmount || 0),
+    },
+    snapshot,
+    createdAt: row?.createdAt || null,
+  };
+}
+
+function mapOrderAuditLogForAdmin(row) {
+  return {
+    id: String(row?._id || ''),
+    event: String(row?.event || ''),
+    actorRole: String(row?.actorRole || ''),
+    note: String(row?.note || ''),
+    previousState: row?.previousState ?? null,
+    newState: row?.newState ?? null,
+    meta: row?.meta ?? null,
+    createdAt: row?.createdAt || null,
+  };
+}
+
+function buildDateBuckets(days) {
+  const buckets = new Map();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    buckets.set(key, { date: key, revenue: 0, orders: 0 });
+  }
+
+  return buckets;
+}
+
 // GET /api/admin/overview
 router.get('/overview', auth, admin, async (req, res) => {
   try {
@@ -441,6 +523,475 @@ router.get('/system/health', auth, admin, async (req, res) => {
       nimbuspostMode: String(env.nimbuspost?.mode || 'auto'),
     },
   });
+});
+
+// GET /api/admin/analytics/revenue
+router.get('/analytics/revenue', auth, admin, async (req, res) => {
+  try {
+    const days = toPositiveInt(req.query.days, 30, 365);
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - (days - 1));
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
+    const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
+
+    const paidOrderQuery = { isDraft: { $ne: true }, paymentStatus: 'completed' };
+    const recentPaidOrderQuery = { ...paidOrderQuery, createdAt: { $gte: since } };
+
+    const [
+      lifetimeRows,
+      recentRows,
+      todayRows,
+      weekRows,
+      monthRows,
+      orderStatusRows,
+      paymentStatusRows,
+      shipmentStatusRows,
+      dailyRows,
+      topProductRows,
+    ] = await Promise.all([
+      Order.aggregate([
+        { $match: paidOrderQuery },
+        { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 }, avgOrderValue: { $avg: '$totalAmount' } } },
+      ]),
+      Order.aggregate([
+        { $match: recentPaidOrderQuery },
+        { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 }, avgOrderValue: { $avg: '$totalAmount' } } },
+      ]),
+      Order.aggregate([
+        { $match: { ...paidOrderQuery, createdAt: { $gte: startOfToday } } },
+        { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: { ...paidOrderQuery, createdAt: { $gte: startOfWeek } } },
+        { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: { ...paidOrderQuery, createdAt: { $gte: startOfMonth } } },
+        { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: { isDraft: { $ne: true } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: { isDraft: { $ne: true } } },
+        { $group: { _id: '$paymentStatus', count: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $unwind: { path: '$sellerShipments', preserveNullAndEmptyArrays: false } },
+        { $group: { _id: '$sellerShipments.status', count: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: recentPaidOrderQuery },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            revenue: { $sum: '$totalAmount' },
+            orders: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      Order.aggregate([
+        { $match: recentPaidOrderQuery },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            title: { $last: '$items.title' },
+            image: { $last: '$items.image' },
+            quantity: { $sum: '$items.quantity' },
+            revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          },
+        },
+        { $sort: { revenue: -1, quantity: -1 } },
+        { $limit: 8 },
+      ]),
+    ]);
+
+    const buckets = buildDateBuckets(days);
+    for (const row of dailyRows || []) {
+      const key = String(row?._id || '');
+      buckets.set(key, {
+        date: key,
+        revenue: formatMoneyValue(row?.revenue || 0),
+        orders: Number(row?.orders || 0),
+      });
+    }
+
+    const lifetime = lifetimeRows?.[0] || {};
+    const recent = recentRows?.[0] || {};
+    const today = todayRows?.[0] || {};
+    const week = weekRows?.[0] || {};
+    const month = monthRows?.[0] || {};
+
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      days,
+      totals: {
+        lifetimeRevenue: formatMoneyValue(lifetime.revenue || 0),
+        lifetimeOrders: Number(lifetime.orders || 0),
+        lifetimeAverageOrderValue: formatMoneyValue(lifetime.avgOrderValue || 0),
+        recentRevenue: formatMoneyValue(recent.revenue || 0),
+        recentOrders: Number(recent.orders || 0),
+        recentAverageOrderValue: formatMoneyValue(recent.avgOrderValue || 0),
+        todayRevenue: formatMoneyValue(today.revenue || 0),
+        todayOrders: Number(today.orders || 0),
+        weekRevenue: formatMoneyValue(week.revenue || 0),
+        weekOrders: Number(week.orders || 0),
+        monthRevenue: formatMoneyValue(month.revenue || 0),
+        monthOrders: Number(month.orders || 0),
+      },
+      statusCounts: {
+        orders: buildCountMap(orderStatusRows),
+        payments: buildCountMap(paymentStatusRows),
+        shipments: buildCountMap(shipmentStatusRows),
+      },
+      dailySales: Array.from(buckets.values()).sort((a, b) => String(a.date).localeCompare(String(b.date))),
+      topProducts: (topProductRows || []).map((row) => ({
+        productId: String(row?._id || ''),
+        title: String(row?.title || 'Untitled product'),
+        image: String(row?.image || ''),
+        quantity: Number(row?.quantity || 0),
+        revenue: formatMoneyValue(row?.revenue || 0),
+      })),
+    });
+  } catch (err) {
+    console.error('[ADMIN][REVENUE_ANALYTICS] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to load revenue analytics' });
+  }
+});
+
+// GET /api/admin/shipments
+router.get('/shipments', auth, admin, async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req, { limit: 20, maxLimit: 100 });
+    const status = safeText(req.query.status || '', 50);
+    const search = safeText(req.query.search || '', 120);
+    const orderId = toObjectId(req.query.orderId);
+    const sellerId = toObjectId(req.query.sellerId);
+
+    const pipeline = [
+      { $unwind: { path: '$sellerShipments', preserveNullAndEmptyArrays: false } },
+      { $addFields: { orderIdText: { $toString: '$_id' } } },
+    ];
+
+    if (orderId) pipeline.push({ $match: { _id: orderId } });
+    if (sellerId) pipeline.push({ $match: { 'sellerShipments.seller': sellerId } });
+    if (status) pipeline.push({ $match: { 'sellerShipments.status': status } });
+
+    if (search) {
+      const pattern = new RegExp(escapeRegex(search), 'i');
+      pipeline.push({
+        $match: {
+          $or: [
+            { orderIdText: pattern },
+            { 'sellerShipments.localShipmentRef': pattern },
+            { 'sellerShipments.carrier.awbNumber': pattern },
+            { 'sellerShipments.carrier.courierName': pattern },
+            { 'sellerShipments.preferredCourierName': pattern },
+            { 'sellerShipments.lastError': pattern },
+          ],
+        },
+      });
+    }
+
+    pipeline.push(
+      { $sort: { 'sellerShipments.updatedAt': -1, createdAt: -1 } },
+      {
+        $facet: {
+          rows: [
+            { $skip: skip },
+            { $limit: limit },
+            { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'buyerDoc' } },
+            { $lookup: { from: 'users', localField: 'sellerShipments.seller', foreignField: '_id', as: 'sellerDoc' } },
+            {
+              $project: {
+                _id: 1,
+                orderIdText: 1,
+                user: 1,
+                buyer: { $first: '$buyerDoc' },
+                seller: { $first: '$sellerDoc' },
+                items: 1,
+                orderStatus: '$status',
+                paymentStatus: 1,
+                totalAmount: 1,
+                shippingCost: 1,
+                createdAt: 1,
+                shipment: '$sellerShipments',
+              },
+            },
+          ],
+          metadata: [{ $count: 'total' }],
+        },
+      }
+    );
+
+    const result = await Order.aggregate(pipeline);
+    const rows = result?.[0]?.rows || [];
+    const total = Number(result?.[0]?.metadata?.[0]?.total || 0);
+
+    return res.json({
+      shipments: rows.map((row) => {
+        const shipment = row.shipment || {};
+        const carrier = shipment.carrier || {};
+        const itemIndexes = Array.isArray(shipment.itemIndexes) ? shipment.itemIndexes : [];
+        const items = Array.isArray(row.items)
+          ? row.items.filter((_, index) => itemIndexes.length === 0 || itemIndexes.includes(index))
+          : [];
+
+        return {
+          id: String(shipment._id || `${row._id}-${shipment.localShipmentRef || ''}`),
+          orderId: String(row._id || ''),
+          localShipmentRef: String(shipment.localShipmentRef || ''),
+          status: String(shipment.status || ''),
+          lastError: String(shipment.lastError || ''),
+          preferredCourierId: String(shipment.preferredCourierId || ''),
+          preferredCourierName: String(shipment.preferredCourierName || ''),
+          quotedShippingCost: formatMoneyValue(shipment.quotedShippingCost || 0),
+          awbNumber: String(carrier.awbNumber || ''),
+          courierName: String(carrier.courierName || shipment.preferredCourierName || ''),
+          provider: String(carrier.provider || ''),
+          remoteStatus: String(carrier.remoteStatus || ''),
+          trackingUrl: String(carrier.trackingUrl || ''),
+          labelUrl: String(carrier.labelUrl || ''),
+          manifestUrl: String(carrier.manifestUrl || ''),
+          itemIndexes,
+          items: items.map((item) => ({
+            title: String(item?.title || ''),
+            image: String(item?.image || ''),
+            quantity: Number(item?.quantity || 0),
+            fulfillmentStatus: String(item?.fulfillmentStatus || ''),
+          })),
+          timeline: Array.isArray(shipment.timeline) ? shipment.timeline : [],
+          buyer: {
+            id: String(row?.buyer?._id || row?.user || ''),
+            name: String(row?.buyer?.name || ''),
+            email: String(row?.buyer?.email || ''),
+          },
+          seller: {
+            id: String(row?.seller?._id || shipment?.seller || ''),
+            name: String(row?.seller?.name || row?.seller?.sellerDisplayName || ''),
+            email: String(row?.seller?.email || ''),
+          },
+          orderStatus: String(row.orderStatus || ''),
+          paymentStatus: String(row.paymentStatus || ''),
+          totalAmount: formatMoneyValue(row.totalAmount || 0),
+          shippingCost: formatMoneyValue(row.shippingCost || 0),
+          createdAt: row.createdAt || null,
+          updatedAt: shipment.updatedAt || shipment.createdAt || row.createdAt || null,
+        };
+      }),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (err) {
+    console.error('[ADMIN][SHIPMENTS] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch shipments' });
+  }
+});
+
+// GET /api/admin/reconciliation
+router.get('/reconciliation', auth, admin, async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req, { limit: 20, maxLimit: 100 });
+    const event = safeText(req.query.event || '', 80);
+    const source = safeText(req.query.source || '', 40);
+    const search = safeText(req.query.search || '', 120);
+    const orderId = toObjectId(req.query.orderId);
+    const sellerId = toObjectId(req.query.sellerId);
+
+    const query = {};
+    if (event) query.event = event;
+    if (source) query.source = source;
+    if (orderId) query.order = orderId;
+    if (sellerId) query.seller = sellerId;
+
+    if (search) {
+      const pattern = new RegExp(escapeRegex(search), 'i');
+      const searchClauses = [
+        { gatewayPaymentId: pattern },
+        { gatewayOrderId: pattern },
+        { payoutStatus: pattern },
+        { event: pattern },
+        { note: pattern },
+      ];
+      if (mongoose.Types.ObjectId.isValid(search)) {
+        searchClauses.push({ order: new mongoose.Types.ObjectId(search) });
+        searchClauses.push({ seller: new mongoose.Types.ObjectId(search) });
+        searchClauses.push({ payoutId: new mongoose.Types.ObjectId(search) });
+      }
+      query.$or = searchClauses;
+    }
+
+    const [rows, total, eventRows, sourceRows] = await Promise.all([
+      PaymentReconciliation.find(query)
+        .populate('seller', 'name email sellerDisplayName')
+        .populate('order', 'totalAmount paymentStatus status createdAt')
+        .populate('payoutId', 'status sellerShipmentRef split payout')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      PaymentReconciliation.countDocuments(query),
+      PaymentReconciliation.aggregate([
+        { $match: query },
+        { $group: { _id: '$event', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+        { $sort: { count: -1 } },
+      ]),
+      PaymentReconciliation.aggregate([
+        { $match: query },
+        { $group: { _id: '$source', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]),
+    ]);
+
+    return res.json({
+      reconciliations: rows.map(mapReconciliationForAdmin),
+      summary: {
+        byEvent: (eventRows || []).map((row) => ({
+          event: String(row?._id || 'unknown'),
+          count: Number(row?.count || 0),
+          amount: formatMoneyValue(row?.amount || 0),
+        })),
+        bySource: (sourceRows || []).map((row) => ({
+          source: String(row?._id || 'unknown'),
+          count: Number(row?.count || 0),
+        })),
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (err) {
+    console.error('[ADMIN][RECONCILIATION] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch payment reconciliation' });
+  }
+});
+
+// GET /api/admin/inventory
+router.get('/inventory', auth, admin, async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req, { limit: 20, maxLimit: 100 });
+    const threshold = toPositiveInt(req.query.threshold, 5, 100000);
+    const search = safeText(req.query.search || '', 120);
+    const status = safeText(req.query.status || '', 30);
+
+    const productQuery = { stock: { $lte: threshold } };
+    if (status === 'active') productQuery.isActive = true;
+    if (status === 'inactive') productQuery.isActive = false;
+
+    if (search) {
+      const pattern = new RegExp(escapeRegex(search), 'i');
+      productQuery.$or = [
+        { title: pattern },
+        { category: pattern },
+        { sellerName: pattern },
+      ];
+    }
+
+    const [
+      lowStockProducts,
+      lowStockTotal,
+      totalProducts,
+      activeProducts,
+      outOfStockProducts,
+      totalStockRows,
+      recentTransactions,
+    ] = await Promise.all([
+      Product.find(productQuery)
+        .populate('seller', 'name email accountStatus')
+        .sort({ stock: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(productQuery),
+      Product.countDocuments({}),
+      Product.countDocuments({ isActive: true }),
+      Product.countDocuments({ stock: { $lte: 0 } }),
+      Product.aggregate([{ $group: { _id: null, totalStock: { $sum: '$stock' } } }]),
+      InventoryTransaction.find({})
+        .populate('product', 'title category images stock isActive')
+        .populate('seller', 'name email')
+        .populate('order', 'status paymentStatus totalAmount createdAt')
+        .sort({ createdAt: -1 })
+        .limit(30)
+        .lean(),
+    ]);
+
+    return res.json({
+      threshold,
+      summary: {
+        totalProducts,
+        activeProducts,
+        inactiveProducts: Math.max(0, totalProducts - activeProducts),
+        lowStockProducts: lowStockTotal,
+        outOfStockProducts,
+        totalStockUnits: Number(totalStockRows?.[0]?.totalStock || 0),
+      },
+      lowStockProducts: lowStockProducts.map((product) => ({
+        id: String(product?._id || ''),
+        title: String(product?.title || ''),
+        category: String(product?.category || ''),
+        sellerName: String(product?.seller?.name || product?.sellerName || ''),
+        sellerEmail: String(product?.seller?.email || ''),
+        price: formatMoneyValue(product?.price || 0),
+        stock: Number(product?.stock || 0),
+        isActive: Boolean(product?.isActive),
+        image: Array.isArray(product?.images) ? String(product.images[0] || '') : '',
+        createdAt: product?.createdAt || null,
+      })),
+      recentTransactions: recentTransactions.map((entry) => ({
+        id: String(entry?._id || ''),
+        type: String(entry?.type || ''),
+        quantityChange: Number(entry?.quantityChange || 0),
+        previousStock: Number(entry?.previousStock || 0),
+        newStock: Number(entry?.newStock || 0),
+        reason: String(entry?.reason || ''),
+        source: String(entry?.source || ''),
+        product: {
+          id: String(entry?.product?._id || entry?.product || ''),
+          title: String(entry?.product?.title || ''),
+          image: Array.isArray(entry?.product?.images) ? String(entry.product.images[0] || '') : '',
+          stock: Number(entry?.product?.stock || 0),
+          isActive: Boolean(entry?.product?.isActive),
+        },
+        seller: {
+          id: String(entry?.seller?._id || entry?.seller || ''),
+          name: String(entry?.seller?.name || ''),
+          email: String(entry?.seller?.email || ''),
+        },
+        order: {
+          id: String(entry?.order?._id || entry?.order || ''),
+          status: String(entry?.order?.status || ''),
+          paymentStatus: String(entry?.order?.paymentStatus || ''),
+          totalAmount: formatMoneyValue(entry?.order?.totalAmount || 0),
+        },
+        createdAt: entry?.createdAt || null,
+      })),
+      pagination: {
+        page,
+        limit,
+        total: lowStockTotal,
+        totalPages: Math.max(1, Math.ceil(lowStockTotal / limit)),
+      },
+    });
+  } catch (err) {
+    console.error('[ADMIN][INVENTORY] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch inventory controls' });
+  }
 });
 
 // GET /api/admin/users
@@ -1048,17 +1599,55 @@ router.get('/orders/:id', auth, admin, async (req, res) => {
       return res.status(400).json({ message: 'Invalid order id' });
     }
 
-    const order = await Order.findById(orderId)
-      .populate('user', 'name email accountStatus')
-      .populate('items.product', 'title isActive price stock')
-      .populate('sellerShipments.seller', 'name email')
-      .lean();
+    const [order, orderAuditLog, shipmentEvents, reconciliations, payouts] = await Promise.all([
+      Order.findById(orderId)
+        .populate('user', 'name email accountStatus')
+        .populate('items.product', 'title isActive price stock images')
+        .populate('items.seller', 'name email sellerDisplayName')
+        .populate('sellerShipments.seller', 'name email sellerDisplayName')
+        .lean(),
+      OrderAuditLog.find({ order: orderId }).sort({ createdAt: 1 }).limit(150).lean(),
+      ShipmentEvent.find({ order: orderId }).sort({ createdAt: -1 }).limit(100).lean(),
+      PaymentReconciliation.find({ order: orderId })
+        .populate('seller', 'name email sellerDisplayName')
+        .populate('payoutId', 'status sellerShipmentRef split payout')
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .lean(),
+      Payout.find({ order: orderId })
+        .populate('seller', 'name email sellerPayoutProfile')
+        .populate('order', 'totalAmount paymentStatus status createdAt')
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .lean(),
+    ]);
 
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    return res.json({ order });
+    return res.json({
+      order,
+      orderAuditLog: orderAuditLog.map(mapOrderAuditLogForAdmin),
+      shipmentEvents: shipmentEvents.map((event) => ({
+        id: String(event?._id || ''),
+        localShipmentRef: String(event?.localShipmentRef || ''),
+        event: String(event?.event || ''),
+        previousStatus: String(event?.previousStatus || ''),
+        newStatus: String(event?.newStatus || ''),
+        carrier: event?.carrier || null,
+        quoteData: event?.quoteData || null,
+        errorMessage: String(event?.errorMessage || ''),
+        source: String(event?.source || ''),
+        processingMs: Number(event?.processingMs || 0),
+        createdAt: event?.createdAt || null,
+      })),
+      reconciliations: reconciliations.map((row) => mapReconciliationForAdmin({
+        ...row,
+        order,
+      })),
+      payouts: payouts.map(mapPayoutForAdmin),
+    });
   } catch (err) {
     console.error('[ADMIN][ORDER_DETAIL] Error:', err?.message || err);
     return res.status(500).json({ message: 'Failed to fetch order details' });

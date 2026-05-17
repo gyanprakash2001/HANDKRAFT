@@ -32,6 +32,7 @@ import {
   uploadProductFile,
 } from '@/utils/api';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
+import { normalizeProduct, resolveProductImageUri } from '@/utils/product';
 
 type Params = {
   id?: string;
@@ -41,6 +42,7 @@ const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PROFILE_MODE_KEY = 'HANDKRAFT_PROFILE_MODE';
 const REVIEW_MEDIA_MAX_ATTACHMENTS = 10;
+const RELATED_FALLBACK_IMAGE = require('../../assets/handkraft_logo_trimmed.png');
 
 const EMPTY_REVIEW_SUMMARY: ProductReviewSummary = {
   averageRating: 0,
@@ -218,6 +220,7 @@ export default function ProductDetailsScreen() {
   const [reviewViewerVisible, setReviewViewerVisible] = useState(false);
   const [reviewViewerItems, setReviewViewerItems] = useState<ReviewViewerMediaItem[]>([]);
   const [reviewViewerIndex, setReviewViewerIndex] = useState(0);
+  const [failedRelatedImageIds, setFailedRelatedImageIds] = useState<Record<string, true>>({});
   const addToCartInFlightRef = useRef(false);
   const autoModeToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { showNotificationForItem } = useCartNotification();
@@ -307,8 +310,9 @@ export default function ProductDetailsScreen() {
     try {
       setLoading(true);
       setError(null);
+      setFailedRelatedImageIds({});
 
-      const currentProduct = await getProductById(id);
+      const currentProduct = normalizeProduct(await getProductById(id));
       setProduct(currentProduct);
       setActiveMediaIndex(0);
 
@@ -326,7 +330,10 @@ export default function ProductDetailsScreen() {
         sort: 'newest',
       });
 
-      const filtered = related.items.filter((item) => item._id !== currentProduct._id).slice(0, 4);
+      const filtered = related.items
+        .filter((item) => item._id !== currentProduct._id)
+        .slice(0, 4)
+        .map((item) => normalizeProduct(item));
       setRelatedProducts(filtered);
     } catch (err: any) {
       setError(err?.message || 'Failed to load product details');
@@ -1082,15 +1089,22 @@ export default function ProductDetailsScreen() {
         ListEmptyComponent={<ThemedText style={styles.subtleText}>No related products yet.</ThemedText>}
         renderItem={({ item }) => {
           const relatedPricing = getProductPricing(item);
+          const relatedImageKey = String(item._id || item.title || '');
+          const relatedImageUri = resolveProductImageUri(item);
+          const useRelatedFallback = !relatedImageUri || Boolean(relatedImageKey && failedRelatedImageIds[relatedImageKey]);
 
           return (
             <Pressable
               style={styles.relatedCard}
               onPress={() => openRelatedProduct(item._id)}>
               <Image
-                source={{ uri: item.images?.[0] || 'https://placehold.co/400x260?text=Handmade' }}
+                source={useRelatedFallback ? RELATED_FALLBACK_IMAGE : { uri: relatedImageUri }}
                 style={styles.relatedImage}
                 contentFit="cover"
+                onError={() => {
+                  if (!relatedImageKey) return;
+                  setFailedRelatedImageIds((prev) => (prev[relatedImageKey] ? prev : { ...prev, [relatedImageKey]: true }));
+                }}
               />
               <View style={styles.relatedContent}>
                 <ThemedText numberOfLines={2}>{item.title}</ThemedText>

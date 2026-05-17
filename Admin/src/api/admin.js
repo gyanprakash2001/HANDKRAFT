@@ -38,6 +38,26 @@ export async function fetchSystemHealth() {
   };
 }
 
+export async function fetchRevenueAnalytics(filters = {}) {
+  const res = await api.get('/admin/analytics/revenue', { params: toParams(filters) });
+  return res.data;
+}
+
+export async function fetchShipments(filters = {}) {
+  const res = await api.get('/admin/shipments', { params: toParams(filters) });
+  return res.data;
+}
+
+export async function fetchPaymentReconciliations(filters = {}) {
+  const res = await api.get('/admin/reconciliation', { params: toParams(filters) });
+  return res.data;
+}
+
+export async function fetchInventoryControl(filters = {}) {
+  const res = await api.get('/admin/inventory', { params: toParams(filters) });
+  return res.data;
+}
+
 export async function fetchUsers(filters = {}) {
   const res = await api.get('/admin/users', { params: toParams(filters) });
   return res.data;

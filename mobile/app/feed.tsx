@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import * as Haptics from 'expo-haptics';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -18,6 +19,7 @@ import { useCartNotification } from '@/contexts/cart-notification-context';
 import { getProfile, getProducts, ProductItem, ProductMediaItem, getChatConversations, getProfileDashboard, normalizeAssetUrl } from '@/utils/api';
 import { removeToken } from '@/utils/auth';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
+import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
 
 type ProfileMode = 'buyer' | 'seller';
 const PROFILE_MODE_KEY = 'HANDKRAFT_PROFILE_MODE';
@@ -275,6 +277,7 @@ function getPostMedia(item: ProductItem): ProductMediaItem[] {
 }
 
 export default function FeedScreen() {
+  const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ProfileMode>('buyer');
   const [buyerName, setBuyerName] = useState('Buyer');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -511,6 +514,10 @@ export default function FeedScreen() {
 
   const isLocalTabAvatar = useMemo(() => Boolean(userAvatar && String(userAvatar).startsWith('local:')), [userAvatar]);
   const tabAvatarSource = useMemo(() => (isLocalTabAvatar ? null : resolveAvatarSource(userAvatar)), [userAvatar, isLocalTabAvatar]);
+  const headerTopPadding = Math.max(insets.top + 20, 54);
+  const feedBottomPadding = getTabBarContentPadding(insets, 12);
+  const tabBarHeight = getCustomTabBarHeight(insets);
+  const tabBarBottomPadding = tabBarHeight - CUSTOM_TAB_BAR_HEIGHT;
 
   // Compute two-column masonry layout. Use measured media widths when
   // available so the height estimates match the actual reserved media heights
@@ -650,7 +657,7 @@ export default function FeedScreen() {
   return (
     <ThemedView style={styles.container}>
       {/* Header with brand left and quick actions right */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
         <View style={styles.brandWrap}>
           <Image
             source={require('../assets/feed_logo.png')}
@@ -787,7 +794,7 @@ export default function FeedScreen() {
         onScroll={handleFeedScroll}
         scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
-        contentContainerStyle={styles.feedContent}>
+        contentContainerStyle={[styles.feedContent, { paddingBottom: feedBottomPadding }]}>
         {loading ? (
           <View style={styles.masonryWrap}>
             <View style={styles.column}>
@@ -837,7 +844,7 @@ export default function FeedScreen() {
       </ScrollView>
 
       {/* Bottom Tab Navigation */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { height: tabBarHeight, paddingBottom: tabBarBottomPadding }]}>
         <Pressable style={styles.tabItem} onPress={() => router.push('/feed')}>
           <Ionicons name="home" size={26} color="#fff" />
         </Pressable>
@@ -1252,7 +1259,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    height: '100%',
+    height: CUSTOM_TAB_BAR_HEIGHT,
   },
   tabAvatar: {
     width: 30,

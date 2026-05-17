@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PanGestureHandler, PanGestureHandlerStateChangeEvent, State } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -36,6 +37,7 @@ import {
 } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
 import { resolveProductImageUri } from '@/utils/product';
+import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
 
 // Local in-app avatar manifest (emoji + gradient) — non-human, neutral
 const LOCAL_MANIFEST: string[] = Array.from({ length: 30 }, (_, i) => `local:avatar${String(i + 1).padStart(2, '0')}`);
@@ -218,6 +220,7 @@ const SELLER_SEEN_COUNT_KEY = 'HANDKRAFT_SELLER_SEEN_COUNT';
 const NEW_ORDERS_TAB_SEEN_COUNT_KEY = 'HANDKRAFT_NEW_ORDERS_TAB_SEEN_COUNT';
 
 export default function ProfileScreen() {
+  const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ProfileMode>('buyer');
   const [buyerTab, setBuyerTab] = useState<BuyerTab>('saved');
   const [activeSavedBoard, setActiveSavedBoard] = useState('home');
@@ -239,6 +242,11 @@ export default function ProfileScreen() {
   const [pendingSellerBadgeClear, setPendingSellerBadgeClear] = useState(false);
   const { width: screenWidth } = useWindowDimensions();
   const router = useRouter();
+  const headerTopPadding = Math.max(insets.top + 20, 54);
+  const listBottomPadding = getTabBarContentPadding(insets, 18);
+  const sellerBottomPadding = getTabBarContentPadding(insets, 14);
+  const tabBarHeight = getCustomTabBarHeight(insets);
+  const tabBarBottomPadding = tabBarHeight - CUSTOM_TAB_BAR_HEIGHT;
   const [serverAvatars, setServerAvatars] = useState<string[]>([]);
   const [editorUri, setEditorUri] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
@@ -1362,7 +1370,7 @@ export default function ProfileScreen() {
         onOpenDefault={() => setAvatarModalVisible(true)}
         onOpenUpload={() => pickImage()}
       />
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
         <ThemedText type="title" style={styles.headerTitle}>Profile</ThemedText>
         <View style={styles.switchWrap}>
           <ThemedText style={[styles.switchLabel, mode === 'buyer' && styles.switchLabelActive]}>Buyer</ThemedText>
@@ -1473,7 +1481,7 @@ export default function ProfileScreen() {
               renderItem={renderRow}
               refreshing={refreshing}
               onRefresh={() => loadDashboard(true)}
-              contentContainerStyle={styles.savedListContent}
+              contentContainerStyle={[styles.savedListContent, { paddingBottom: listBottomPadding }]}
               ListHeaderComponent={
                 savedItems.length > 0 && savedBoards.length > 0 ? (
                   <View style={styles.savedBoardsHeader}>
@@ -1529,7 +1537,7 @@ export default function ProfileScreen() {
               renderItem={renderOrderItem}
               refreshing={refreshing}
               onRefresh={() => loadDashboard(true)}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Ionicons name="document-outline" size={48} color="#666" />
@@ -1547,7 +1555,7 @@ export default function ProfileScreen() {
 
           {/* Addresses Tab */}
           {buyerTab === 'addresses' && (
-            <View style={styles.addressesContainer}>
+            <View style={[styles.addressesContainer, { paddingBottom: listBottomPadding }]}>
               <Pressable style={styles.addAddressButton} onPress={() => router.push('/add-address')}>
                 <Ionicons name="add-circle" size={24} color="#9df0a2" />
                 <ThemedText style={styles.addAddressText}>Add New Address</ThemedText>
@@ -1557,7 +1565,7 @@ export default function ProfileScreen() {
                 keyExtractor={(_, index) => `address-${index}`}
                 renderItem={(props) => renderAddressItem({ ...props, index: addresses.indexOf(props.item) })}
                 scrollEnabled={false}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
                     <Ionicons name="location-outline" size={48} color="#666" />
@@ -1571,7 +1579,7 @@ export default function ProfileScreen() {
 
           {/* Account Settings Tab */}
           {buyerTab === 'account' && (
-                <ScrollView style={styles.accountContainer} contentContainerStyle={styles.accountContent}>
+                <ScrollView style={styles.accountContainer} contentContainerStyle={[styles.accountContent, { paddingBottom: listBottomPadding }]}>
               <ThemedText style={styles.sectionTitleFirst}>Account Information</ThemedText>
               <Pressable style={styles.settingItem} onPress={handleEditProfile}>
                 <View style={styles.settingItemLeft}>
@@ -1633,7 +1641,7 @@ export default function ProfileScreen() {
           renderItem={renderSellerOrderRow}
           refreshing={refreshing}
           onRefresh={() => loadDashboard(true)}
-          contentContainerStyle={styles.sellerListContent}
+          contentContainerStyle={[styles.sellerListContent, { paddingBottom: sellerBottomPadding }]}
           ListHeaderComponent={sellerScrollableHeader}
         />
       )}
@@ -1696,7 +1704,7 @@ export default function ProfileScreen() {
       />
 
       {/* Bottom Tab Bar */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { height: tabBarHeight, paddingBottom: tabBarBottomPadding }]}>
         <Pressable style={styles.tabItem} onPress={() => router.push('/feed')}>
           <Ionicons name="home-outline" size={26} color="#fff" />
         </Pressable>
@@ -3182,7 +3190,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    height: '100%',
+    height: CUSTOM_TAB_BAR_HEIGHT,
   },
   tabAvatar: {
     width: 30,

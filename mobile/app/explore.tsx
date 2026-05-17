@@ -6,6 +6,7 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -13,6 +14,7 @@ import LocalAvatar from '@/components/LocalAvatar';
 import { getProducts, normalizeAssetUrl, ProductItem, getProfile } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
+import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
 
 const RECENT_SEARCHES_KEY = 'HANDKRAFT_RECENT_SEARCHES';
 const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
@@ -89,7 +91,7 @@ function resolveProductImageSource(item: ProductItem) {
   const mediaImage = Array.isArray(item?.media)
     ? item.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
     : null;
-  const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || item.images?.[0] || '';
+  const candidate = mediaImage?.thumbnailUrl || mediaImage?.url || item.images?.[0] || mediaImage?.thumbnailDataUri || '';
   return normalizeAssetUrl(candidate) || 'https://placehold.co/600x600?text=Handmade';
 }
 
@@ -282,6 +284,7 @@ function scoreItem(item: ProductItem, rawQuery: string) {
 
 export default function ExploreScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
 
   const [query, setQuery] = useState('');
@@ -506,6 +509,10 @@ export default function ExploreScreen() {
 
   const isLocalTabAvatar = useMemo(() => Boolean(userAvatar && String(userAvatar).startsWith('local:')), [userAvatar]);
   const tabAvatarSource = useMemo(() => (isLocalTabAvatar ? null : resolveAvatarSource(userAvatar)), [userAvatar, isLocalTabAvatar]);
+  const headerTopPadding = Math.max(insets.top + 20, 54);
+  const resultsBottomPadding = getTabBarContentPadding(insets, 16);
+  const tabBarHeight = getCustomTabBarHeight(insets);
+  const tabBarBottomPadding = tabBarHeight - CUSTOM_TAB_BAR_HEIGHT;
 
   const openProduct = useCallback((item: ProductItem) => {
     if (trimmedQuery) {
@@ -572,7 +579,7 @@ export default function ExploreScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
         <ThemedText type="title" style={styles.headerTitle}>Search</ThemedText>
       </View>
 
@@ -692,7 +699,7 @@ export default function ExploreScreen() {
           style={styles.resultsScroll}
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadProducts(true)} tintColor="#fff" />}
-          contentContainerStyle={styles.resultsContent}>
+          contentContainerStyle={[styles.resultsContent, { paddingBottom: resultsBottomPadding }]}>
           {results.length === 0 ? (
             <View style={styles.emptyWrap}>
               <ThemedText style={styles.emptyTitle}>No matching items</ThemedText>
@@ -707,7 +714,7 @@ export default function ExploreScreen() {
         </ScrollView>
       )}
 
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { height: tabBarHeight, paddingBottom: tabBarBottomPadding }]}>
         <Pressable style={styles.tabItem} onPress={() => router.push('/feed')}>
           <Ionicons name="home-outline" size={26} color="#fff" />
         </Pressable>
@@ -1036,7 +1043,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    height: '100%',
+    height: CUSTOM_TAB_BAR_HEIGHT,
   },
   tabAvatar: {
     width: 30,
