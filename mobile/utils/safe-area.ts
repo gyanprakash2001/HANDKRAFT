@@ -3,11 +3,16 @@ import type { EdgeInsets } from 'react-native-safe-area-context';
 
 export const CUSTOM_TAB_BAR_HEIGHT = 70;
 
-const MIN_BOTTOM_SYSTEM_INSET = Platform.OS === 'android' ? 28 : 12;
+const ANDROID_THREE_BUTTON_NAV_MIN_INSET = 36;
 
 export function getBottomSystemInset(insets: Pick<EdgeInsets, 'bottom'>) {
   const measuredInset = Number(insets?.bottom || 0);
-  return Math.max(measuredInset, MIN_BOTTOM_SYSTEM_INSET);
+
+  if (Platform.OS === 'android') {
+    return measuredInset >= ANDROID_THREE_BUTTON_NAV_MIN_INSET ? measuredInset : 0;
+  }
+
+  return Math.max(0, measuredInset);
 }
 
 export function getCustomTabBarHeight(insets: Pick<EdgeInsets, 'bottom'>) {

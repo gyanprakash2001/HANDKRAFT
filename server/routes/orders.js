@@ -7,8 +7,8 @@ const Razorpay = require('razorpay');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const User = require('../models/User');
-const CsrSummary = require('../models/CsrSummary');
 const { env } = require('../config/env');
+const { recordCsrContributionForPaidOrder } = require('../services/csr');
 const {
   createShipment,
   getCourierServiceabilityQuote,
@@ -47,43 +47,8 @@ const {
   nowMs,
 } = require('../services/audit');
 
-const CSR_SUMMARY_KEY = 'global';
 const CSR_CONTRIBUTION_PER_ORDER = 1;
-const CSR_MILESTONE_AMOUNT = 20000;
 const PLATFORM_FEE_PER_ORDER = 8;
-
-async function recordCsrContributionForPaidOrder() {
-  const summary = await CsrSummary.findOneAndUpdate(
-    { key: CSR_SUMMARY_KEY },
-    {
-      $setOnInsert: {
-        key: CSR_SUMMARY_KEY,
-        contributionPerOrder: CSR_CONTRIBUTION_PER_ORDER,
-        milestoneAmount: CSR_MILESTONE_AMOUNT,
-        totalPaidOrdersCounted: 0,
-        totalContributionAmount: 0,
-        completedMilestones: 0,
-      },
-      $inc: {
-        totalPaidOrdersCounted: 1,
-        totalContributionAmount: CSR_CONTRIBUTION_PER_ORDER,
-      },
-      $set: {
-        lastContributionAt: new Date(),
-        contributionPerOrder: CSR_CONTRIBUTION_PER_ORDER,
-        milestoneAmount: CSR_MILESTONE_AMOUNT,
-      },
-    },
-    { upsert: true, new: true }
-  );
-
-  const totalContributionAmount = Math.max(0, Number(summary?.totalContributionAmount || 0));
-  const completedMilestones = Math.floor(totalContributionAmount / CSR_MILESTONE_AMOUNT);
-  if (Number(summary?.completedMilestones || 0) !== completedMilestones) {
-    summary.completedMilestones = completedMilestones;
-    await summary.save();
-  }
-}
 
 // Helper: Calculate tax (assumed 5% for demo)
 function calculateTax(subtotal) {

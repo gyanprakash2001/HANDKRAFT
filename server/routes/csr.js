@@ -1,27 +1,12 @@
 const express = require('express');
 const auth = require('../middleware/auth');
-const CsrSummary = require('../models/CsrSummary');
 const CsrActivity = require('../models/CsrActivity');
+const { reconcileCsrSummaryFromPaidOrders } = require('../services/csr');
 
 const router = express.Router();
 
-const CSR_SUMMARY_KEY = 'global';
 const DEFAULT_CONTRIBUTION_PER_ORDER = 1;
 const DEFAULT_MILESTONE_AMOUNT = 20000;
-
-async function getOrCreateCsrSummary() {
-  const existing = await CsrSummary.findOne({ key: CSR_SUMMARY_KEY });
-  if (existing) return existing;
-
-  return CsrSummary.create({
-    key: CSR_SUMMARY_KEY,
-    contributionPerOrder: DEFAULT_CONTRIBUTION_PER_ORDER,
-    milestoneAmount: DEFAULT_MILESTONE_AMOUNT,
-    totalPaidOrdersCounted: 0,
-    totalContributionAmount: 0,
-    completedMilestones: 0,
-  });
-}
 
 function mapSummary(summaryDoc) {
   const contributionPerOrder = Math.max(0, Number(summaryDoc?.contributionPerOrder || DEFAULT_CONTRIBUTION_PER_ORDER));
@@ -78,7 +63,7 @@ function mapActivity(activityDoc) {
 // GET /api/csr/summary
 router.get('/summary', auth, async (req, res) => {
   try {
-    const summary = await getOrCreateCsrSummary();
+    const summary = await reconcileCsrSummaryFromPaidOrders();
     return res.json({ summary: mapSummary(summary) });
   } catch (err) {
     console.error('[CSR][SUMMARY] Error:', err?.message || err);

@@ -27,6 +27,7 @@ const {
   processDuePayouts,
   claimAdminReadyPayouts,
 } = require('../services/payouts');
+const { reconcileCsrSummaryFromPaidOrders } = require('../services/csr');
 
 const ORDER_STATUS_VALUES = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
 const PAYMENT_STATUS_VALUES = ['pending', 'completed', 'failed', 'refunded'];
@@ -2501,7 +2502,7 @@ router.get('/audit-logs', auth, admin, async (req, res) => {
 // GET /api/admin/csr/summary
 router.get('/csr/summary', auth, admin, async (req, res) => {
   try {
-    const summary = await getOrCreateCsrSummary();
+    const summary = await reconcileCsrSummaryFromPaidOrders();
     return res.json({ summary: mapCsrSummary(summary) });
   } catch (err) {
     console.error('[ADMIN][CSR][SUMMARY] Error:', err?.message || err);

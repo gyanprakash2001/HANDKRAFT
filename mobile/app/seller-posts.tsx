@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { deleteProduct, getSellerListedItems, ProductItem } from '@/utils/api';
-import { normalizeProduct, resolveProductImageUri } from '@/utils/product';
+import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
 import { getScreenBottomPadding } from '@/utils/safe-area';
 
 function formatPrice(value: number) {
@@ -39,7 +39,7 @@ export default function SellerPostsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [posts, setPosts] = useState<ProductItem[]>([]);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
-  const [failedImageIds, setFailedImageIds] = useState<Record<string, true>>({});
+  const [imageErrorLevels, setImageErrorLevels] = useState<Record<string, number>>({});
 
   const loadPosts = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -66,7 +66,7 @@ export default function SellerPostsScreen() {
 
   const handlePostImageError = useCallback((id: string) => {
     if (!id) return;
-    setFailedImageIds((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+    setImageErrorLevels((prev) => ({ ...prev, [id]: Number(prev[id] || 0) + 1 }));
   }, []);
 
   const cardWidth = useMemo(() => (screenWidth - 32) / 2, [screenWidth]);
@@ -126,9 +126,11 @@ export default function SellerPostsScreen() {
     const socialProof = sold > 0 ? `${sold} sold` : '';
     const isDeleting = deletingPostId === item._id;
     const pricing = resolvePostPricing(item);
-    const imageUri = resolveProductImageUri(item);
+    const imageUris = resolveProductImageUris(item);
     const imageKey = String(item._id || item.title || '');
-    const useFallback = !imageUri || Boolean(imageKey && failedImageIds[imageKey]);
+    const imageErrorLevel = Math.max(0, Number(imageKey ? imageErrorLevels[imageKey] : 0) || 0);
+    const imageUri = imageUris[imageErrorLevel] || '';
+    const useFallback = !imageUri;
 
     return (
       <View key={item._id} style={[styles.postCard, { width: cardWidth }]}>
@@ -191,7 +193,7 @@ export default function SellerPostsScreen() {
         </View>
       </View>
     );
-  }, [cardWidth, deletingPostId, failedImageIds, handleDeletePost, handlePostImageError, router]);
+  }, [cardWidth, deletingPostId, handleDeletePost, handlePostImageError, imageErrorLevels, router]);
 
   if (loading) {
     return (

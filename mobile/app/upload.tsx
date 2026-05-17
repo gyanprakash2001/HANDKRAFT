@@ -18,6 +18,7 @@ import { createProduct, uploadProductMedia, uploadProductFile, getProfile, updat
 import AddressPickerModal from '@/components/AddressPickerModal';
 import type { UserAddress } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
+import { launchStableImageLibraryAsync } from '@/utils/media-picker';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
 
 const RATIO_OPTIONS = [
@@ -453,15 +454,17 @@ export default function UploadScreen() {
       // enum properties on older Expo Go runtime builds.
       const mediaTypesOption = ['images', 'videos'];
 
-      result = await (ImagePicker as any).launchImageLibraryAsync({
+      result = await launchStableImageLibraryAsync({
         mediaTypes: mediaTypesOption,
         allowsMultipleSelection: true,
         allowsEditing: false,
         base64: false,
         quality: 1,
+        selectionLimit: 0,
+        orderedSelection: true,
         // Ensure selected assets are copied into the app cache (file://) so uploads work in Expo Go
         copyToCacheDirectory: true,
-      });
+      } as any);
     } catch (err: any) {
       Alert.alert(
         'Picker issue',

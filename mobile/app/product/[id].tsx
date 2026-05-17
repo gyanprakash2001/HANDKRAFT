@@ -32,7 +32,8 @@ import {
   uploadProductFile,
 } from '@/utils/api';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
-import { normalizeProduct, resolveProductImageUri } from '@/utils/product';
+import { launchStableImageLibraryAsync } from '@/utils/media-picker';
+import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
 
 type Params = {
   id?: string;
@@ -220,7 +221,7 @@ export default function ProductDetailsScreen() {
   const [reviewViewerVisible, setReviewViewerVisible] = useState(false);
   const [reviewViewerItems, setReviewViewerItems] = useState<ReviewViewerMediaItem[]>([]);
   const [reviewViewerIndex, setReviewViewerIndex] = useState(0);
-  const [failedRelatedImageIds, setFailedRelatedImageIds] = useState<Record<string, true>>({});
+  const [relatedImageErrorLevels, setRelatedImageErrorLevels] = useState<Record<string, number>>({});
   const addToCartInFlightRef = useRef(false);
   const autoModeToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { showNotificationForItem } = useCartNotification();
@@ -310,7 +311,7 @@ export default function ProductDetailsScreen() {
     try {
       setLoading(true);
       setError(null);
-      setFailedRelatedImageIds({});
+      setRelatedImageErrorLevels({});
 
       const currentProduct = normalizeProduct(await getProductById(id));
       setProduct(currentProduct);
@@ -455,12 +456,14 @@ export default function ProductDetailsScreen() {
 
       const remainingSlots = REVIEW_MEDIA_MAX_ATTACHMENTS - reviewMedia.length;
 
-      const result = await (ImagePicker as any).launchImageLibraryAsync({
+      const result = await launchStableImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         quality: 0.8,
         allowsMultipleSelection: true,
         selectionLimit: remainingSlots,
-      });
+        orderedSelection: true,
+        copyToCacheDirectory: true,
+      } as any);
 
       const anyResult = result as any;
       if (anyResult?.canceled) {
@@ -1090,8 +1093,10 @@ export default function ProductDetailsScreen() {
         renderItem={({ item }) => {
           const relatedPricing = getProductPricing(item);
           const relatedImageKey = String(item._id || item.title || '');
-          const relatedImageUri = resolveProductImageUri(item);
-          const useRelatedFallback = !relatedImageUri || Boolean(relatedImageKey && failedRelatedImageIds[relatedImageKey]);
+          const relatedImageUris = resolveProductImageUris(item);
+          const relatedImageErrorLevel = Math.max(0, Number(relatedImageKey ? relatedImageErrorLevels[relatedImageKey] : 0) || 0);
+          const relatedImageUri = relatedImageUris[relatedImageErrorLevel] || '';
+          const useRelatedFallback = !relatedImageUri;
 
           return (
             <Pressable
@@ -1103,7 +1108,7 @@ export default function ProductDetailsScreen() {
                 contentFit="cover"
                 onError={() => {
                   if (!relatedImageKey) return;
-                  setFailedRelatedImageIds((prev) => (prev[relatedImageKey] ? prev : { ...prev, [relatedImageKey]: true }));
+                  setRelatedImageErrorLevels((prev) => ({ ...prev, [relatedImageKey]: Number(prev[relatedImageKey] || 0) + 1 }));
                 }}
               />
               <View style={styles.relatedContent}>

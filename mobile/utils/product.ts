@@ -59,16 +59,30 @@ export function normalizeProductMedia(item: ProductItem): NormalizedProductMedia
 }
 
 export function resolveProductImageUri(item: ProductItem): string {
+  return resolveProductImageUris(item)[0] || '';
+}
+
+export function resolveProductImageUris(item: ProductItem): string[] {
   const media = Array.isArray(item.media) ? item.media : [];
-  const imageEntry = media.find(
+  const imageEntries = media.filter(
     (entry) => entry?.type === 'image' && (entry.thumbnailDataUri || entry.thumbnailUrl || entry.url)
   );
-  const candidate = imageEntry?.thumbnailUrl
-    || imageEntry?.url
-    || item.images?.[0]
-    || imageEntry?.thumbnailDataUri;
+  const candidates = [
+    ...imageEntries.map((entry) => entry.thumbnailUrl),
+    ...imageEntries.map((entry) => entry.url),
+    ...(Array.isArray(item.images) ? item.images : []),
+    ...imageEntries.map((entry) => entry.thumbnailDataUri),
+  ];
+  const unique = new Set<string>();
 
-  return normalizeAssetUrl(candidate) || '';
+  for (const candidate of candidates) {
+    const normalized = normalizeAssetUrl(candidate);
+    if (normalized) {
+      unique.add(normalized);
+    }
+  }
+
+  return Array.from(unique);
 }
 
 export function normalizeProduct(item: ProductItem): NormalizedProduct {
