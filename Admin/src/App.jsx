@@ -1068,7 +1068,7 @@ function OrdersPage({ showToast }) {
       </Stack>
 
       <Dialog open={Boolean(selectedOrder)} onClose={() => setSelectedOrder(null)} fullWidth maxWidth="lg">
-        <DialogTitle>Order Detail</DialogTitle>
+        <DialogTitle>Order Detail — {selectedOrder?._id}</DialogTitle>
         <DialogContent dividers>
           {selectedOrder && selectedOrderForm ? (
             <Stack spacing={2}>
@@ -1088,13 +1088,91 @@ function OrdersPage({ showToast }) {
               </Stack>
               <TextField label="Notes" value={selectedOrderForm.notes} onChange={(e) => setSelectedOrderForm((prev) => ({ ...prev, notes: e.target.value }))} fullWidth multiline minRows={2} />
 
+              {/* Shipment Tracking Section */}
+              {Array.isArray(selectedOrder.sellerShipments) && selectedOrder.sellerShipments.length > 0 ? (
+                <>
+                  <Divider />
+                  <Typography variant="h6">📦 Shipment Tracking</Typography>
+                  {selectedOrder.sellerShipments.map((shipment, sIdx) => (
+                    <Paper key={sIdx} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                      <Stack spacing={1}>
+                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                          <Chip
+                            label={`Status: ${String(shipment.status || 'pending').replace(/_/g, ' ')}`}
+                            color={shipment.status === 'delivered' ? 'success' : shipment.status === 'in_transit' ? 'info' : 'default'}
+                            size="small"
+                          />
+                          {(shipment.carrier?.courierName || shipment.courierName) ? (
+                            <Chip label={`Courier: ${shipment.carrier?.courierName || shipment.courierName}`} variant="outlined" size="small" />
+                          ) : null}
+                          {shipment.localShipmentRef ? (
+                            <Chip label={`Ref: ${shipment.localShipmentRef}`} variant="outlined" size="small" />
+                          ) : null}
+                        </Stack>
+                        {(shipment.carrier?.awbNumber || shipment.awbNumber) ? (
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                            AWB / Tracking ID: {shipment.carrier?.awbNumber || shipment.awbNumber}
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                            Tracking ID not yet assigned
+                          </Typography>
+                        )}
+                        {(shipment.carrier?.trackingUrl || shipment.trackingUrl) ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            href={shipment.carrier?.trackingUrl || shipment.trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ alignSelf: 'flex-start' }}
+                          >
+                            Open Tracking Link ↗
+                          </Button>
+                        ) : null}
+                      </Stack>
+                    </Paper>
+                  ))}
+                </>
+              ) : null}
+
+              {/* Pricing Summary */}
+              <Divider />
+              <Typography variant="h6">💰 Pricing Breakdown</Typography>
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Stack spacing={0.5}>
+                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Subtotal</Typography><Typography variant="body2">₹{Number(selectedOrder.subtotal || 0).toFixed(2)}</Typography></Stack>
+                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Shipping</Typography><Typography variant="body2">₹{Number(selectedOrder.shippingCost || 0).toFixed(2)}</Typography></Stack>
+                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2">Platform Fee</Typography><Typography variant="body2">₹{Number(selectedOrder.platformFee || selectedOrder.tax || 8).toFixed(2)}</Typography></Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>Includes ₹{Number(selectedOrder.csrContributionAmount || 1).toFixed(0)} CSR contribution</Typography>
+                  <Divider sx={{ my: 0.5 }} />
+                  <Stack direction="row" justifyContent="space-between"><Typography variant="body2" fontWeight={700}>Total</Typography><Typography variant="body2" fontWeight={700} color="success.main">₹{Number(selectedOrder.totalAmount || 0).toFixed(2)}</Typography></Stack>
+                </Stack>
+              </Paper>
+
+              {/* Shipping Address */}
+              {selectedOrder.shippingAddress ? (
+                <>
+                  <Typography variant="h6">📍 Shipping Address</Typography>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Typography variant="body2" fontWeight={700}>{selectedOrder.shippingAddress.fullName}</Typography>
+                    <Typography variant="body2">{selectedOrder.shippingAddress.street}</Typography>
+                    <Typography variant="body2">{selectedOrder.shippingAddress.city}, {selectedOrder.shippingAddress.state} {selectedOrder.shippingAddress.postalCode}</Typography>
+                    <Typography variant="body2">{selectedOrder.shippingAddress.country}</Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>📱 {selectedOrder.shippingAddress.phoneNumber} • 📧 {selectedOrder.shippingAddress.email}</Typography>
+                  </Paper>
+                </>
+              ) : null}
+
               <Divider />
               <Typography variant="h6">Items Fulfillment</Typography>
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell>Image</TableCell>
                       <TableCell>Item</TableCell>
+                      <TableCell>Price</TableCell>
                       <TableCell>Qty</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="right">Action</TableCell>
@@ -1103,9 +1181,24 @@ function OrdersPage({ showToast }) {
                   <TableBody>
                     {(selectedOrder.items || []).map((item, index) => (
                       <TableRow key={`${selectedOrder._id}-${index}`}>
+                        <TableCell>
+                          {item.image ? (
+                            <img
+                              src={item.image.startsWith('/') ? `https://handkraft-api-gyan-akgwc4bwesczdage.centralindia-01.azurewebsites.net${item.image}` : item.image}
+                              alt={item.title || 'Product'}
+                              style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover' }}
+                              onError={(e) => { e.target.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <Box sx={{ width: 48, height: 48, borderRadius: 1.5, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Typography variant="caption" color="text.secondary">—</Typography>
+                            </Box>
+                          )}
+                        </TableCell>
                         <TableCell>{item?.product?.title || item?.title || '-'}</TableCell>
+                        <TableCell>₹{Number(item.price || 0).toFixed(2)}</TableCell>
                         <TableCell>{item.quantity || 0}</TableCell>
-                        <TableCell>{item.fulfillmentStatus}</TableCell>
+                        <TableCell><Chip label={item.fulfillmentStatus} size="small" /></TableCell>
                         <TableCell align="right">
                           <FormControl size="small" sx={{ minWidth: 180 }}>
                             <InputLabel>Status</InputLabel>
