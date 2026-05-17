@@ -1,0 +1,58 @@
+# Server (not needed for mobile build)
+server/
+server/**
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Admin dashboard
+Admin/
+Admin/**
+
+# Client
+client/
+client/**
+
+# Docs
+docs/
+docs/**
+
+# GitHub workflows
+.github/
+.github/**
+
+# Large binary files at root
+*.apk
+*.log
+*.b64
+*.patch
+*.iml
+
+# Build logs
+android-build-log.txt
+android-release-run-*.log
+live-beta3-job.log
+
+# Dev / IDE
+.expo/
+.idea/
+.vscode/
+
+# Git
+.git/
+.git/**
+
+# Keystore
+keystore.b64
+
+# Test files
+test-express-delivery.js

@@ -34,7 +34,7 @@ export default function LoginScreen() {
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
     scopes: ['openid', 'profile', 'email'],
     selectAccount: true,
-  });
+  } as any);
 
   const completeGoogleAuth = useCallback(async (idToken?: string, accessToken?: string) => {
     const { token, user } = await signInWithGoogle(idToken, accessToken);
@@ -144,7 +144,7 @@ export default function LoginScreen() {
         }
       }
 
-      await promptAsync({ useProxy: useProxyForExpo });
+      await promptAsync(useProxyForExpo ? ({ useProxy: true } as any) : undefined);
     } catch (firstError) {
       console.warn('Google AuthSession sign-in failed', firstError);
 

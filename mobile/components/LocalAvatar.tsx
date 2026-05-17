@@ -15,7 +15,7 @@ const EMOJIS = [
   '🌼','🪶','🍃','🪡','🧪','🏺','🕯️','📦','🧯','🪵'
 ];
 
-const PALETTES = [
+const PALETTES: [string, string][] = [
   ['#FFD6A5', '#FDFFB6'],
   ['#9DE0FF', '#C3FBD8'],
   ['#FAD2E1', '#E1F0FF'],

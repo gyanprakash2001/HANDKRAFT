@@ -70,7 +70,7 @@ function FeedVideoSlide({ uri, height }: { uri: string; height: number }) {
     <VideoView
       style={{ width: '100%', height }}
       player={player}
-      allowsFullscreen={false}
+      fullscreenOptions={{ enable: false }}
       allowsPictureInPicture={false}
       nativeControls={false}
       // Feed should not crop videos. Fit video inside the image-based frame.
@@ -562,9 +562,7 @@ export default function FeedScreen() {
     return (
       <View
         key={item._id}
-        style={[styles.card, { minHeight: estimatedCardHeight }]}
-        onMouseEnter={() => {}}
-        onMouseLeave={() => {}}>
+        style={[styles.card, { minHeight: estimatedCardHeight }]}>
         <View
           style={styles.cardImageContainer}
           onLayout={(event) => handleMediaLayout(item._id, event.nativeEvent.layout.width)}>

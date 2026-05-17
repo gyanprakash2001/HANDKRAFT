@@ -1,3 +1,5 @@
+import type { SignInResponse } from '@react-native-google-signin/google-signin';
+
 type ConfigureMode = 'withWebClient' | 'withoutWebClient';
 
 let configuredMode: ConfigureMode | null = null;

@@ -188,7 +188,7 @@ function normalizeProductItem(item: any): ProductItem {
 
   const normalizedMedia = media.length > 0
     ? media
-    : normalizedImages.map((url) => ({
+    : normalizedImages.map((url: string) => ({
         type: 'image' as const,
         url,
         thumbnailUrl: url,
@@ -299,6 +299,7 @@ export interface ProductItem {
   ratingAverage?: number;
   reviewCount?: number;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface SellerProductInsights {
@@ -1315,6 +1316,7 @@ export interface CsrActivityMedia {
   type: 'image' | 'video';
   url: string;
   thumbnailUrl: string;
+  thumbnailDataUri?: string;
   caption: string;
 }
 

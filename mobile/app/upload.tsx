@@ -2005,6 +2005,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 11,
   },
+  btnPressed: {
+    opacity: 0.8,
+  },
   pickupSaveBtnText: {
     color: '#0a0a0a',
     fontSize: 13,

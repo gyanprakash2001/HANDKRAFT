@@ -27,7 +27,7 @@ function toFiniteNumber(value: unknown, fallback = 0) {
 export function normalizeProductMedia(item: ProductItem): NormalizedProductMediaItem[] {
   const media = Array.isArray(item.media) ? item.media : [];
   const normalized = media
-    .map((entry) => ({
+    .map((entry): NormalizedProductMediaItem => ({
       type: entry?.type === 'video' ? 'video' : 'image',
       url: String(entry?.url || '').trim(),
       thumbnailUrl: String(entry?.thumbnailUrl || '').trim() || undefined,

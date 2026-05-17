@@ -2,7 +2,7 @@
   "expo": {
     "name": "Handkraft",
     "slug": "handkraft",
-    "version": "1.0.0",
+    "version": "1.0.26",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.png",
     "scheme": "handkraft",
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/images/app-icon-android-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 1,
+      "versionCode": 26,
       "package": "com.handkraft"
     },
     "web": {

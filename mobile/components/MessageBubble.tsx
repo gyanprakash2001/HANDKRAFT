@@ -165,6 +165,12 @@ const styles = StyleSheet.create({
   bubbleWrap: {
     maxWidth: '82%',
   },
+  bubbleWrapRight: {
+    alignItems: 'flex-end',
+  },
+  bubbleWrapLeft: {
+    alignItems: 'flex-start',
+  },
   bubble: {
     borderRadius: 16,
     paddingHorizontal: 12,

@@ -1,0 +1,28 @@
+# Exclude server folder (not needed for mobile build)
+../server
+../Admin
+../client
+../docs
+../.github
+../.git
+
+# Dependencies and generated native projects
+node_modules
+android
+ios
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Exclude large binary files
+../*.apk
+../*.log
+../*.b64
+../*.patch
+
+# Dev files
+.expo
+.vscode
+*.log

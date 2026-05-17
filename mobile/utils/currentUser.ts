@@ -24,7 +24,9 @@ function subscribe(cb: Listener) {
   listeners.add(cb);
   // immediate call with current state
   try { cb(profile); } catch (e) { /* ignore */ }
-  return () => listeners.delete(cb);
+  return () => {
+    listeners.delete(cb);
+  };
 }
 
 export default {
