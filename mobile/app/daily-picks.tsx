@@ -95,7 +95,45 @@ function recencyWeight(daysSince: number, halfLifeDays: number) {
   return Math.pow(0.5, daysSince / Math.max(0.25, halfLifeDays));
 }
 
-function buildDailyPicks(context: PickContext) {
+function strongSeedHash(input: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  hash += hash << 13;
+  hash ^= hash >>> 7;
+  hash += hash << 3;
+  hash ^= hash >>> 17;
+  hash += hash << 5;
+
+  return hash >>> 0;
+}
+
+function seededNoise(id: string, loadSeed: number) {
+  const seed = `${id}:${loadSeed}`;
+  const hash = strongSeedHash(seed);
+  return (hash % 1000) / 1000;
+}
+
+function seededPick(key: string, loadSeed: number) {
+  const value = strongSeedHash(`${key}:${loadSeed}`);
+  return (value % 100000) / 100000;
+}
+
+function seededShuffle<T>(items: T[], loadSeed: number, keyForItem: (item: T) => string) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(seededPick(`${keyForItem(next[index])}:${index}`, loadSeed) * (index + 1));
+    const temp = next[index];
+    next[index] = next[target];
+    next[target] = temp;
+  }
+  return next;
+}
+
+function buildDailyPicks(context: PickContext, loadSeed: number) {
   const {
     products,
     likedItems,
@@ -181,9 +219,11 @@ function buildDailyPicks(context: PickContext) {
     || allBehaviorIds.size > 0;
 
   if (!hasSignals) {
-    return [...products]
+    const base = [...products]
       .sort((a, b) => (Number(b.monthlySold) || 0) - (Number(a.monthlySold) || 0))
       .slice(0, 28);
+
+    return seededShuffle(base, loadSeed, (item) => item._id);
   }
 
   const scored = products
@@ -206,6 +246,8 @@ function buildDailyPicks(context: PickContext) {
 
       score += (Number(product.monthlySold) || 0) * 0.18;
       score += (Number(product.monthlySaves) || 0) * 0.1;
+      score += Math.min(0.3, recencyWeight(getDaysSince(product.createdAt || product.updatedAt), 2.25) * 0.3);
+      score += (seededNoise(product._id, loadSeed) - 0.5) * 0.75;
 
       return { product, score };
     })
@@ -213,16 +255,29 @@ function buildDailyPicks(context: PickContext) {
     .map((entry) => entry.product)
     .slice(0, 28);
 
-  if (scored.length) return scored;
+  if (scored.length) {
+    const bucketSize = 4;
+    const reshuffled: ProductItem[] = [];
 
-  return [...products]
+    for (let index = 0; index < scored.length; index += bucketSize) {
+      const bucket = scored.slice(index, index + bucketSize);
+      reshuffled.push(...seededShuffle(bucket, loadSeed, (item) => item._id));
+    }
+
+    return reshuffled;
+  }
+
+  const fallback = [...products]
     .sort((a, b) => (Number(b.monthlySold) || 0) - (Number(a.monthlySold) || 0))
     .slice(0, 28);
+
+  return seededShuffle(fallback, loadSeed, (item) => item._id);
 }
 
 export default function DailyPicksScreen() {
   const router = useRouter();
   const seenRef = useRef<Set<string>>(new Set());
+  const shuffleCycleRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -239,6 +294,8 @@ export default function DailyPicksScreen() {
     try {
       setError(null);
       const productLimit = DAILY_PICKS_LIMIT_DEFAULT;
+      shuffleCycleRef.current += 1;
+      const loadSeed = Date.now() + shuffleCycleRef.current * 2654435761;
 
       const [productsRes, dashboardRes, ordersRes, behavior] = await Promise.all([
         getProducts({ page: 1, limit: productLimit, sort: 'newest' }),
@@ -257,7 +314,7 @@ export default function DailyPicksScreen() {
         lastSeenAt: behavior.lastSeenAt || {},
         lastClickedAt: behavior.lastClickedAt || {},
         lastVisitedAt: behavior.lastVisitedAt || {},
-      });
+      }, loadSeed);
 
       setPicks(ranked);
       seenRef.current.clear();
@@ -453,8 +510,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#27384c',
-    backgroundColor: '#101b2a',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -470,8 +527,6 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 10,
     backgroundColor: '#000000',
-    borderTopWidth: 1,
-    borderTopColor: '#ffffff',
   },
   titleRow: {
     flexDirection: 'row',
@@ -544,8 +599,8 @@ const styles = StyleSheet.create({
   emptyWrap: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27384c',
-    backgroundColor: '#101b2a',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     padding: 14,
     marginTop: 24,
   },

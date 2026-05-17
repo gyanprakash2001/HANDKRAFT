@@ -122,6 +122,7 @@ const orderSchema = new mongoose.Schema({
   subtotal: { type: Number, required: true, min: 0 },
   shippingCost: { type: Number, default: 0, min: 0 },
   tax: { type: Number, default: 0, min: 0 },
+  platformFee: { type: Number, default: 8, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 },
   isDraft: { type: Boolean, default: false },
   status: {
@@ -140,6 +141,7 @@ const orderSchema = new mongoose.Schema({
   csrContributionAmount: { type: Number, default: 1, min: 0 },
   csrContributionCredited: { type: Boolean, default: false },
   csrCreditedAt: { type: Date, default: null },
+  expectedDeliveryDate: { type: Date, default: null },
   notes: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

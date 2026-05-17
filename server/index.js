@@ -106,6 +106,9 @@ app.use('/api/payouts', payoutsRouter);
 const csrRouter = require('./routes/csr');
 app.use('/api/csr', csrRouter);
 
+const webhooksRouter = require('./routes/webhooks');
+app.use('/api/webhooks', webhooksRouter);
+
 // Debug routes (protected) for dry-run Nimbus calls
 const debugRouter = require('./routes/debug');
 app.use('/api/debug', debugRouter);

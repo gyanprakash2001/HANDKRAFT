@@ -3,6 +3,7 @@ const { env } = require('../config/env');
 const Order = require('../models/Order');
 const User = require('../models/User');
 const Payout = require('../models/Payout');
+const { logPaymentReconciliation, logSellerAction } = require('./audit');
 
 function roundCurrency(value) {
   const parsed = Number(value || 0);
@@ -55,6 +56,49 @@ function appendPayoutTimeline(payout, { status, note, source = 'system' }) {
     source,
     at: new Date(),
   });
+}
+
+function applyPayoutDeliveryHold(payout, { coolingDays = 0, source = 'system', now = new Date() } = {}) {
+  const normalizedCoolingDays = Math.max(0, Number(coolingDays || 0));
+  const releaseImmediately = normalizedCoolingDays <= 0;
+  const holdUntil = new Date(now.getTime() + (normalizedCoolingDays * 24 * 60 * 60 * 1000));
+
+  payout.status = releaseImmediately ? 'ready_for_payout' : 'on_hold';
+  payout.deliveredAt = payout.deliveredAt || now;
+  payout.holdStartedAt = now;
+  payout.holdUntil = releaseImmediately ? now : holdUntil;
+  payout.payout = Object.assign({}, payout.payout || {}, {
+    mode: 'manual',
+    provider: 'internal',
+    failureReason: '',
+  });
+
+  appendPayoutTimeline(payout, {
+    status: payout.status,
+    note: releaseImmediately
+      ? 'Delivery completed. Amount is now available in seller wallet for claim.'
+      : `Delivery completed. Payout moved to hold for ${normalizedCoolingDays} day(s).`,
+    source,
+  });
+
+  return payout;
+}
+
+function releasePayoutFromHold(payout, { source = 'scheduler' } = {}) {
+  payout.status = 'ready_for_payout';
+  payout.payout = Object.assign({}, payout.payout || {}, {
+    mode: 'manual',
+    provider: 'internal',
+    failureReason: '',
+  });
+
+  appendPayoutTimeline(payout, {
+    status: 'ready_for_payout',
+    note: 'Hold completed. Amount is now available in seller wallet for manual claim.',
+    source,
+  });
+
+  return payout;
 }
 
 function getSellerItems(order, sellerId) {
@@ -336,31 +380,24 @@ async function syncSellerPayoutAfterFulfillment(order, sellerId, source = 'syste
   const coolingDays = resolveCoolingDays(policy);
 
   const now = new Date();
-  const holdUntil = new Date(now.getTime() + (coolingDays * 24 * 60 * 60 * 1000));
-  const releaseImmediately = coolingDays <= 0;
-
-  payout.status = releaseImmediately ? 'ready_for_payout' : 'on_hold';
-  payout.deliveredAt = payout.deliveredAt || now;
-  payout.holdStartedAt = now;
-  payout.holdUntil = releaseImmediately ? now : holdUntil;
+  applyPayoutDeliveryHold(payout, { coolingDays, source, now });
   const seller = await User.findById(sellerObjectId).select('sellerTrust');
   payout.trustSnapshot = buildTrustSnapshot(seller, coolingDays);
 
-  payout.payout = Object.assign({}, payout.payout || {}, {
-    mode: 'manual',
-    provider: 'internal',
-    failureReason: '',
-  });
+  await payout.save();
 
-  appendPayoutTimeline(payout, {
-    status: payout.status,
-    note: releaseImmediately
-      ? 'Delivery completed. Amount is now available in seller wallet for claim.'
-      : `Delivery completed. Payout moved to hold for ${coolingDays} day(s).`,
+  // Audit: payout hold started
+  logPaymentReconciliation({
+    orderId: order._id,
+    sellerId: sellerObjectId,
+    event: 'payout_hold_started',
+    snapshot: payout.split ? payout.split.toObject ? payout.split.toObject() : payout.split : null,
+    payoutId: payout._id,
+    payoutStatus: payout.status,
+    note: `Delivery confirmed. Payout moved to ${payout.status} (cooling: ${coolingDays} day(s)).`,
     source,
   });
 
-  await payout.save();
   return payout;
 }
 
@@ -435,21 +472,22 @@ async function processDuePayouts({ limit = 50 } = {}) {
       continue;
     }
 
-    payout.status = 'ready_for_payout';
-    payout.payout = Object.assign({}, payout.payout || {}, {
-      mode: 'manual',
-      provider: 'internal',
-      failureReason: '',
-    });
-
-    appendPayoutTimeline(payout, {
-      status: 'ready_for_payout',
-      note: 'Hold completed. Amount is now available in seller wallet for manual claim.',
-      source: 'scheduler',
-    });
+    releasePayoutFromHold(payout, { source: 'scheduler' });
 
     await payout.save();
     releasedCount += 1;
+
+    // Audit: payout released from hold
+    logPaymentReconciliation({
+      orderId: payout.order,
+      sellerId: payout.seller,
+      event: 'payout_released',
+      snapshot: payout.split ? (payout.split.toObject ? payout.split.toObject() : payout.split) : null,
+      payoutId: payout._id,
+      payoutStatus: 'ready_for_payout',
+      note: 'Hold period expired. Payout released to seller wallet.',
+      source: 'scheduler',
+    });
   }
 
   return {
@@ -601,6 +639,26 @@ async function claimReadyPayoutsInternal({ sellerId = null, payoutIds = [], limi
     await payout.save();
     claimedCount += 1;
     claimedAmount += netPayoutAmount;
+
+    // Audit: payout claimed
+    logPaymentReconciliation({
+      orderId: payout.order,
+      sellerId: payout.seller,
+      event: 'payout_claimed',
+      snapshot: payout.split ? (payout.split.toObject ? payout.split.toObject() : payout.split) : null,
+      payoutId: payout._id,
+      payoutStatus: 'paid',
+      amount: netPayoutAmount,
+      note: `Payout claimed. Amount: ${netPayoutAmount}. Ref: ${payout.payout?.referenceId || ''}.`,
+      source,
+    });
+    logSellerAction({
+      sellerId: payout.seller,
+      action: 'payout_claimed',
+      after: { payoutId: String(payout._id), amount: netPayoutAmount, referenceId: payout.payout?.referenceId || '' },
+      note: `Payout of ${netPayoutAmount} claimed.`,
+      source,
+    });
   }
 
   return {
@@ -959,4 +1017,6 @@ module.exports = {
   claimAdminReadyPayouts,
   getPayoutPolicy,
   maskBankDetails,
+  applyPayoutDeliveryHold,
+  releasePayoutFromHold,
 };

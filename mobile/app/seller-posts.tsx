@@ -141,7 +141,7 @@ export default function SellerPostsScreen() {
             {supportsCustomization ? <ThemedText style={styles.postBadge}>CUSTOM</ThemedText> : null}
           </View>
           {pricing.discountedPrice !== null ? (
-            <View style={styles.priceRow}>
+            <View style={styles.priceStack}>
               <ThemedText style={styles.discountedPrice}>{formatPrice(pricing.effectivePrice)}</ThemedText>
               <ThemedText style={styles.originalPrice}>{formatPrice(pricing.realPrice)}</ThemedText>
             </View>
@@ -363,12 +363,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
   },
-  priceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  priceStack: {
+    gap: 2,
     marginBottom: 4,
-    flexWrap: 'wrap',
   },
   discountedPrice: {
     color: '#9df0a2',

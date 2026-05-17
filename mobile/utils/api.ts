@@ -565,6 +565,11 @@ export interface UpdateSellerProfilePayload {
   sellerPickupAddress?: SellerPickupAddress;
 }
 
+export interface UpdateSellerPickupAddressPayload {
+  sellerPickupAddressId?: string;
+  sellerPickupAddress?: SellerPickupAddress;
+}
+
 export async function getSellerPublicProfile(params: {
   sellerId?: string;
   sellerName?: string;
@@ -618,6 +623,23 @@ export async function updateSellerProfile(payload: UpdateSellerProfilePayload): 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to update seller profile');
+  }
+
+  return res.json();
+}
+
+export async function updateSellerPickupAddress(payload: UpdateSellerPickupAddressPayload): Promise<{
+  message: string;
+  sellerPickupAddress: SellerPickupAddress;
+}> {
+  const res = await fetchWithAuth('/users/seller/pickup-address', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update pickup address');
   }
 
   return res.json();
@@ -1102,14 +1124,26 @@ export interface OrderItem {
   image: string;
 }
 
+export interface OrderShipmentSummary {
+  seller?: string;
+  localShipmentRef: string;
+  status: string;
+  awbNumber: string;
+  trackingUrl: string;
+  courierName: string;
+  labelUrl?: string;
+}
+
 export interface Order {
   _id: string;
   user: string;
   items: OrderItem[];
+  sellerShipments?: OrderShipmentSummary[];
   shippingAddress: ShippingAddress;
   subtotal: number;
   shippingCost: number;
   tax: number;
+  platformFee?: number;
   totalAmount: number;
   isDraft?: boolean;
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
@@ -1117,6 +1151,7 @@ export interface Order {
   paymentMethod: string;
   transactionId: string;
   notes: string;
+  expectedDeliveryDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1127,6 +1162,25 @@ export interface SellerOrderTrackingEvent {
   status: SellerFulfillmentStatus;
   note: string;
   at: string;
+}
+
+export interface SellerShipmentCarrier {
+  provider: string;
+  awbNumber: string;
+  courierName: string;
+  trackingUrl: string;
+  remoteStatus: string;
+  labelUrl: string;
+}
+
+export interface SellerShipmentView {
+  id: string;
+  localShipmentRef: string;
+  status: string;
+  lastError: string;
+  carrier: SellerShipmentCarrier | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface SellerOrderItem {
@@ -1153,6 +1207,7 @@ export interface SellerOrder {
   paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
   overallStatus: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
   sellerSubtotal: number;
+  shipment?: SellerShipmentView | null;
   items: SellerOrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -1188,7 +1243,8 @@ export interface OrderShippingEstimateResponse {
         courierName: string;
         totalCharges: number;
         freightCharges: number;
-        codCharges: number;
+        codCharges: number | null;
+        codAvailable?: boolean;
         etd: string;
         chargeableWeight: number;
       }[];
@@ -1196,6 +1252,7 @@ export interface OrderShippingEstimateResponse {
       selectedCourierName: string;
       selectedTotalCharges: number;
       selectedEtd: string;
+      selectedCodAvailable?: boolean;
     }[];
     reason?: string;
   };
@@ -1233,7 +1290,7 @@ export interface RazorpayPaymentOrder {
 }
 
 export interface ProcessOrderPaymentPayload {
-  paymentProvider?: 'razorpay' | 'card';
+  paymentProvider?: 'razorpay' | 'card' | 'cash_on_delivery';
   stripeToken?: string;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;

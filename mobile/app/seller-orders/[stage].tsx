@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, Linking, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -11,8 +13,26 @@ import {
   SellerFulfillmentStatus,
   SellerOrder,
   SellerOrderItem,
-  updateSellerOrderItemStatus,
 } from '@/utils/api';
+
+const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+
+function resolveFileBaseUrl() {
+  if (ENV_BASE_URL) return ENV_BASE_URL.replace(/\/api\/?$/, '');
+  const hostUri = Constants.expoConfig?.hostUri || (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
+  const host = hostUri ? hostUri.split(':')[0] : null;
+  const isIpv4 = host ? /^\d{1,3}(\.\d{1,3}){3}$/.test(host) : false;
+  if (host && isIpv4) return `http://${host}:5000`;
+  if (Platform.OS === 'android') return 'http://10.0.2.2:5000';
+  return 'http://localhost:5000';
+}
+
+function resolveImageUri(url?: string) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('/')) return `${resolveFileBaseUrl()}${raw}`;
+  return raw;
+}
 
 type SellerStage = 'new' | 'shipment' | 'delivered';
 
@@ -77,7 +97,6 @@ export default function SellerStageOrdersScreen() {
   const [error, setError] = useState<string | null>(null);
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [expandedOrderIds, setExpandedOrderIds] = useState<string[]>([]);
-  const [updatingKey, setUpdatingKey] = useState<string | null>(null);
 
   const loadOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -114,9 +133,9 @@ export default function SellerStageOrdersScreen() {
   const stageTitle = stage === 'new' ? 'New Orders' : stage === 'shipment' ? 'In Shipment' : 'Delivered';
 
   const stageDescription = stage === 'new'
-    ? 'Move ready orders into shipment.'
+    ? 'Orders awaiting shipment booking by NimbusPost.'
     : stage === 'shipment'
-      ? 'Mark shipped items as delivered.'
+      ? 'Orders currently being shipped via courier.'
       : 'Completed delivered orders.';
 
   const filteredOrders = useMemo(() => {
@@ -136,31 +155,16 @@ export default function SellerStageOrdersScreen() {
       .filter((order) => order.items.length > 0);
   }, [orders, stage]);
 
-  const handleUpdateGroupedStatus = async (orderId: string, item: GroupedSellerOrderItem, nextStatus: SellerFulfillmentStatus) => {
-    const key = `${orderId}-${item.groupKey}`;
-
-    try {
-      setUpdatingKey(key);
-
-      let updatedOrder: SellerOrder | null = null;
-      for (const itemIndex of item.itemIndexes) {
-        updatedOrder = await updateSellerOrderItemStatus(orderId, itemIndex, nextStatus);
-      }
-
-      if (updatedOrder) {
-        setOrders((prev) => prev.map((entry) => (entry.id === updatedOrder.id ? updatedOrder : entry)));
-      }
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch (err: any) {
-      setError(err?.message || 'Failed to update order status');
-    } finally {
-      setUpdatingKey(null);
-    }
-  };
-
   const renderOrder = ({ item }: { item: SellerOrder }) => {
     const totalUnits = item.items.reduce((sum, orderItem) => sum + (Number(orderItem.quantity) || 0), 0);
+    const shipment = (item as any).shipment;
+    const awbNumber = shipment?.carrier?.awbNumber || '';
+    const courierName = shipment?.carrier?.courierName || '';
+    const trackingUrl = shipment?.carrier?.trackingUrl || '';
+    const shipmentStatus = shipment?.status || '';
+
+    // Get first item image
+    const firstItemImage = item.items?.[0]?.image;
 
     return (
       <Pressable
@@ -171,72 +175,145 @@ export default function SellerStageOrdersScreen() {
           ));
         }}>
         <View style={styles.orderHeader}>
+          {/* Product image thumbnail */}
+          {firstItemImage ? (
+            <Image
+              source={{ uri: resolveImageUri(firstItemImage) }}
+              style={styles.orderThumbnail}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.orderThumbnail, styles.orderThumbnailPlaceholder]}>
+              <Ionicons name="cube-outline" size={20} color="#68788d" />
+            </View>
+          )}
           <View style={styles.orderHeaderMeta}>
-            <ThemedText style={styles.orderTitle}>Order #{item.orderId.slice(-8).toUpperCase()}</ThemedText>
-            <ThemedText style={styles.orderBuyer}>Buyer: {item.buyer?.name || 'Buyer'} • {totalUnits} unit(s)</ThemedText>
+            <ThemedText numberOfLines={1} style={styles.orderTitle}>
+              {item.items?.[0]?.title || `Order #${item.orderId.slice(-8).toUpperCase()}`}
+            </ThemedText>
+            <ThemedText style={styles.orderBuyer}>
+              Buyer: {item.buyer?.name || 'Buyer'} • {totalUnits} unit(s)
+            </ThemedText>
+            {awbNumber ? (
+              <View style={styles.awbRow}>
+                <Ionicons name="locate-outline" size={11} color="#9df0a2" />
+                <ThemedText numberOfLines={1} style={styles.awbText}>
+                  {courierName ? `${courierName} • ` : ''}AWB: {awbNumber}
+                </ThemedText>
+              </View>
+            ) : (
+              <ThemedText style={styles.awbPending}>
+                {stage === 'new' ? 'Tracking ID will be assigned after booking' : 'No tracking ID'}
+              </ThemedText>
+            )}
           </View>
           <Ionicons name={expandedOrderIds.includes(item.id) ? 'chevron-up' : 'chevron-down'} size={18} color="#9cb0cc" />
         </View>
 
         <ThemedText style={styles.orderSubtext}>
-          {new Date(item.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} • Payment: {item.paymentStatus}
+          {new Date(item.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} • Payment: {item.paymentStatus}
         </ThemedText>
 
         {expandedOrderIds.includes(item.id) ? (
           <View style={styles.expandedWrap}>
-          <View style={styles.addressCard}>
-            <ThemedText style={styles.addressTitle}>Ship To</ThemedText>
-            <ThemedText style={styles.addressText}>{item.shippingAddress?.fullName}</ThemedText>
-            <ThemedText style={styles.addressText}>{item.shippingAddress?.phoneNumber}</ThemedText>
-            <ThemedText style={styles.addressText}>{item.shippingAddress?.street}</ThemedText>
-            <ThemedText style={styles.addressText}>
-              {item.shippingAddress?.city}, {item.shippingAddress?.state} {item.shippingAddress?.postalCode}
-            </ThemedText>
-          </View>
+            {/* Shipping address */}
+            <View style={styles.addressCard}>
+              <ThemedText style={styles.addressTitle}>Ship To</ThemedText>
+              <ThemedText style={styles.addressText}>{item.shippingAddress?.fullName}</ThemedText>
+              <ThemedText style={styles.addressText}>{item.shippingAddress?.phoneNumber}</ThemedText>
+              <ThemedText style={styles.addressText}>{item.shippingAddress?.street}</ThemedText>
+              <ThemedText style={styles.addressText}>
+                {item.shippingAddress?.city}, {item.shippingAddress?.state} {item.shippingAddress?.postalCode}
+              </ThemedText>
+            </View>
 
+            {/* Tracking info card */}
+            {(awbNumber || shipmentStatus) ? (
+              <View style={styles.trackingInfoCard}>
+                <View style={styles.trackingInfoRow}>
+                  <Ionicons name="cube-outline" size={14} color="#9df0a2" />
+                  <ThemedText style={styles.trackingInfoStatus}>
+                    {shipmentStatus ? shipmentStatus.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Pending'}
+                  </ThemedText>
+                </View>
+                {awbNumber ? (
+                  <ThemedText style={styles.trackingInfoAwb} selectable>
+                    AWB: {awbNumber}
+                  </ThemedText>
+                ) : null}
+                {courierName ? (
+                  <ThemedText style={styles.trackingInfoCourier}>
+                    Courier: {courierName}
+                  </ThemedText>
+                ) : null}
+                {trackingUrl ? (
+                  <Pressable
+                    style={styles.trackShipmentBtn}
+                    onPress={() => Linking.openURL(trackingUrl).catch(() => {})}>
+                    <Ionicons name="open-outline" size={13} color="#071b0e" />
+                    <ThemedText style={styles.trackShipmentBtnText}>Track Shipment</ThemedText>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+
+            {/* Order items with images */}
             {groupSellerOrderItems(item.items).map((orderItem) => {
               const key = `${item.id}-${orderItem.groupKey}`;
               const latestEvent = orderItem.trackingEvents?.[orderItem.trackingEvents.length - 1];
-              const isUpdating = updatingKey === key;
-
-              const action = stage === 'new'
-                ? { label: 'Move to In Shipment', next: 'shipped' as SellerFulfillmentStatus }
-                : stage === 'shipment'
-                  ? { label: 'Mark Delivered', next: 'delivered' as SellerFulfillmentStatus }
-                  : null;
 
               return (
                 <View key={key} style={styles.itemCard}>
-                <View style={styles.itemTopRow}>
-                  <View style={styles.itemTextWrap}>
-                    <ThemedText numberOfLines={1} style={styles.itemTitle}>{orderItem.title}</ThemedText>
-                    <ThemedText style={styles.itemMeta}>Qty {orderItem.quantity} • ₹{orderItem.lineTotal.toFixed(2)}</ThemedText>
-                  </View>
-                  <View style={styles.statusBadge}>
-                    <ThemedText style={styles.statusBadgeText}>{statusLabelMap[orderItem.fulfillmentStatus]}</ThemedText>
-                  </View>
-                </View>
-
-                <ThemedText style={styles.trackingText}>
-                  {latestEvent
-                    ? `Latest: ${statusLabelMap[latestEvent.status]} • ${new Date(latestEvent.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-                    : 'No tracking update yet'}
-                </ThemedText>
-
-                {action ? (
-                  <Pressable
-                    style={[styles.actionBtn, isUpdating && styles.actionBtnDisabled]}
-                    onPress={() => handleUpdateGroupedStatus(item.id, orderItem, action.next)}
-                    disabled={isUpdating}>
-                    {isUpdating ? (
-                      <ActivityIndicator size="small" color="#071b0e" />
+                  <View style={styles.itemTopRow}>
+                    {orderItem.image ? (
+                      <Image
+                        source={{ uri: resolveImageUri(orderItem.image) }}
+                        style={styles.itemImage}
+                        contentFit="cover"
+                      />
                     ) : (
-                      <ThemedText style={styles.actionBtnText}>{action.label}</ThemedText>
+                      <View style={[styles.itemImage, styles.itemImagePlaceholder]}>
+                        <Ionicons name="image-outline" size={16} color="#68788d" />
+                      </View>
                     )}
-                  </Pressable>
-                ) : (
-                  <ThemedText style={styles.readOnlyText}>Delivered item, no further action needed.</ThemedText>
-                )}
+                    <View style={styles.itemTextWrap}>
+                      <ThemedText numberOfLines={1} style={styles.itemTitle}>{orderItem.title}</ThemedText>
+                      <ThemedText style={styles.itemMeta}>Qty {orderItem.quantity} • ₹{orderItem.lineTotal.toFixed(2)}</ThemedText>
+                    </View>
+                    <View style={styles.statusBadge}>
+                      <ThemedText style={styles.statusBadgeText}>{statusLabelMap[orderItem.fulfillmentStatus]}</ThemedText>
+                    </View>
+                  </View>
+
+                  <ThemedText style={styles.trackingText}>
+                    {latestEvent
+                      ? `Latest: ${statusLabelMap[latestEvent.status]} • ${new Date(latestEvent.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                      : 'Status updates automatically via NimbusPost tracking'}
+                  </ThemedText>
+
+                  {/* Info text instead of manual action buttons */}
+                  {stage === 'new' ? (
+                    <View style={styles.infoRow}>
+                      <Ionicons name="information-circle-outline" size={14} color="#9cb0cc" />
+                      <ThemedText style={styles.infoText}>
+                        Shipment will be booked automatically after payment. Tracking updates via NimbusPost.
+                      </ThemedText>
+                    </View>
+                  ) : stage === 'shipment' ? (
+                    <View style={styles.infoRow}>
+                      <Ionicons name="sync-outline" size={14} color="#7fb8ff" />
+                      <ThemedText style={styles.infoText}>
+                        Status updates automatically when courier delivers the package.
+                      </ThemedText>
+                    </View>
+                  ) : (
+                    <View style={styles.infoRow}>
+                      <Ionicons name="checkmark-circle-outline" size={14} color="#9df0a2" />
+                      <ThemedText style={styles.infoText}>
+                        Delivered successfully. No further action needed.
+                      </ThemedText>
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -360,8 +437,17 @@ const styles = StyleSheet.create({
   orderHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    gap: 10,
+  },
+  orderThumbnail: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#1a2436',
+  },
+  orderThumbnailPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   orderHeaderMeta: {
     flex: 1,
@@ -375,6 +461,24 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: '#9cb0cc',
     fontSize: 11,
+  },
+  awbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  awbText: {
+    fontSize: 10,
+    color: '#9df0a2',
+    fontWeight: '600',
+    flex: 1,
+  },
+  awbPending: {
+    marginTop: 3,
+    fontSize: 10,
+    color: '#8fa6c4',
+    fontStyle: 'italic',
   },
   orderSubtext: {
     marginTop: 6,
@@ -403,6 +507,55 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
   },
+  trackingInfoCard: {
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a5e3f',
+    backgroundColor: '#0e2318',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  trackingInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  trackingInfoStatus: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#9df0a2',
+  },
+  trackingInfoAwb: {
+    fontSize: 12,
+    color: '#7fb8ff',
+    fontWeight: '700',
+    fontFamily: 'Courier',
+    marginBottom: 2,
+  },
+  trackingInfoCourier: {
+    fontSize: 11,
+    color: '#b4b4b4',
+    marginBottom: 4,
+  },
+  trackShipmentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    marginTop: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#9df0a2',
+    alignSelf: 'flex-start',
+  },
+  trackShipmentBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#071b0e',
+  },
   itemCard: {
     marginTop: 9,
     borderRadius: 10,
@@ -415,8 +568,17 @@ const styles = StyleSheet.create({
   itemTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 10,
+  },
+  itemImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#1a2436',
+  },
+  itemImagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   itemTextWrap: {
     flex: 1,
@@ -449,29 +611,21 @@ const styles = StyleSheet.create({
     color: '#8fa6c4',
     fontSize: 10.5,
   },
-  actionBtn: {
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
     marginTop: 8,
-    height: 34,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: '#6bcf88',
-    backgroundColor: '#9df0a2',
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#263a52',
   },
-  actionBtnDisabled: {
-    opacity: 0.7,
-  },
-  actionBtnText: {
-    color: '#071b0e',
-    fontSize: 11.5,
-    fontWeight: '800',
-  },
-  readOnlyText: {
-    marginTop: 8,
-    color: '#8fa6c4',
+  infoText: {
+    flex: 1,
     fontSize: 10.5,
-    fontWeight: '600',
+    color: '#8fa6c4',
+    fontWeight: '500',
+    lineHeight: 15,
   },
   emptyState: {
     marginTop: 38,

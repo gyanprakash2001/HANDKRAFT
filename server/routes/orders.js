@@ -19,10 +19,38 @@ const {
   ensureOrderPayoutRecords,
   syncSellerPayoutAfterFulfillment,
 } = require('../services/payouts');
+const {
+  validateOrderSellers,
+} = require('../services/shipment-validation');
+const {
+  buildShipmentSkeletons,
+  validateOrderAndBuildShipments,
+  getShipmentsSummary,
+} = require('../services/shipment-grouping');
+const {
+  bookReadySellerShipmentsAfterPayment,
+} = require('../services/payment-booking');
+const {
+  processNimbuspostWebhook,
+} = require('../services/nimbuspost-webhook');
+  const {
+    calculateShippingQuotes,
+    validateSellersForShipping,
+  } = require('../services/shipping-quotes');
+const {
+  logWebhookAudit,
+  logPaymentReconciliation,
+  logShipmentEvent,
+  logInventoryTransaction,
+  logOrderAudit,
+  logOrderAuditBatch,
+  nowMs,
+} = require('../services/audit');
 
 const CSR_SUMMARY_KEY = 'global';
 const CSR_CONTRIBUTION_PER_ORDER = 1;
 const CSR_MILESTONE_AMOUNT = 20000;
+const PLATFORM_FEE_PER_ORDER = 8;
 
 async function recordCsrContributionForPaidOrder() {
   const summary = await CsrSummary.findOneAndUpdate(
@@ -60,6 +88,54 @@ async function recordCsrContributionForPaidOrder() {
 // Helper: Calculate tax (assumed 5% for demo)
 function calculateTax(subtotal) {
   return Number((subtotal * 0.05).toFixed(2));
+}
+
+function calculateCheckoutTotal(subtotal, shippingCost) {
+  const platformFee = PLATFORM_FEE_PER_ORDER; // ₹8 total, includes ₹1 CSR
+  const csrContributionAmount = CSR_CONTRIBUTION_PER_ORDER; // ₹1 included in platformFee
+  // CSR is INCLUDED in the platform fee, NOT added separately
+  const totalAmount = roundCurrency(Number(subtotal || 0) + Number(shippingCost || 0) + platformFee);
+
+  return {
+    platformFee,
+    csrContributionAmount,
+    totalAmount,
+  };
+}
+
+function parseNimbusDeliveryDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const dmyMatch = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]) - 1;
+    const year = Number(dmyMatch[3]);
+    const parsed = new Date(Date.UTC(year, month, day));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function computeExpectedDeliveryDateFromShippingQuote(shippingQuote) {
+  const details = Array.isArray(shippingQuote?.details) ? shippingQuote.details : [];
+  const candidateDates = details
+    .map((detail) => parseNimbusDeliveryDate(detail?.selectedEtd))
+    .filter(Boolean)
+    .map((date) => {
+      const next = new Date(date);
+      next.setUTCDate(next.getUTCDate() + 2);
+      return next;
+    });
+
+  if (candidateDates.length === 0) {
+    return null;
+  }
+
+  return candidateDates.reduce((latest, current) => (current.getTime() > latest.getTime() ? current : latest));
 }
 
 function toPositiveNumber(value, fallback = 0) {
@@ -426,8 +502,37 @@ async function estimateOrderShippingFromNimbus({ orderItems = [], sellerShipment
       weight,
     });
 
+    let codQuoteByCourierId = new Map();
+    try {
+      const codQuote = await getCourierServiceabilityQuote({
+        origin,
+        destination,
+        paymentType: 'cod',
+        weight,
+      });
+
+      const codOptions = Array.isArray(codQuote?.quotes)
+        ? codQuote.quotes.map(normalizeNimbusQuoteOption).filter((entry) => entry.courierId)
+        : [];
+      codQuoteByCourierId = new Map(codOptions.map((entry) => [String(entry.courierId || ''), entry]));
+    } catch (codQuoteErr) {
+      console.warn(
+        `[ORDERS][ESTIMATE_SHIPPING][NIMBUS] COD availability probe failed for ${origin} -> ${destination}:`,
+        codQuoteErr?.message || codQuoteErr
+      );
+    }
+
     const options = Array.isArray(quote?.quotes)
-      ? quote.quotes.map(normalizeNimbusQuoteOption).filter((entry) => entry.totalCharges > 0)
+      ? quote.quotes.map((entry) => {
+        const normalized = normalizeNimbusQuoteOption(entry);
+        const codMatch = codQuoteByCourierId.get(String(normalized.courierId || '')) || null;
+
+        return {
+          ...normalized,
+          codAvailable: Boolean(codMatch),
+          codCharges: codMatch ? Number(codMatch.codCharges || 0) : null,
+        };
+      }).filter((entry) => entry.totalCharges > 0)
       : [];
 
     if (options.length === 0) {
@@ -462,6 +567,7 @@ async function estimateOrderShippingFromNimbus({ orderItems = [], sellerShipment
       selectedCourierName: String(resolvedSelection.courierName || ''),
       selectedTotalCharges: shipmentCharge,
       selectedEtd: String(resolvedSelection.etd || ''),
+      selectedCodAvailable: Boolean(resolvedSelection?.codAvailable),
     });
   }
 
@@ -870,45 +976,18 @@ function buildSellerShipmentStatusFromItems(itemStatuses = []) {
 }
 
 function buildSellerShipmentSkeletons(items = [], orderId) {
-  const groupedBySeller = new Map();
+  // Use the new shipment-grouping service
+  const result = buildShipmentSkeletons(items, orderId);
+  
+  // Return shipments array for backward compatibility
+  // (the service returns { shipments, isValid, errors, failureReason })
+  return result.shipments;
+}
 
-  (items || []).forEach((item, index) => {
-    const sellerKey = item?.seller ? String(item.seller) : `missing:${index}`;
-    if (!groupedBySeller.has(sellerKey)) {
-      groupedBySeller.set(sellerKey, {
-        seller: item?.seller || null,
-        itemIndexes: [],
-      });
-    }
-
-    groupedBySeller.get(sellerKey).itemIndexes.push(index);
-  });
-
-  const orderRefPart = String(orderId || '').slice(-8).toUpperCase() || Date.now().toString(36).toUpperCase();
-  let sequence = 1;
-
-  return Array.from(groupedBySeller.values()).map((group) => {
-    const hasSeller = Boolean(group.seller);
-    const status = hasSeller ? 'pending' : 'failed';
-
-    return {
-      seller: group.seller || null,
-      itemIndexes: group.itemIndexes,
-      localShipmentRef: `HK-${orderRefPart}-${String(sequence++).padStart(2, '0')}`,
-      status,
-      lastError: hasSeller ? '' : 'Missing seller mapping for one or more order items.',
-      timeline: [
-        {
-          status,
-          note: hasSeller
-            ? 'Shipment record initialized and waiting for seller processing.'
-            : 'Shipment record initialization failed because seller mapping is missing.',
-          source: 'system',
-          at: new Date(),
-        },
-      ],
-    };
-  });
+// Enhanced version with validation - use this in order creation
+function buildAndValidateShipments(items = [], orderId) {
+  const result = buildShipmentSkeletons(items, orderId);
+  return result;
 }
 
 function toSellerShipmentView(shipment) {
@@ -1128,17 +1207,71 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
     console.warn('[PAYMENT][PAYOUT] Failed to initialize payout ledger:', payoutErr?.message || payoutErr);
   }
 
+  // Audit: payment completed + payout created
+  logOrderAudit({
+    orderId: order._id,
+    actorRole: 'system',
+    event: 'payment_completed',
+    newState: { paymentStatus: 'completed', status: 'confirmed', paymentMethod },
+    meta: { transactionId, gatewayProvider: paymentGateway?.provider || '' },
+    note: `Payment completed via ${paymentMethod}. Transaction: ${transactionId}`,
+  });
+  logOrderAudit({
+    orderId: order._id,
+    actorRole: 'system',
+    event: 'payout_created',
+    note: 'Payout records initialized for all sellers in this order.',
+  });
+
+  // Audit: reconciliation records per seller
+  const sellerIdsForRecon = Array.from(new Set(
+    (order.items || []).map((item) => String(item?.seller || '')).filter(Boolean)
+  ));
+  for (const sid of sellerIdsForRecon) {
+    logPaymentReconciliation({
+      orderId: order._id,
+      sellerId: sid,
+      event: 'payment_captured',
+      gatewayPaymentId: transactionId,
+      gatewayOrderId: paymentGateway?.gatewayOrderId || '',
+      note: `Payment captured. Method: ${paymentMethod}.`,
+      source: 'system',
+    });
+  }
+
   if (order.items && order.items.length > 0) {
     const stockPromises = order.items.map((item) =>
       Product.findByIdAndUpdate(
         item.product,
         { $inc: { stock: -Number(item.quantity || 0) } },
         { new: false, runValidators: false }
-      ).catch((e) => {
+      ).then((prevDoc) => {
+        // Audit: inventory transaction for each item
+        const prevStock = Number(prevDoc?.stock ?? 0);
+        const qty = Number(item.quantity || 0);
+        logInventoryTransaction({
+          productId: item.product,
+          orderId: order._id,
+          sellerId: item.seller,
+          type: 'sale_deducted',
+          quantityChange: -qty,
+          previousStock: prevStock,
+          newStock: Math.max(0, prevStock - qty),
+          reason: `Order ${order._id} payment completed. Deducted ${qty} unit(s).`,
+          source: 'system',
+        });
+      }).catch((e) => {
         console.warn(`[PAYMENT] Stock update warning for product ${item.product}:`, e?.message);
       })
     );
     await Promise.all(stockPromises);
+
+    logOrderAudit({
+      orderId: order._id,
+      actorRole: 'system',
+      event: 'stock_deducted',
+      note: `Stock deducted for ${order.items.length} item(s).`,
+    });
   }
 
   try {
@@ -1177,72 +1310,82 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
         (sellers || []).map((seller) => [String(seller._id), mapSellerPickupForNimbus(seller)])
       );
 
-      for (const shipment of shipmentsToBook) {
-        try {
-          const pickupOverride = sellerPickupMap.get(String(shipment?.seller || '')) || null;
-          if (!pickupOverride) {
-            throw new Error('Seller pickup address is missing or incomplete for this shipment.');
-          }
-
-          const payload = buildNimbusShipmentPayload(order, shipment, pickupOverride);
-          const booking = await createShipment(payload);
-
-          const mappedStatus = booking.awbNumber
-            ? 'awb_assigned'
-            : mapNimbusStatusToShipmentStatus(booking.remoteStatus || 'booked');
-
-          shipment.status = SELLER_SHIPMENT_STATUS_ORDER.includes(mappedStatus)
-            ? mappedStatus
-            : 'booked';
-          shipment.lastError = '';
-          shipment.carrier = {
-            provider: 'nimbuspost',
-            mode: booking.mode || '',
-            orderId: booking.orderId || '',
-            shipmentId: booking.shipmentId || '',
-            awbNumber: booking.awbNumber || '',
-            courierId: booking.courierId || '',
-            courierName: booking.courierName || '',
-            remoteStatus: booking.remoteStatus || '',
-            labelUrl: booking.labelUrl || '',
-            manifestUrl: booking.manifestUrl || '',
-            trackingUrl: buildNimbusTrackingUrl(booking.awbNumber),
-          };
-
-          appendShipmentTimelineEntry(shipment, {
-            status: shipment.status,
-            note: booking.awbNumber
-              ? `NimbusPost booking successful. AWB: ${booking.awbNumber}.`
-              : 'NimbusPost booking successful.',
-            source: 'system',
-          });
-
-          syncOrderItemsFromShipment(order, shipment, {
-            note: booking.awbNumber
-              ? `Shipment AWB assigned (${booking.awbNumber}).`
-              : 'Shipment booked with NimbusPost.',
-            updatedBy: null,
-          });
-        } catch (bookingError) {
-          const bookingMessage = bookingError?.message || 'Unknown NimbusPost booking error';
-          shipment.status = 'failed';
-          shipment.lastError = bookingMessage;
-
-          appendShipmentTimelineEntry(shipment, {
-            status: 'failed',
-            note: `NimbusPost booking failed: ${bookingMessage}`,
-            source: 'system',
-          });
-
-          console.warn(`[PAYMENT][NIMBUS] Booking failed for ${shipment.localShipmentRef}:`, bookingMessage);
-        }
-      }
+      const bookingResult = await bookReadySellerShipmentsAfterPayment({
+        order,
+        shipmentsToBook,
+        sellerPickupMap,
+        createShipment,
+        buildNimbusShipmentPayload,
+        mapNimbusStatusToShipmentStatus,
+        buildNimbusTrackingUrl,
+        appendShipmentTimelineEntry,
+        syncOrderItemsFromShipment,
+        allowedShipmentStatuses: SELLER_SHIPMENT_STATUS_ORDER,
+      });
 
       await order.save();
       console.log('[PAYMENT][NIMBUS] Shipment booking pass completed.');
+
+      // Audit: shipment booking results
+      for (const shipment of shipmentsToBook) {
+        const isBooked = ['booked', 'awb_assigned'].includes(String(shipment.status || ''));
+        logShipmentEvent({
+          orderId: order._id,
+          sellerId: shipment.seller,
+          localShipmentRef: shipment.localShipmentRef,
+          event: isBooked ? 'booking_succeeded' : 'booking_failed',
+          newStatus: shipment.status,
+          carrier: shipment.carrier ? {
+            provider: shipment.carrier.provider,
+            courierId: shipment.carrier.courierId,
+            courierName: shipment.carrier.courierName,
+            awbNumber: shipment.carrier.awbNumber,
+          } : null,
+          errorMessage: shipment.lastError || '',
+          source: 'system',
+        });
+        logOrderAudit({
+          orderId: order._id,
+          actorRole: 'system',
+          event: isBooked ? 'shipment_booked' : 'shipment_booking_failed',
+          newState: { shipmentRef: shipment.localShipmentRef, status: shipment.status },
+          meta: { awbNumber: shipment.carrier?.awbNumber || '' },
+          note: isBooked
+            ? `Shipment ${shipment.localShipmentRef} booked. AWB: ${shipment.carrier?.awbNumber || 'pending'}`
+            : `Shipment ${shipment.localShipmentRef} booking failed: ${shipment.lastError || 'unknown'}`,
+        });
+      }
     }
   }
 }
+
+// POST /api/orders/validate-sellers - Validate that all sellers have complete pickup addresses
+router.post('/validate-sellers', auth, async (req, res) => {
+  try {
+    const { sellerIds } = req.body || {};
+
+    if (!Array.isArray(sellerIds) || sellerIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'sellerIds array is required and must not be empty',
+      });
+    }
+
+    const result = await validateOrderSellers(sellerIds);
+
+    return res.json({
+      success: result.allReady,
+      message: result.message,
+      allReady: result.allReady,
+      validations: result.results,
+      unreadySellers: result.unreadySellers,
+    });
+  } catch (err) {
+    const message = err?.message || 'Failed to validate sellers';
+    console.error('[ORDERS][VALIDATE_SELLERS] Error:', message, err);
+    return res.status(500).json({ message });
+  }
+});
 
 // POST /api/orders/estimate-shipping - Estimate checkout totals using current cart and destination
 router.post('/estimate-shipping', auth, async (req, res) => {
@@ -1337,14 +1480,15 @@ router.post('/estimate-shipping', auth, async (req, res) => {
     }
 
     const shippingCost = roundCurrency(shippingQuote.shippingCost);
-    const tax = calculateTax(subtotal);
-    const totalAmount = roundCurrency(subtotal + shippingCost + tax);
+    const checkoutTotal = calculateCheckoutTotal(subtotal, shippingCost);
 
     return res.json({
       subtotal: roundCurrency(subtotal),
       shippingCost,
-      tax,
-      totalAmount,
+      tax: 0,
+      platformFee: checkoutTotal.platformFee,
+      csrContributionAmount: checkoutTotal.csrContributionAmount,
+      totalAmount: checkoutTotal.totalAmount,
       currency: String(env?.razorpay?.currency || 'INR').toUpperCase(),
       shippingQuote,
     });
@@ -1476,9 +1620,9 @@ router.post('/', auth, async (req, res) => {
     }
 
     const shippingCost = roundCurrency(shippingQuote.shippingCost);
-    const tax = calculateTax(subtotal);
-    const totalAmount = subtotal + shippingCost + tax;
-    console.log('[CREATE_ORDER] Calculated totals - subtotal:', subtotal, 'shipping:', shippingCost, 'tax:', tax, 'total:', totalAmount);
+    const checkoutTotal = calculateCheckoutTotal(subtotal, shippingCost);
+    const expectedDeliveryDate = computeExpectedDeliveryDateFromShippingQuote(shippingQuote);
+    console.log('[CREATE_ORDER] Calculated totals - subtotal:', subtotal, 'shipping:', shippingCost, 'platformFee:', checkoutTotal.platformFee, 'csr:', checkoutTotal.csrContributionAmount, 'total:', checkoutTotal.totalAmount);
 
     // Create order
     console.log('[CREATE_ORDER] Creating order document...');
@@ -1489,16 +1633,31 @@ router.post('/', auth, async (req, res) => {
       shippingAddress,
       subtotal: Number(subtotal.toFixed(2)),
       shippingCost,
-      tax,
-      totalAmount: Number(totalAmount.toFixed(2)),
+      tax: 0,
+      platformFee: checkoutTotal.platformFee,
+      totalAmount: Number(checkoutTotal.totalAmount.toFixed(2)),
       status: 'pending',
       paymentStatus: 'pending',
       isDraft: true,
       notes: notes || '',
+      csrContributionAmount: checkoutTotal.csrContributionAmount,
+      expectedDeliveryDate,
     });
 
+    // Validate order items have sellers before building shipments
+    console.log('[CREATE_ORDER] Validating order sellers...');
+    const shipmentValidation = buildAndValidateShipments(orderItems, order._id);
+    
+    if (!shipmentValidation.isValid) {
+      console.warn('[CREATE_ORDER] Shipment validation failed:', shipmentValidation.errors);
+      return res.status(400).json({
+        message: 'Order validation failed. ' + shipmentValidation.errors.join('; '),
+        errors: shipmentValidation.errors,
+      });
+    }
+
     // Pre-build one shipment mapping per seller so carrier IDs can be attached later.
-    order.sellerShipments = buildSellerShipmentSkeletons(orderItems, order._id);
+    order.sellerShipments = shipmentValidation.shipments;
 
     const quoteBySeller = new Map(
       (shippingQuote?.details || [])
@@ -1524,6 +1683,46 @@ router.post('/', auth, async (req, res) => {
     console.log('[CREATE_ORDER] Saving order...');
     await order.save();
     console.log('[CREATE_ORDER] Order saved successfully:', order._id);
+
+    // Audit: order created + shipping quote
+    logOrderAudit({
+      orderId: order._id,
+      actorId: user._id,
+      actorRole: 'buyer',
+      event: 'order_created',
+      newState: {
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        isDraft: order.isDraft,
+        totalAmount: order.totalAmount,
+        itemCount: order.items?.length || 0,
+        sellerShipmentCount: order.sellerShipments?.length || 0,
+      },
+      note: `Order created with ${order.items?.length || 0} item(s), total ₹${order.totalAmount}.`,
+    });
+    logOrderAudit({
+      orderId: order._id,
+      actorRole: 'system',
+      event: 'shipping_quote_calculated',
+      meta: { shippingCost, source: shippingQuote?.source || 'nimbus' },
+      note: `Shipping quote: ₹${shippingCost} from ${shippingQuote?.details?.length || 0} seller shipment(s).`,
+    });
+    // Audit: shipment skeletons created
+    for (const shipment of (order.sellerShipments || [])) {
+      logShipmentEvent({
+        orderId: order._id,
+        sellerId: shipment.seller,
+        localShipmentRef: shipment.localShipmentRef,
+        event: 'shipment_created',
+        newStatus: shipment.status,
+        quoteData: {
+          preferredCourierId: shipment.preferredCourierId || '',
+          preferredCourierName: shipment.preferredCourierName || '',
+          quotedShippingCost: shipment.quotedShippingCost || 0,
+        },
+        source: 'system',
+      });
+    }
 
     res.status(201).json({
       message: 'Order created successfully',
@@ -1702,6 +1901,20 @@ router.post('/:id/pay', auth, async (req, res) => {
     const hasRazorpayPayload = Boolean(razorpayOrderId && razorpayPaymentId && razorpaySignature);
     const isRazorpayFlow = paymentProvider === 'razorpay' || hasRazorpayPayload;
 
+    if (paymentProvider === 'cash_on_delivery') {
+      const transactionId = `cod_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+      await applySuccessfulPaymentEffects(order, {
+        transactionId,
+        paymentMethod: 'cash_on_delivery',
+      });
+
+      return res.json({
+        message: 'Order placed successfully with COD',
+        order,
+        transactionId,
+      });
+    }
+
     if (isRazorpayFlow) {
       if (!isRazorpayEnabled()) {
         return res.status(503).json({ message: 'Razorpay is not configured on server.' });
@@ -1815,6 +2028,7 @@ router.post('/:id/pay', auth, async (req, res) => {
 
 // POST /api/orders/webhooks/razorpay - Reconcile Razorpay payment events server-side
 router.post('/webhooks/razorpay', async (req, res) => {
+  const _webhookStartMs = nowMs();
   try {
     if (!isRazorpayEnabled()) {
       return res.status(503).json({ message: 'Razorpay is not enabled on server.' });
@@ -1910,6 +2124,24 @@ router.post('/webhooks/razorpay', async (req, res) => {
         });
       }
 
+      // Audit: Razorpay success webhook
+      logWebhookAudit({
+        provider: 'razorpay',
+        event,
+        idempotencyKey: `rzp_${gatewayOrderId}_${event}`,
+        signature: String(req.headers['x-razorpay-signature'] || ''),
+        signatureValid: true,
+        payload: req.body,
+        headers: req.headers,
+        processingResult: { message: 'Razorpay webhook processed.' },
+        orderId: order?._id,
+        gatewayOrderId,
+        gatewayPaymentId,
+        httpStatusCode: 200,
+        processingMs: nowMs() - _webhookStartMs,
+        ip: req.ip || req.headers['x-forwarded-for'] || '',
+      });
+
       return res.status(200).json({ message: 'Razorpay webhook processed.' });
     }
 
@@ -1932,13 +2164,67 @@ router.post('/webhooks/razorpay', async (req, res) => {
         await order.save();
       }
 
+      // Audit: Razorpay failure webhook
+      logWebhookAudit({
+        provider: 'razorpay',
+        event,
+        idempotencyKey: `rzp_${gatewayOrderId}_${event}`,
+        signature: String(req.headers['x-razorpay-signature'] || ''),
+        signatureValid: true,
+        payload: req.body,
+        headers: req.headers,
+        processingResult: { message: 'Razorpay failure webhook processed.' },
+        orderId: order?._id,
+        gatewayOrderId,
+        gatewayPaymentId,
+        httpStatusCode: 200,
+        processingMs: nowMs() - _webhookStartMs,
+        ip: req.ip || req.headers['x-forwarded-for'] || '',
+      });
+      logOrderAudit({
+        orderId: order?._id,
+        actorRole: 'webhook',
+        event: 'payment_failed',
+        newState: { paymentStatus: 'failed' },
+        meta: { errorCode: String(paymentEntity?.error_code || ''), errorDescription: String(paymentEntity?.error_description || '') },
+        note: `Razorpay payment failed. Event: ${event}.`,
+      });
+
       return res.status(200).json({ message: 'Razorpay failure webhook processed.' });
     }
+
+    // Audit: ignored webhook event
+    logWebhookAudit({
+      provider: 'razorpay',
+      event,
+      idempotencyKey: `rzp_${gatewayOrderId}_${event}_ignored`,
+      signature: String(req.headers['x-razorpay-signature'] || ''),
+      signatureValid: true,
+      payload: req.body,
+      headers: req.headers,
+      processingResult: { message: 'Razorpay webhook ignored.' },
+      orderId: order?._id,
+      gatewayOrderId,
+      gatewayPaymentId,
+      httpStatusCode: 200,
+      processingMs: nowMs() - _webhookStartMs,
+      ip: req.ip || req.headers['x-forwarded-for'] || '',
+    });
 
     return res.status(200).json({ message: 'Razorpay webhook ignored.' });
   } catch (err) {
     const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Unknown error');
     console.error('[RAZORPAY_WEBHOOK] Error:', errorMsg, err);
+    logWebhookAudit({
+      provider: 'razorpay',
+      signatureValid: null,
+      payload: req.body,
+      headers: req.headers,
+      httpStatusCode: 500,
+      error: errorMsg,
+      processingMs: nowMs() - _webhookStartMs,
+      ip: req.ip || req.headers['x-forwarded-for'] || '',
+    });
     return res.status(500).json({ message: errorMsg });
   }
 });
@@ -1950,7 +2236,21 @@ router.get('/user/me', auth, async (req, res) => {
       .populate('items.product', 'title price')
       .sort({ createdAt: -1 });
 
-    res.json({ orders });
+    // Include a lightweight sellerShipments summary for tracking info
+    const ordersWithTracking = (orders || []).map((order) => {
+      const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+      orderObj.sellerShipments = (orderObj.sellerShipments || []).map((s) => ({
+        seller: s.seller,
+        localShipmentRef: s.localShipmentRef || '',
+        status: s.status || 'pending',
+        awbNumber: s.carrier?.awbNumber || '',
+        trackingUrl: s.carrier?.trackingUrl || '',
+        courierName: s.carrier?.courierName || s.preferredCourierName || '',
+      }));
+      return orderObj;
+    });
+
+    res.json({ orders: ordersWithTracking });
   } catch (err) {
     const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Unknown error');
     console.error('Get user orders error:', errorMsg, err);
@@ -2178,6 +2478,27 @@ router.patch('/seller/:orderId/items/:itemIndex/status', auth, async (req, res) 
 
     await order.save();
 
+    // Audit: seller item status update
+    logOrderAudit({
+      orderId: order._id,
+      actorId: sellerId,
+      actorRole: 'seller',
+      event: 'item_status_changed',
+      previousState: { fulfillmentStatus: currentStatus },
+      newState: { fulfillmentStatus: nextStatus, itemIndex },
+      note: note || `Seller updated item ${itemIndex} to ${nextStatus}.`,
+    });
+    if (sellerShipment) {
+      logOrderAudit({
+        orderId: order._id,
+        actorId: sellerId,
+        actorRole: 'seller',
+        event: 'shipment_status_changed',
+        newState: { shipmentRef: sellerShipment.localShipmentRef, status: sellerShipment.status },
+        note: `Seller shipment status derived: ${sellerShipment.status}.`,
+      });
+    }
+
     try {
       await syncSellerPayoutAfterFulfillment(order, sellerId, 'seller');
     } catch (payoutErr) {
@@ -2195,73 +2516,52 @@ router.patch('/seller/:orderId/items/:itemIndex/status', auth, async (req, res) 
 
 // POST /api/orders/carrier/nimbuspost/webhook - Receive NimbusPost tracking updates
 router.post('/carrier/nimbuspost/webhook', async (req, res) => {
+  const _nimbusWebhookStart = nowMs();
   try {
-    const secret = String(env.nimbuspost?.webhookSecret || '').trim();
-    if (!isNimbusWebhookAuthorized(req, secret)) {
-      return res.status(401).json({ message: 'Invalid webhook signature/secret' });
-    }
-
-    const payload = req.body || {};
-    const awbNumber = extractNimbusWebhookAwb(payload);
-
-    if (!awbNumber) {
-      return res.status(400).json({ message: 'AWB number is required in webhook payload.' });
-    }
-
-    const order = await Order.findOne({ 'sellerShipments.carrier.awbNumber': awbNumber });
-    if (!order) {
-      return res.status(200).json({ message: 'No shipment found for AWB.' });
-    }
-
-    const shipment = (order.sellerShipments || []).find(
-      (entry) => String(entry?.carrier?.awbNumber || '').trim() === awbNumber
-    );
-
-    if (!shipment) {
-      return res.status(200).json({ message: 'Shipment entry not found for AWB.' });
-    }
-
-    const remoteStatus = extractNimbusWebhookStatus(payload);
-    const mappedStatus = mapNimbusStatusToShipmentStatus(remoteStatus);
-
-    if (SELLER_SHIPMENT_STATUS_ORDER.includes(mappedStatus)) {
-      shipment.status = mappedStatus;
-    }
-
-    shipment.lastError = mappedStatus === 'failed'
-      ? (extractNimbusWebhookNote(payload) || shipment.lastError || 'NimbusPost reported shipment exception.')
-      : '';
-
-    shipment.carrier = shipment.carrier || {};
-    shipment.carrier.provider = 'nimbuspost';
-    shipment.carrier.remoteStatus = remoteStatus || shipment.carrier.remoteStatus || '';
-
-    appendShipmentTimelineEntry(shipment, {
-      status: shipment.status,
-      note: extractNimbusWebhookNote(payload) || `NimbusPost webhook status: ${remoteStatus || shipment.status}`,
-      source: 'system',
+    const result = await processNimbuspostWebhook({
+      headers: req.headers,
+      rawBody: req.rawBody,
+      body: req.body || {},
     });
 
-    syncOrderItemsFromShipment(order, shipment, {
-      note: extractNimbusWebhookNote(payload) || `NimbusPost status: ${remoteStatus || shipment.status}`,
-      updatedBy: null,
+    // Audit: NimbusPost webhook
+    const awb = String(
+      req.body?.awb || req.body?.awb_number || req.body?.data?.awb
+      || req.body?.data?.awb_number || ''
+    ).trim();
+    const nimbusStatus = String(
+      req.body?.current_status || req.body?.shipment_status
+      || req.body?.status || ''
+    ).trim();
+    logWebhookAudit({
+      provider: 'nimbuspost',
+      event: nimbusStatus || 'tracking_update',
+      idempotencyKey: awb ? `nimbus_${awb}_${nimbusStatus}_${Date.now()}` : undefined,
+      signature: String(req.headers['x-webhook-secret'] || req.headers['x-hmac-sha256'] || ''),
+      signatureValid: result.statusCode !== 401,
+      payload: req.body,
+      headers: req.headers,
+      processingResult: result.body,
+      awbNumber: awb,
+      httpStatusCode: result.statusCode || 200,
+      processingMs: nowMs() - _nimbusWebhookStart,
+      ip: req.ip || req.headers['x-forwarded-for'] || '',
     });
 
-    await order.save();
-
-    const shipmentSellerId = String(shipment?.seller || '');
-    if (shipmentSellerId && mongoose.Types.ObjectId.isValid(shipmentSellerId)) {
-      try {
-        await syncSellerPayoutAfterFulfillment(order, shipmentSellerId, 'system');
-      } catch (payoutErr) {
-        console.warn('[NIMBUS_WEBHOOK][PAYOUT] Failed to sync payout state:', payoutErr?.message || payoutErr);
-      }
-    }
-
-    return res.status(200).json({ message: 'NimbusPost webhook processed.' });
+    return res.status(result.statusCode || 200).json(result.body || {});
   } catch (err) {
     const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Unknown error');
     console.error('[NIMBUS_WEBHOOK] Error:', errorMsg, err);
+    logWebhookAudit({
+      provider: 'nimbuspost',
+      signatureValid: null,
+      payload: req.body,
+      headers: req.headers,
+      httpStatusCode: 500,
+      error: errorMsg,
+      processingMs: nowMs() - _nimbusWebhookStart,
+      ip: req.ip || req.headers['x-forwarded-for'] || '',
+    });
     return res.status(500).json({ message: errorMsg });
   }
 });
@@ -2366,7 +2666,19 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(403).json({ message: 'Unauthorized' });
     }
 
-    res.json(order);
+    // Include shipment tracking summary for buyer
+    const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+    orderObj.sellerShipments = (orderObj.sellerShipments || []).map((s) => ({
+      seller: s.seller,
+      localShipmentRef: s.localShipmentRef || '',
+      status: s.status || 'pending',
+      awbNumber: s.carrier?.awbNumber || '',
+      trackingUrl: s.carrier?.trackingUrl || '',
+      courierName: s.carrier?.courierName || s.preferredCourierName || '',
+      labelUrl: s.carrier?.labelUrl || '',
+    }));
+
+    res.json(orderObj);
   } catch (err) {
     const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Unknown error');
     console.error('Get order details error:', errorMsg, err);

@@ -161,6 +161,88 @@ function getProductPricing(item: ProductItem, localOverride?: LocalPriceOverride
   };
 }
 
+function getFreshnessScore(item: ProductItem) {
+  const createdAtMs = Date.parse(String(item.createdAt || item.updatedAt || ''));
+  if (Number.isNaN(createdAtMs)) {
+    return 0;
+  }
+
+  const ageDays = Math.max(0, (Date.now() - createdAtMs) / 86400000);
+  return Math.pow(0.5, ageDays / 2.75);
+}
+
+function strongSeedHash(input: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  hash += hash << 13;
+  hash ^= hash >>> 7;
+  hash += hash << 3;
+  hash ^= hash >>> 17;
+  hash += hash << 5;
+
+  return hash >>> 0;
+}
+
+function getSeededNoise(itemId: string, loadSeed: number) {
+  const seed = `${itemId}:${loadSeed}`;
+  const hashed = strongSeedHash(seed);
+  return (hashed % 1000) / 1000;
+}
+
+function seededPick(key: string, loadSeed: number) {
+  const value = strongSeedHash(`${key}:${loadSeed}`);
+  return (value % 100000) / 100000;
+}
+
+function seededShuffle<T>(items: T[], loadSeed: number, keyForItem: (item: T) => string) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(seededPick(`${keyForItem(next[index])}:${index}`, loadSeed) * (index + 1));
+    const temp = next[index];
+    next[index] = next[target];
+    next[target] = temp;
+  }
+  return next;
+}
+
+function rankFeedProducts(items: ProductItem[], loadSeed: number) {
+  const scored = items.map((item) => {
+    const pricing = getProductPricing(item);
+    const freshnessScore = getFreshnessScore(item);
+    const popularityScore = (Math.max(0, Number(item.monthlySold) || 0) * 0.14)
+      + (Math.max(0, Number(item.monthlySaves) || 0) * 0.08);
+    const discountBoost = pricing.hasDiscount ? 0.12 : 0;
+    const seedNoise = (getSeededNoise(item._id, loadSeed) - 0.5) * 1.05;
+    const freshnessBoost = Math.min(0.35, freshnessScore * 0.35);
+
+    return {
+      item,
+      score: freshnessScore * 0.55 + freshnessBoost + popularityScore * 0.18 + discountBoost + seedNoise,
+    };
+  });
+
+  const ranked = scored
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return strongSeedHash(`${a.item._id}:${loadSeed}`) - strongSeedHash(`${b.item._id}:${loadSeed}`);
+    })
+    .map((entry) => entry.item);
+
+  const bucketSize = 4;
+  const reshuffled: ProductItem[] = [];
+
+  for (let index = 0; index < ranked.length; index += bucketSize) {
+    const bucket = ranked.slice(index, index + bucketSize);
+    reshuffled.push(...seededShuffle(bucket, loadSeed, (item) => item._id));
+  }
+
+  return reshuffled;
+}
+
 function hashFromId(id: string) {
   return (id || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
@@ -209,6 +291,7 @@ export default function FeedScreen() {
   const lastScrollYRef = useRef(0);
   const firstFocusRef = useRef(true);
   const lastCartSyncAtRef = useRef(0);
+  const shuffleCycleRef = useRef(0);
   const seenProductIdsRef = useRef<Set<string>>(new Set());
   const topFiltersAnim = useRef(new Animated.Value(1)).current;
   const router = useRouter();
@@ -273,6 +356,8 @@ export default function FeedScreen() {
     try {
       setError(null);
       const productLimit = FEED_LIMIT_DEFAULT;
+      shuffleCycleRef.current += 1;
+      const loadSeed = Date.now() + shuffleCycleRef.current * 2654435761;
 
       const profilePromise = getProfile();
       const productsPromise = getProducts({ page: 1, limit: productLimit, sort: 'newest' });
@@ -292,7 +377,8 @@ export default function FeedScreen() {
 
       const productsRes = await productsPromise;
 
-      setProducts((productsRes.items || []).map((item) => normalizeProduct(item)));
+      const normalizedProducts = (productsRes.items || []).map((item) => normalizeProduct(item));
+      setProducts(rankFeedProducts(normalizedProducts, loadSeed));
       loadUnreadMessageCount();
     } catch (err: any) {
       const message = err?.message || 'Failed to load feed';
@@ -580,7 +666,7 @@ export default function FeedScreen() {
           <Pressable
             style={({ pressed }) => [styles.headerActionButton, styles.headerActionCart, pressed && styles.headerActionPressed]}
             onPress={() => router.push('/checkout')}>
-            <Ionicons name="cart-outline" size={24} color="#dce9fb" />
+            <Ionicons name="bag-handle-outline" size={28} color="#ffffff" />
             {totalCartItems > 0 ? (
               <View style={styles.cartBadge}>
                 <ThemedText style={styles.cartBadgeText}>{totalCartItems > 99 ? '99+' : String(totalCartItems)}</ThemedText>
@@ -593,7 +679,7 @@ export default function FeedScreen() {
               Haptics.selectionAsync().catch(() => {});
               router.push('/messages');
             }}>
-            <Ionicons name="chatbubble-ellipses-outline" size={30} color="#fff" />
+            <Ionicons name="chatbubbles-outline" size={30} color="#ffffff" />
             {unreadMessageCount > 0 ? (
               <View style={styles.messageBadge}>
                 <ThemedText style={styles.messageBadgeText}>{unreadMessageCount > 99 ? '99+' : String(unreadMessageCount)}</ThemedText>
@@ -804,18 +890,18 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#28374b',
-    backgroundColor: '#101926',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   headerActionCart: {
-    backgroundColor: '#101a27',
+    backgroundColor: 'transparent',
   },
   headerActionChat: {
-    backgroundColor: '#101a27',
+    backgroundColor: 'transparent',
   },
   headerActionPressed: {
     opacity: 0.86,
@@ -896,8 +982,8 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27323d',
-    backgroundColor: '#121a24',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -933,32 +1019,35 @@ const styles = StyleSheet.create({
   categoryRow: {
     paddingHorizontal: 10,
     paddingBottom: 8,
-    gap: 8,
+    gap: 16,
     backgroundColor: '#0a0a0a',
   },
   categoryChip: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#ffffff',
-    backgroundColor: '#000000',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingTop: 4,
+    paddingBottom: 8,
   },
   categoryChipActive: {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
+    borderBottomWidth: 2,
     borderColor: '#ffffff',
   },
   categoryChipPressed: {
     opacity: 0.82,
-    transform: [{ scale: 0.97 }],
   },
   categoryChipText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
   categoryChipTextActive: {
-    color: '#000000',
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
   },
   feedContent: {
     paddingHorizontal: FEED_SIDE_PADDING,
@@ -1014,7 +1103,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#1f1f1f',
+    borderColor: '#FFFFFF',
     overflow: 'hidden',
   },
   cardImageContainer: {
@@ -1025,7 +1114,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#111823',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#232f3d',
+    borderColor: '#FFFFFF',
     overflow: 'hidden',
   },
   skeletonImage: {

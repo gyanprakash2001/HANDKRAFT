@@ -16,6 +16,12 @@ const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
 const CsrSummary = require('../models/CsrSummary');
 const CsrActivity = require('../models/CsrActivity');
+const WebhookAudit = require('../models/WebhookAudit');
+const PaymentReconciliation = require('../models/PaymentReconciliation');
+const ShipmentEvent = require('../models/ShipmentEvent');
+const SellerAction = require('../models/SellerAction');
+const InventoryTransaction = require('../models/InventoryTransaction');
+const OrderAuditLog = require('../models/OrderAuditLog');
 const { env } = require('../config/env');
 const {
   processDuePayouts,
@@ -2097,6 +2103,237 @@ router.patch('/csr/activities/:id/publish', auth, admin, async (req, res) => {
   } catch (err) {
     console.error('[ADMIN][CSR][PUBLISH] Error:', err?.message || err);
     return res.status(500).json({ message: 'Failed to update CSR publish status' });
+  }
+});
+
+// ============================================================================
+// AUDIT DASHBOARD ENDPOINTS
+// ============================================================================
+
+// GET /api/admin/audit/webhooks — Paginated webhook audit log
+router.get('/audit/webhooks', auth, admin, async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req, { limit: 50, maxLimit: 200 });
+    const query = {};
+
+    const provider = safeText(req.query.provider, 20).toLowerCase();
+    if (provider && ['razorpay', 'nimbuspost'].includes(provider)) query.provider = provider;
+
+    if (req.query.signatureValid === 'true') query.signatureValid = true;
+    if (req.query.signatureValid === 'false') query.signatureValid = false;
+
+    const from = parseDate(req.query.from);
+    const to = parseDate(req.query.to);
+    if (from || to) {
+      query.receivedAt = {};
+      if (from) query.receivedAt.$gte = from;
+      if (to) query.receivedAt.$lte = to;
+    }
+
+    const orderId = toObjectId(req.query.orderId);
+    if (orderId) query.orderId = orderId;
+
+    const awb = safeText(req.query.awbNumber, 50);
+    if (awb) query.awbNumber = awb;
+
+    const [docs, total] = await Promise.all([
+      WebhookAudit.find(query).sort({ receivedAt: -1 }).skip(skip).limit(limit).lean(),
+      WebhookAudit.countDocuments(query),
+    ]);
+
+    return res.json({ webhooks: docs, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][WEBHOOKS] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch webhook audit log' });
+  }
+});
+
+// GET /api/admin/audit/reconciliation — Payment reconciliation history
+router.get('/audit/reconciliation', auth, admin, async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req, { limit: 50, maxLimit: 200 });
+    const query = {};
+
+    const orderId = toObjectId(req.query.orderId);
+    const sellerId = toObjectId(req.query.sellerId);
+    const event = safeText(req.query.event, 50);
+    if (orderId) query.order = orderId;
+    if (sellerId) query.seller = sellerId;
+    if (event) query.event = event;
+
+    const from = parseDate(req.query.from);
+    const to = parseDate(req.query.to);
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = from;
+      if (to) query.createdAt.$lte = to;
+    }
+
+    const [docs, total] = await Promise.all([
+      PaymentReconciliation.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      PaymentReconciliation.countDocuments(query),
+    ]);
+
+    return res.json({ reconciliations: docs, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][RECONCILIATION] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch reconciliation log' });
+  }
+});
+
+// GET /api/admin/audit/shipment-events — Shipment event log
+router.get('/audit/shipment-events', auth, admin, async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req, { limit: 50, maxLimit: 200 });
+    const query = {};
+
+    const orderId = toObjectId(req.query.orderId);
+    const sellerId = toObjectId(req.query.sellerId);
+    const event = safeText(req.query.event, 50);
+    const shipmentRef = safeText(req.query.shipmentRef, 50);
+    if (orderId) query.order = orderId;
+    if (sellerId) query.seller = sellerId;
+    if (event) query.event = event;
+    if (shipmentRef) query.localShipmentRef = shipmentRef;
+
+    const from = parseDate(req.query.from);
+    const to = parseDate(req.query.to);
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = from;
+      if (to) query.createdAt.$lte = to;
+    }
+
+    const [docs, total] = await Promise.all([
+      ShipmentEvent.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      ShipmentEvent.countDocuments(query),
+    ]);
+
+    return res.json({ shipmentEvents: docs, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][SHIPMENT_EVENTS] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch shipment events' });
+  }
+});
+
+// GET /api/admin/audit/order-log/:orderId — Full order lifecycle timeline
+router.get('/audit/order-log/:orderId', auth, admin, async (req, res) => {
+  try {
+    const orderId = toObjectId(req.params.orderId);
+    if (!orderId) return res.status(400).json({ message: 'Invalid order id' });
+
+    const { page, limit, skip } = parsePagination(req, { limit: 100, maxLimit: 500 });
+
+    const [docs, total] = await Promise.all([
+      OrderAuditLog.find({ order: orderId }).sort({ createdAt: 1 }).skip(skip).limit(limit).lean(),
+      OrderAuditLog.countDocuments({ order: orderId }),
+    ]);
+
+    return res.json({ orderAuditLog: docs, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][ORDER_LOG] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch order audit log' });
+  }
+});
+
+// GET /api/admin/audit/seller-actions/:sellerId — Seller action history
+router.get('/audit/seller-actions/:sellerId', auth, admin, async (req, res) => {
+  try {
+    const sellerId = toObjectId(req.params.sellerId);
+    if (!sellerId) return res.status(400).json({ message: 'Invalid seller id' });
+
+    const { page, limit, skip } = parsePagination(req, { limit: 50, maxLimit: 200 });
+    const action = safeText(req.query.action, 50);
+    const query = { seller: sellerId };
+    if (action) query.action = action;
+
+    const [docs, total] = await Promise.all([
+      SellerAction.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      SellerAction.countDocuments(query),
+    ]);
+
+    return res.json({ sellerActions: docs, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][SELLER_ACTIONS] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch seller actions' });
+  }
+});
+
+// GET /api/admin/audit/inventory/:productId — Inventory transaction history
+router.get('/audit/inventory/:productId', auth, admin, async (req, res) => {
+  try {
+    const productId = toObjectId(req.params.productId);
+    if (!productId) return res.status(400).json({ message: 'Invalid product id' });
+
+    const { page, limit, skip } = parsePagination(req, { limit: 50, maxLimit: 200 });
+    const type = safeText(req.query.type, 30);
+    const query = { product: productId };
+    if (type) query.type = type;
+
+    const [docs, total] = await Promise.all([
+      InventoryTransaction.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      InventoryTransaction.countDocuments(query),
+    ]);
+
+    return res.json({ inventoryTransactions: docs, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][INVENTORY] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch inventory transactions' });
+  }
+});
+
+// GET /api/admin/audit/stats — Aggregate audit statistics
+router.get('/audit/stats', auth, admin, async (req, res) => {
+  try {
+    const [
+      webhooksByProvider,
+      webhookFailedSignatures,
+      totalReconciliations,
+      totalShipmentEvents,
+      totalSellerActions,
+      totalInventoryTx,
+      totalOrderAuditLogs,
+      recentWebhookAvgMs,
+    ] = await Promise.all([
+      WebhookAudit.aggregate([{ $group: { _id: '$provider', count: { $sum: 1 } } }]),
+      WebhookAudit.countDocuments({ signatureValid: false }),
+      PaymentReconciliation.countDocuments(),
+      ShipmentEvent.countDocuments(),
+      SellerAction.countDocuments(),
+      InventoryTransaction.countDocuments(),
+      OrderAuditLog.countDocuments(),
+      WebhookAudit.aggregate([
+        { $match: { receivedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } },
+        { $group: { _id: null, avgMs: { $avg: '$processingMs' }, count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const webhookStats = {};
+    for (const row of webhooksByProvider || []) {
+      webhookStats[String(row._id || 'unknown')] = Number(row.count || 0);
+    }
+
+    const last24hWebhook = recentWebhookAvgMs?.[0] || {};
+
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      webhooks: {
+        byProvider: webhookStats,
+        totalFailedSignatures: webhookFailedSignatures,
+        last24h: {
+          count: Number(last24hWebhook.count || 0),
+          avgProcessingMs: Number(Number(last24hWebhook.avgMs || 0).toFixed(1)),
+        },
+      },
+      reconciliations: { total: totalReconciliations },
+      shipmentEvents: { total: totalShipmentEvents },
+      sellerActions: { total: totalSellerActions },
+      inventoryTransactions: { total: totalInventoryTx },
+      orderAuditLogs: { total: totalOrderAuditLogs },
+    });
+  } catch (err) {
+    console.error('[ADMIN][AUDIT][STATS] Error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to fetch audit stats' });
   }
 });
 

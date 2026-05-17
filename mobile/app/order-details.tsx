@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, FlatList } from 'react-native';
+import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, FlatList, Linking } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -59,6 +59,21 @@ export default function OrderDetailsScreen() {
     }
   };
 
+  const getShipmentStatusLabel = (status: string) => {
+    const map: Record<string, string> = {
+      pending: 'Awaiting Payment',
+      ready_for_booking: 'Ready to Ship',
+      booked: 'Booked',
+      awb_assigned: 'AWB Assigned',
+      pickup_scheduled: 'Pickup Scheduled',
+      in_transit: 'In Transit',
+      delivered: 'Delivered',
+      cancelled: 'Cancelled',
+      failed: 'Failed',
+    };
+    return map[status] || status;
+  };
+
   const renderOrderItem = ({ item }: any) => (
     <View style={styles.itemCard}>
       <Image
@@ -104,13 +119,17 @@ export default function OrderDetailsScreen() {
     );
   }
 
+  const firstItemTitle = order.items?.[0]?.title || 'Order';
+  const shipments = (order as any).sellerShipments || [];
+  const platformFee = (order as any).platformFee ?? order.tax ?? 8;
+
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color="#fff" />
         </Pressable>
-        <ThemedText style={styles.headerTitle}>Order #{order._id.slice(-8).toUpperCase()}</ThemedText>
+        <ThemedText numberOfLines={1} style={styles.headerTitle}>{firstItemTitle}</ThemedText>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -139,6 +158,49 @@ export default function OrderDetailsScreen() {
           </ThemedText>
         </View>
 
+        {/* Tracking / Shipment Info */}
+        {shipments.length > 0 && (
+          <View style={styles.section}>
+            <ThemedText style={styles.sectionTitle}>Tracking Information</ThemedText>
+            {shipments.map((shipment: any, index: number) => (
+              <View key={`shipment-${index}`} style={styles.trackingCard}>
+                <View style={styles.trackingHeaderRow}>
+                  <Ionicons name="cube-outline" size={16} color="#9df0a2" />
+                  <ThemedText style={styles.trackingStatus}>
+                    {getShipmentStatusLabel(shipment.status)}
+                  </ThemedText>
+                </View>
+                {shipment.courierName ? (
+                  <ThemedText style={styles.trackingCourier}>
+                    Courier: {shipment.courierName}
+                  </ThemedText>
+                ) : null}
+                {shipment.awbNumber ? (
+                  <View style={styles.trackingAwbRow}>
+                    <Ionicons name="locate-outline" size={13} color="#7fb8ff" />
+                    <ThemedText style={styles.trackingAwbLabel}>AWB / Tracking ID:</ThemedText>
+                    <ThemedText style={styles.trackingAwbValue} selectable>{shipment.awbNumber}</ThemedText>
+                  </View>
+                ) : (
+                  <ThemedText style={styles.trackingPending}>
+                    Tracking ID will be available once shipment is booked
+                  </ThemedText>
+                )}
+                {shipment.trackingUrl ? (
+                  <Pressable
+                    style={styles.trackBtn}
+                    onPress={() => {
+                      Linking.openURL(shipment.trackingUrl).catch(() => {});
+                    }}>
+                    <Ionicons name="open-outline" size={14} color="#071b0e" />
+                    <ThemedText style={styles.trackBtnText}>Track Shipment</ThemedText>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Order Items */}
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>Order Items</ThemedText>
@@ -165,9 +227,12 @@ export default function OrderDetailsScreen() {
               <ThemedText style={styles.summaryValue}>₹{order.shippingCost.toFixed(2)}</ThemedText>
             </View>
             <View style={styles.summaryRow}>
-              <ThemedText style={styles.summaryLabel}>Tax</ThemedText>
-              <ThemedText style={styles.summaryValue}>₹{order.tax.toFixed(2)}</ThemedText>
+              <ThemedText style={styles.summaryLabel}>Platform Fee</ThemedText>
+              <ThemedText style={styles.summaryValue}>₹{Number(platformFee).toFixed(2)}</ThemedText>
             </View>
+            <ThemedText style={styles.csrNote}>
+              Includes ₹1 CSR contribution per order
+            </ThemedText>
             <View style={[styles.summaryRow, styles.summaryRowTotal]}>
               <ThemedText style={styles.summaryLabelTotal}>Total Amount</ThemedText>
               <ThemedText style={styles.summaryValueTotal}>₹{order.totalAmount.toFixed(2)}</ThemedText>
@@ -257,9 +322,12 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
   },
   headerSpacer: {
     width: 44,
@@ -328,6 +396,69 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#b4b4b4',
   },
+  // Tracking styles
+  trackingCard: {
+    padding: 14,
+    backgroundColor: '#141922',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#272f3d',
+    marginBottom: 8,
+  },
+  trackingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  trackingStatus: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#9df0a2',
+  },
+  trackingCourier: {
+    fontSize: 12,
+    color: '#b4b4b4',
+    marginBottom: 6,
+  },
+  trackingAwbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  trackingAwbLabel: {
+    fontSize: 12,
+    color: '#8e9bb2',
+  },
+  trackingAwbValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7fb8ff',
+    fontFamily: 'Courier',
+  },
+  trackingPending: {
+    fontSize: 11,
+    color: '#8e9bb2',
+    fontStyle: 'italic',
+  },
+  trackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#9df0a2',
+    alignSelf: 'flex-start',
+  },
+  trackBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#071b0e',
+  },
+  // Item styles
   itemsList: {
     backgroundColor: '#141922',
     borderRadius: 12,
@@ -374,6 +505,7 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#272f3d',
   },
+  // Summary styles
   summaryBox: {
     padding: 12,
     backgroundColor: '#141922',
@@ -411,6 +543,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#9df0a2',
   },
+  csrNote: {
+    fontSize: 10,
+    color: '#8e9bb2',
+    fontStyle: 'italic',
+    paddingBottom: 4,
+  },
+  // Address styles
   addressBox: {
     padding: 12,
     backgroundColor: '#141922',
@@ -432,6 +571,7 @@ const styles = StyleSheet.create({
   marginTop: {
     marginTop: 6,
   },
+  // Payment styles
   paymentBox: {
     padding: 12,
     backgroundColor: '#141922',

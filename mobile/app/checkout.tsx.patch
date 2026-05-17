@@ -1,0 +1,50 @@
+*** Begin Patch
+*** Update File: c:\Users\jm road cashify\HANDKRAFT\mobile\app\checkout.tsx
+@@
+-            <Pressable
+-              style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
+-              onPress={() => void handleContinueToReview()}
+-              disabled={estimatingShipping}>
+-              <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Calculating Shipping...' : 'Continue to Payment'}</ThemedText>
+-            </Pressable>
++            <Pressable
++              style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
++              onPress={() => void handleContinueToReview()}
++              disabled={estimatingShipping}>
++              <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Calculating Shipping...' : 'Continue to Payment'}</ThemedText>
++            </Pressable>
++
++            {/* Show delivery partner options on the Shipping page so Change navigates here */}
++            {hasLiveNimbusQuote ? (
++              <View style={styles.quoteListWrap}>
++                {(quoteDetails || []).map((detail, detailIndex) => {
++                  const key = String(detail.shipmentRef || detail.sellerId || `shipment-${detailIndex}`);
++                  const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
++
++                  return (
++                    <View key={`quote-detail-${detailIndex}`} style={styles.quoteShipmentCard}>
++                      <ThemedText style={styles.quoteShipmentTitle}>
++                        Shipment {detailIndex + 1}: {detail.origin} to {detail.destination} ({detail.weight}g)
++                      </ThemedText>
++
++                      {(detail.options || []).map((option: any, optionIndex: number) => {
++                        const isSelected = String(option.courierId || '') === selectedCourierId;
++                        return (
++                          <Pressable
++                            key={`quote-option-${detailIndex}-${optionIndex}`}
++                            style={[styles.quoteOptionRow, isSelected && styles.quoteOptionRowSelected]}
++                            onPress={() => setSelectedQuotesMap((prev) => ({ ...prev, [key]: String(option.courierId || '') }))}>
++                            <View style={styles.quoteOptionTextWrap}>
++                              <ThemedText style={styles.quoteOptionName}>{option.courierName || option.courierId}</ThemedText>
++                              <ThemedText style={styles.quoteOptionMeta}>Delivery by {formatDeliveryDate(option.etd)} • Chargeable {option.chargeableWeight || detail.weight}g</ThemedText>
++                            </View>
++                            <ThemedText style={styles.quoteOptionPrice}>₹{Number(option.totalCharges || 0).toFixed(2)}</ThemedText>
++                          </Pressable>
++                        );
++                      })}
++                    </View>
++                  );
++                })}
++              </View>
++            ) : null}
+*** End Patch

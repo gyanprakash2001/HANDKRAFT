@@ -13,7 +13,7 @@ import Constants from 'expo-constants';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import LocalAvatar from '@/components/LocalAvatar';
-import { createProduct, uploadProductMedia, uploadProductFile, getProfile, prepareLocalUploadUri } from '@/utils/api';
+import { createProduct, uploadProductMedia, uploadProductFile, getProfile, updateSellerPickupAddress, prepareLocalUploadUri } from '@/utils/api';
 import AddressPickerModal from '@/components/AddressPickerModal';
 import type { UserAddress } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
@@ -251,6 +251,7 @@ export default function UploadScreen() {
   const [formScrollEnabled, setFormScrollEnabled] = useState(true);
   const [processingMedia, setProcessingMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [savingPickupAddress, setSavingPickupAddress] = useState(false);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [addressModalVisible, setAddressModalVisible] = useState(false);
   const [pickupAddressId, setPickupAddressId] = useState<string | null>(null);
@@ -993,6 +994,52 @@ export default function UploadScreen() {
     persistActiveTransform();
   };
 
+  const handleSavePickupAddress = async () => {
+    if (!pickupAddressSnapshot) {
+      Alert.alert('Pickup address required', 'Please select a pickup address first.');
+      return;
+    }
+
+    if (!String(pickupAddressSnapshot.fullName || '').trim()
+      || !String(pickupAddressSnapshot.phoneNumber || '').trim()
+      || !String(pickupAddressSnapshot.street || '').trim()
+      || !String(pickupAddressSnapshot.city || '').trim()
+      || !String(pickupAddressSnapshot.state || '').trim()
+      || !String(pickupAddressSnapshot.postalCode || '').trim()) {
+      Alert.alert('Pickup address incomplete', 'Please complete name, phone, street, city, state and postal code.');
+      return;
+    }
+
+    try {
+      setSavingPickupAddress(true);
+      const response = await updateSellerPickupAddress({
+        sellerPickupAddressId: pickupAddressId || undefined,
+        sellerPickupAddress: {
+          label: String(pickupAddressSnapshot.label || 'Pickup'),
+          fullName: String(pickupAddressSnapshot.fullName || ''),
+          phoneNumber: String(pickupAddressSnapshot.phoneNumber || ''),
+          email: String(pickupAddressSnapshot.email || ''),
+          street: String(pickupAddressSnapshot.street || ''),
+          city: String(pickupAddressSnapshot.city || ''),
+          state: String(pickupAddressSnapshot.state || ''),
+          postalCode: String(pickupAddressSnapshot.postalCode || ''),
+          country: String(pickupAddressSnapshot.country || 'India'),
+        },
+      });
+
+      setPickupAddressSnapshot((prev) => ({
+        ...(prev || {}),
+        ...(response?.sellerPickupAddress || {}),
+      } as UserAddress));
+      setPickupAddressId(response?.sellerPickupAddress?.addressId || pickupAddressId);
+      Alert.alert('Saved', 'Pickup address updated successfully.');
+    } catch (err: any) {
+      Alert.alert('Save failed', err?.message || 'Could not update pickup address.');
+    } finally {
+      setSavingPickupAddress(false);
+    }
+  };
+
   const handlePostItem = async () => {
     if (!title.trim() || !category.trim() || !price.trim()) {
       Alert.alert('Missing fields', 'Please add title, category and price.');
@@ -1478,6 +1525,17 @@ export default function UploadScreen() {
             </ThemedText>
             <Ionicons name="chevron-forward" size={18} color="#9aa7b8" />
           </Pressable>
+          <ThemedText style={styles.helperInlineText}>Used as the courier pickup origin for this seller account.</ThemedText>
+          <Pressable
+            style={({ pressed }) => [styles.pickupSaveBtn, pressed && styles.btnPressed, savingPickupAddress && styles.saveDisabled]}
+            onPress={handleSavePickupAddress}
+            disabled={savingPickupAddress}>
+            {savingPickupAddress ? (
+              <ActivityIndicator size="small" color="#0a0a0a" />
+            ) : (
+              <ThemedText style={styles.pickupSaveBtnText}>Save pickup address</ThemedText>
+            )}
+          </Pressable>
         </View>
 
         <View style={styles.customizableRow}>
@@ -1843,9 +1901,9 @@ const styles = StyleSheet.create({
   helperText: {
     color: '#c6d3e3',
     marginBottom: 12,
-    backgroundColor: '#0f1723',
+    backgroundColor: '#000000',
     borderWidth: 1,
-    borderColor: '#223145',
+    borderColor: '#FFFFFF',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -1853,9 +1911,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   sectionCard: {
-    backgroundColor: '#0d141f',
+    backgroundColor: '#000000',
     borderWidth: 1,
-    borderColor: '#1e2b3d',
+    borderColor: '#FFFFFF',
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingBottom: 12,
@@ -1871,8 +1929,8 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#2d3f57',
-    backgroundColor: '#111b29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     borderRadius: 12,
     height: 48,
     color: '#f8fbff',
@@ -1906,9 +1964,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#2a3c55',
+    borderColor: '#FFFFFF',
     borderRadius: 12,
-    backgroundColor: '#121f30',
+    backgroundColor: '#000000',
     paddingHorizontal: 12,
     paddingVertical: 11,
   },
@@ -1922,8 +1980,8 @@ const styles = StyleSheet.create({
   },
   addressRow: {
     borderWidth: 1,
-    borderColor: '#2d3f57',
-    backgroundColor: '#111b29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     borderRadius: 12,
     minHeight: 48,
     paddingHorizontal: 14,
@@ -1938,6 +1996,22 @@ const styles = StyleSheet.create({
     color: '#f8fbff',
     fontSize: 13,
     lineHeight: 18,
+  },
+  pickupSaveBtn: {
+    marginTop: 10,
+    borderRadius: 12,
+    backgroundColor: '#9df0a2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+  },
+  pickupSaveBtnText: {
+    color: '#0a0a0a',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  saveDisabled: {
+    opacity: 0.5,
   },
   helperInlineText: {
     color: '#95a7bf',
@@ -1969,8 +2043,8 @@ const styles = StyleSheet.create({
   categoryDropdownButton: {
     height: 48,
     borderWidth: 1,
-    borderColor: '#2d3f57',
-    backgroundColor: '#111b29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     borderRadius: 12,
     paddingHorizontal: 14,
     flexDirection: 'row',
@@ -2013,9 +2087,9 @@ const styles = StyleSheet.create({
   imagePickButton: {
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#18293f',
+    backgroundColor: '#000000',
     borderWidth: 1,
-    borderColor: '#2b4463',
+    borderColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -2045,8 +2119,8 @@ const styles = StyleSheet.create({
   },
   ratioChip: {
     borderWidth: 1,
-    borderColor: '#2a3b52',
-    backgroundColor: '#111b29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     borderRadius: 999,
     paddingHorizontal: 13,
     paddingVertical: 7,
@@ -2079,8 +2153,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a3b52',
-    backgroundColor: '#101a27',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
   },

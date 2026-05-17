@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, Pressable, TextInput, Alert, NativeModules } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
@@ -13,7 +14,6 @@ import {
   getProfileDashboard,
   createOrder,
   createRazorpayPaymentOrder,
-  discardDraftOrder,
   processOrderPayment,
   ShippingAddress,
   Order,
@@ -24,133 +24,89 @@ import {
   UserAddress,
   getProductById,
   estimateOrderShipping,
+  discardDraftOrder,
   OrderShippingEstimateResponse,
-  normalizeAssetUrl,
 } from '@/utils/api';
 import { getToken } from '@/utils/auth';
 
-type CheckoutStep = 'cart' | 'shipping' | 'payment' | 'confirmation';
+function resolveNimbusQuoteErrorMessage({ estimate, shippingEstimateError } : { estimate?: any; shippingEstimateError?: string | null }) {
+  return shippingEstimateError || 'Live shipping quote could not be fetched from Nimbus. Please try again.';
+}
 
-function getEffectiveProductPrice(product: CartItem['product']) {
+type CheckoutStep = 'cart' | 'address' | 'shipping' | 'payment-method' | 'payment' | 'confirmation';
+
+function getEffectiveProductPrice(product: any) {
   const realPrice = Math.max(0, Number(product?.realPrice ?? product?.price) || 0);
   const discountedPrice = Number(product?.discountedPrice);
-  const hasDiscount = Number.isFinite(discountedPrice)
-    && discountedPrice >= 0
-    && discountedPrice < realPrice;
-
+  const hasDiscount = Number.isFinite(discountedPrice) && discountedPrice >= 0 && discountedPrice < realPrice;
   return hasDiscount ? discountedPrice : realPrice;
 }
 
-function resolveCartImageSource(product: CartItem['product']) {
+function resolveCartImageSource(product: any) {
   const mediaImage = Array.isArray(product?.media)
-    ? product.media.find((entry) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
+    ? product.media.find((entry: any) => entry?.type !== 'video' && (entry?.thumbnailDataUri || entry?.thumbnailUrl || entry?.url))
     : null;
   const candidate = mediaImage?.thumbnailDataUri || mediaImage?.thumbnailUrl || mediaImage?.url || product.images?.[0] || '';
-  return normalizeAssetUrl(candidate) || 'https://placehold.co/80x60';
+  return candidate || 'https://placehold.co/80x60';
 }
 
 function getRazorpayRuntime() {
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
-  if (appOwnership === 'expo') {
-    return {
-      open: null as ((options: any) => Promise<any>) | null,
-      reason: 'Razorpay is not supported in Expo Go. Install and open the app from a development build.',
-    };
-  }
-
-  const nativeCheckout = (NativeModules as any)?.RNRazorpayCheckout;
-
-  if (!nativeCheckout || typeof nativeCheckout?.open !== 'function') {
-    return {
-      open: null as ((options: any) => Promise<any>) | null,
-      reason: 'Razorpay native module is missing in this app build. Rebuild the app and reinstall it.',
-    };
-  }
-
-  const razorpayClient = (RazorpayCheckout as any)?.default ?? RazorpayCheckout;
-  if (typeof razorpayClient?.open === 'function') {
-    return {
-      open: razorpayClient.open.bind(razorpayClient) as (options: any) => Promise<any>,
-      reason: '',
-    };
-  }
-
+  const isAvailable = appOwnership !== 'expo';
   return {
-    open: null as ((options: any) => Promise<any>) | null,
-    reason: 'Razorpay SDK is installed but checkout.open is unavailable.',
+    isAvailable,
+    reason: appOwnership === 'expo' ? 'Razorpay unavailable in Expo Go' : null,
   };
 }
 
-function resolveNimbusQuoteErrorMessage(params: {
-  estimate?: OrderShippingEstimateResponse | null;
-  shippingEstimateError?: string | null;
-}) {
-  const reasonFromEstimate = String(params.estimate?.shippingQuote?.reason || '').trim();
-  if (reasonFromEstimate) {
-    return reasonFromEstimate;
+function formatDeliveryDate(etd?: string | null) {
+  if (!etd) return '—';
+  // expect DD-MM-YYYY or ISO
+  const parts = String(etd).split('-');
+  if (parts.length === 3 && parts[2].length === 4) {
+    const [d, m, y] = parts.map(Number);
+    try {
+      const dt = new Date(y, (m || 1) - 1, d || 1);
+      return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    } catch {
+      return String(etd);
+    }
   }
-
-  const fallbackError = String(params.shippingEstimateError || '').trim();
-  if (!fallbackError) {
-    return 'Live shipping quote could not be fetched from Nimbus. Please try again.';
+  try {
+    const dt = new Date(String(etd));
+    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch {
+    return String(etd);
   }
+}
 
-  const normalized = fallbackError.toLowerCase();
-
-  if (normalized.includes('wallet balance is low')) {
-    return 'Shipping partner wallet balance is low. Please recharge Nimbus wallet and try again.';
+function calculateDaysToDelivery(etd?: string | null) {
+  if (!etd) return Infinity;
+  const parts = String(etd).split('-');
+  let dt: Date;
+  if (parts.length === 3 && parts[2].length === 4) {
+    const [d, m, y] = parts.map(Number);
+    dt = new Date(y, (m || 1) - 1, d || 1);
+  } else {
+    dt = new Date(String(etd));
   }
+  const diff = Math.ceil((dt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  return Number.isFinite(diff) ? Math.max(0, diff) : Infinity;
+}
 
-  if (
-    normalized.includes('support email and phone number')
-    || normalized.includes('otp-verified')
-    || normalized.includes('otp verified')
-  ) {
-    return 'Nimbus support email and phone must be OTP-verified in Label Settings before booking shipments.';
-  }
-
-  if (
-    normalized.includes('network error')
-    || normalized.includes('network request failed')
-    || normalized.includes('fetch failed')
-    || normalized.includes('timed out')
-  ) {
-    return 'Nimbus is temporarily unreachable. Please retry in a few seconds.';
-  }
-
-  if (
-    normalized.includes('failed to estimate shipping')
-    || normalized.includes('live shipping quote is currently unavailable')
-  ) {
-    return 'Could not fetch live shipping charges right now. Please retry in a few seconds.';
-  }
-
-  if (
-    normalized.includes('nimbuspost is disabled')
-    || normalized.includes('integration is disabled')
-    || normalized.includes('fallback shipping estimate')
-  ) {
-    return 'Nimbus is disabled on server. Live shipping quote is required before checkout can continue.';
-  }
-
-  if (
-    normalized.includes('cannot post')
-    || normalized.includes('/orders/estimate-shipping')
-    || normalized.includes('not found')
-  ) {
-    return 'Checkout API endpoint is unreachable from the app. Please restart backend and retry.';
-  }
-
-  return fallbackError;
+function getServiceType(daysToDelivery: number) {
+  return daysToDelivery <= 2 ? 'Express' : 'Normal';
 }
 
 export default function CheckoutScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<CheckoutStep>('cart');
   const [order, setOrder] = useState<Order | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'cod' | 'razorpay'>('razorpay');
   const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
   const [useNewAddressForm, setUseNewAddressForm] = useState(false);
@@ -161,6 +117,9 @@ export default function CheckoutScreen() {
   const [shippingEstimateError, setShippingEstimateError] = useState<string | null>(null);
   const latestShippingEstimateErrorRef = useRef<string | null>(null);
   const [selectedQuotesMap, setSelectedQuotesMap] = useState<Record<string, string>>({});
+  const [selectedServiceType, setSelectedServiceType] = useState<'Express' | 'Normal'>('Normal');
+  const [addressSelectedInCart, setAddressSelectedInCart] = useState(false);
+  const [cartStepFormVisible, setCartStepFormVisible] = useState(false);
   const {
     cartItems: sharedCartItems,
     changeNotificationQuantity,
@@ -205,6 +164,8 @@ export default function CheckoutScreen() {
           setSelectedAddressIndex(defaultIndex >= 0 ? defaultIndex : 0);
           setUseNewAddressForm(false);
           setSetAsDefaultAddress(false);
+          // auto-select default address in cart view
+          setAddressSelectedInCart(true);
         } else {
           setSelectedAddressIndex(null);
           setUseNewAddressForm(true);
@@ -223,48 +184,138 @@ export default function CheckoutScreen() {
       }
     };
 
-    loadCart();
+    void loadCart();
   }, [hydrateCartFromBackend]);
+
+  // When a default/selected address is present on load, fetch shipping estimate
+  useEffect(() => {
+    const autoFetch = async () => {
+      if (selectedAddressIndex === null) return;
+      const addr = savedAddresses[selectedAddressIndex];
+      if (!addr) return;
+      const shippingAddr = mapUserAddressToShippingAddress(addr);
+      setShippingAddressForOrder(shippingAddr);
+      // Fetch estimate and auto-select cheapest courier per shipment
+      const estimate = await fetchShippingEstimateForAddress(shippingAddr);
+      if (estimate && estimate.shippingQuote && Array.isArray(estimate.shippingQuote.details)) {
+        // pick cheapest option per detail
+        const defaults: Record<string, string> = {};
+        estimate.shippingQuote.details.forEach((detail: any) => {
+          const key = String(detail.shipmentRef || detail.sellerId || '');
+          const options = Array.isArray(detail.options) ? detail.options : [];
+          if (options.length === 0) return;
+          const cheapest = options.reduce((min: any, cur: any) => (Number(cur.totalCharges || Infinity) < Number(min.totalCharges || Infinity) ? cur : min), options[0]);
+          if (cheapest && cheapest.courierId) defaults[key] = String(cheapest.courierId);
+        });
+        if (Object.keys(defaults).length > 0) setSelectedQuotesMap(defaults);
+      }
+    };
+
+    void autoFetch();
+  }, [selectedAddressIndex, savedAddresses]);
 
   const cartItems: CartItem[] = sharedCartItems.map((entry) => ({
     product: entry.product,
     quantity: entry.quantity,
   }));
   const razorpayRuntime = useMemo(() => getRazorpayRuntime(), []);
+  const isAddressStep = step === 'address';
+  const isShippingStep = step === 'shipping';
+  const isPaymentMethodStep = step === 'payment-method';
+  const isPaymentStep = step === 'payment';
+
+  // Check if COD is available from the selected courier options
+  const getCodAvailable = () => {
+    if (!hasLiveNimbusQuote) return false;
+    // COD is available only when every selected courier was confirmed by a Nimbus COD quote.
+    return (quoteDetails || []).every((detail) => {
+      const key = String(detail.shipmentRef || detail.sellerId || '');
+      const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+      const selectedOption = (detail.options || []).find((opt: any) => String(opt.courierId || '') === selectedCourierId);
+      if (!selectedOption) {
+        return false;
+      }
+
+      if (typeof (detail as any).selectedCodAvailable === 'boolean') {
+        return Boolean((detail as any).selectedCodAvailable);
+      }
+
+      return Boolean((selectedOption as any).codAvailable);
+    });
+  };
+  const isCodAvailable = getCodAvailable();
 
   const subtotal = cartItems.reduce((sum, item) => sum + getEffectiveProductPrice(item.product) * item.quantity, 0);
   const quoteDetails = shippingEstimate?.shippingQuote?.details || [];
   const hasLiveNimbusQuote = shippingEstimate?.shippingQuote?.source === 'nimbus_serviceability' && quoteDetails.length > 0;
 
-  const resolveSelectedOption = (detail: OrderShippingEstimateResponse['shippingQuote']['details'][number]) => {
-    const key = String(detail.shipmentRef || detail.sellerId || '');
-    const selectedCourierId = selectedQuotesMap[key] || detail.selectedCourierId;
-    const options = Array.isArray(detail.options) ? detail.options : [];
-    const matched = options.find((option) => String(option.courierId || '') === String(selectedCourierId || ''));
-    return matched || options[0] || null;
-  };
+  // Build selected shipping quotes payload (uses component state)
+  function buildSelectedShippingQuotesPayload() {
+    const details = shippingEstimate?.shippingQuote?.details || [];
+    return details
+      .map((detail) => {
+        const key = String(detail.shipmentRef || detail.sellerId || '');
+        const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+        return {
+          sellerId: String(detail.sellerId || ''),
+          shipmentRef: String(detail.shipmentRef || ''),
+          courierId: selectedCourierId,
+        };
+      })
+      .filter((entry) => entry.courierId);
+  }
 
   const selectedShippingCost = hasLiveNimbusQuote
     ? quoteDetails.reduce((sum, detail) => {
-        const selected = resolveSelectedOption(detail);
-        return sum + Number(selected?.totalCharges || 0);
+        const key = String(detail.shipmentRef || detail.sellerId || '');
+        const selectedCourierId = selectedQuotesMap[key] || detail.selectedCourierId;
+        const options = Array.isArray(detail.options) ? detail.options : [];
+        const matched = options.find((option) => String(option.courierId || '') === String(selectedCourierId || ''));
+        return sum + Number(matched?.totalCharges || 0);
       }, 0)
     : 0;
 
   const displaySubtotal = Number(shippingEstimate?.subtotal ?? subtotal);
-  const csrContributionPerPaidOrder = 1;
+  const platformFee = 8; // includes ₹1 CSR contribution
+  const csrContributionPerPaidOrder = 1; // included in platformFee, shown for info only
   const shippingCost = Number(hasLiveNimbusQuote ? selectedShippingCost : 0);
-  const tax = Number(shippingEstimate?.tax ?? 0);
-  const totalAmount = Number(displaySubtotal + shippingCost + tax);
+  const totalAmount = Number(displaySubtotal + shippingCost + platformFee); // CSR already inside platformFee
   const shippingDisplayText = hasLiveNimbusQuote
     ? (shippingCost === 0 ? 'Free' : `₹${shippingCost.toFixed(2)}`)
-    : 'Live quote required';
+    : (addressSelectedInCart ? 'Calculating...' : 'Select address');
 
   const shippingSourceText = hasLiveNimbusQuote
     ? 'Live Nimbus quote based on destination pincode and package weight/dimensions.'
     : (shippingEstimateError
       ? `Live shipping quote unavailable: ${shippingEstimateError}`
-      : 'Select address to fetch live Nimbus shipping charge.');
+        : (addressSelectedInCart ? 'Fetching shipping options...' : 'Select address below to view shipping options'));
+
+  const selectedQuotesPayload = buildSelectedShippingQuotesPayload();
+  const shippingSelectedForAll = hasLiveNimbusQuote ? selectedQuotesPayload.length === (quoteDetails?.length || 0) : false;
+
+// Typo fix from ScrollView
+const ScatterView = ScrollView;
+
+  const formatCompactAddress = (address: UserAddress | null) => {
+    if (!address) return '';
+    return [address.fullName, address.street, address.city, address.postalCode]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join(', ');
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (step === 'cart') {
+        return;
+      }
+
+      event.preventDefault();
+      setStep('cart');
+    });
+
+    return unsubscribe;
+  }, [navigation, step]);
 
   const persistCart = async (items: { productId: string; quantity: number }[]) => {
     try {
@@ -423,6 +474,32 @@ export default function CheckoutScreen() {
     }
   };
 
+  const handleContinueFromCart = async () => {
+    if (!addressSelectedInCart) {
+      setError('Please select a delivery address');
+      return;
+    }
+
+    if (!hasLiveNimbusQuote) {
+      setError('Shipping options not available. Please try again.');
+      return;
+    }
+
+    try {
+      const stockCheck = await reconcileCartStock();
+      if (!stockCheck.isValid) {
+        setError(stockCheck.message);
+        return;
+      }
+
+      await syncCartToBackend();
+      setError(null);
+      setStep('payment-method');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to proceed to payment');
+    }
+  };
+
   const validateShippingForm = () => {
     if (!fullName.trim()) {
       setError('Full name is required');
@@ -556,11 +633,13 @@ export default function CheckoutScreen() {
 
       const defaults: Record<string, string> = {};
       const details = estimate?.shippingQuote?.details || [];
-      details.forEach((detail) => {
+      details.forEach((detail: any) => {
         const key = String(detail.shipmentRef || detail.sellerId || '');
-        const defaultCourierId = String(detail.selectedCourierId || detail.options?.[0]?.courierId || '');
-        if (key && defaultCourierId) {
-          defaults[key] = defaultCourierId;
+        const options = Array.isArray(detail.options) ? detail.options : [];
+        if (options.length === 0) return;
+        const cheapest = options.reduce((min: any, cur: any) => (Number(cur.totalCharges || Infinity) < Number(min.totalCharges || Infinity) ? cur : min), options[0]);
+        if (cheapest && (cheapest.courierId || cheapest.courier_id)) {
+          defaults[key] = String(cheapest.courierId || cheapest.courier_id);
         }
       });
       setSelectedQuotesMap(defaults);
@@ -582,19 +661,22 @@ export default function CheckoutScreen() {
     }
   };
 
-  const buildSelectedShippingQuotesPayload = () => {
-    const details = shippingEstimate?.shippingQuote?.details || [];
-    return details
-      .map((detail) => {
-        const key = String(detail.shipmentRef || detail.sellerId || '');
-        const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
-        return {
-          sellerId: String(detail.sellerId || ''),
-          shipmentRef: String(detail.shipmentRef || ''),
-          courierId: selectedCourierId,
-        };
-      })
-      .filter((entry) => entry.courierId);
+  const getQuotesByServiceType = (serviceType: 'Express' | 'Normal') => {
+    if (!quoteDetails || quoteDetails.length === 0) return {};
+
+    const result: Record<string, typeof quoteDetails[0]['options']> = {};
+    quoteDetails.forEach((detail) => {
+      const key = String(detail.shipmentRef || detail.sellerId || '');
+      const filteredOptions = (detail.options || []).filter((option) => {
+        const daysToDelivery = calculateDaysToDelivery(option.etd);
+        const optionServiceType = getServiceType(daysToDelivery);
+        return optionServiceType === serviceType;
+      });
+      if (filteredOptions.length > 0) {
+        result[key] = filteredOptions;
+      }
+    });
+    return result;
   };
 
   const handleContinueToReview = async () => {
@@ -620,6 +702,32 @@ export default function CheckoutScreen() {
     setStep('payment');
   };
 
+  const handleConfirmAddressAndReturn = async () => {
+    const selected = await ensureAddressSelectedForCheckout();
+    if (!selected) {
+      return;
+    }
+
+    setShippingAddressForOrder(selected);
+    setAddressSelectedInCart(true);
+
+    const estimate = await fetchShippingEstimateForAddress(selected);
+    const hasLiveQuote = estimate?.shippingQuote?.source === 'nimbus_serviceability'
+      && Array.isArray(estimate?.shippingQuote?.details)
+      && estimate.shippingQuote.details.length > 0;
+
+    if (!estimate || !hasLiveQuote) {
+      setError(resolveNimbusQuoteErrorMessage({
+        estimate,
+        shippingEstimateError: latestShippingEstimateErrorRef.current || shippingEstimateError,
+      }));
+    } else {
+      setError(null);
+    }
+
+    setStep('cart');
+  };
+
   const handleProcessPayment = async () => {
     try {
       setProcessing(true);
@@ -632,7 +740,6 @@ export default function CheckoutScreen() {
         setError('You must be logged in to checkout. Please log in again.');
         Alert.alert('Not logged in', 'You must be logged in to checkout. Please log in again.');
         setProcessing(false);
-        // Optionally, redirect to login screen here
         return;
       }
 
@@ -663,8 +770,44 @@ export default function CheckoutScreen() {
         return;
       }
 
-      const razorpayOpen = razorpayRuntime.open;
-      if (!razorpayOpen) {
+      if (selectedPaymentMethod === 'cod' && !isCodAvailable) {
+        setError('Cash on Delivery is not available for the selected courier or destination.');
+        setStep('payment-method');
+        return;
+      }
+
+      if (selectedPaymentMethod === 'cod') {
+        // COD completes directly on the server; no Razorpay runtime is required.
+        console.log('[CHECKOUT] Creating COD order...');
+        const selectedShippingQuotes = buildSelectedShippingQuotesPayload();
+        if (selectedShippingQuotes.length === 0) {
+          setError('Please select a shipping option before placing order.');
+          return;
+        }
+
+        const newOrder = await createOrder({
+          shippingAddress,
+          selectedShippingQuotes,
+        });
+        console.log('[CHECKOUT] COD order created:', newOrder._id);
+
+        const paymentResult = await processOrderPayment(newOrder._id, {
+          paymentProvider: 'cash_on_delivery',
+        });
+
+        setOrder(paymentResult.order);
+
+        hydrateCartFromBackend([]);
+        await replaceCart([]).catch(() => {
+          // Non-blocking: order is already successful.
+        });
+
+        setStep('confirmation');
+        return;
+      }
+
+      const isRazorpayAvailable = razorpayRuntime.isAvailable;
+      if (!isRazorpayAvailable) {
         const sdkMissingMessage = razorpayRuntime.reason
           ? `${razorpayRuntime.reason} Use npm run android (or npm run ios) and open the newly installed app.`
           : 'Razorpay checkout is unavailable in this app build. Use an Expo development build (not Expo Go), then rebuild with npm run android (or npm run ios).';
@@ -689,7 +832,6 @@ export default function CheckoutScreen() {
       setOrder(newOrder);
 
       const draftOrderId = String(newOrder._id || '');
-
       let paymentOrder;
       try {
         paymentOrder = await createRazorpayPaymentOrder(newOrder._id);
@@ -702,7 +844,7 @@ export default function CheckoutScreen() {
 
       let razorpayResult: any;
       try {
-        razorpayResult = await razorpayOpen({
+        razorpayResult = await RazorpayCheckout.open({
           key: paymentOrder.keyId,
           amount: paymentOrder.amount,
           currency: paymentOrder.currency,
@@ -723,13 +865,15 @@ export default function CheckoutScreen() {
         throw new Error(checkoutMessage);
       }
 
-      await processOrderPayment(newOrder._id, {
+      const paymentResult = await processOrderPayment(newOrder._id, {
         paymentProvider: 'razorpay',
         razorpayOrderId: String(razorpayResult?.razorpay_order_id || ''),
         razorpayPaymentId: String(razorpayResult?.razorpay_payment_id || ''),
         razorpaySignature: String(razorpayResult?.razorpay_signature || ''),
       });
       console.log('[CHECKOUT] Payment successful');
+
+      setOrder(paymentResult.order);
 
       // Clear local cart badge state immediately after successful payment.
       hydrateCartFromBackend([]);
@@ -755,13 +899,18 @@ export default function CheckoutScreen() {
       router.back();
     } else if (step === 'shipping') {
       setStep('cart');
+    } else if (step === 'address') {
+      setStep('cart');
+    } else if (step === 'payment-method') {
+      setStep('cart');
     } else if (step === 'payment') {
-      setStep('shipping');
+      // Since shipping is handled in cart step, avoid going to shipping when backing from payment
+      setStep('cart');
     }
   };
 
   const handleContinueShopping = () => {
-    router.replace('/feed');
+    router.replace('/(tabs)');
   };
 
   if (loading) {
@@ -816,7 +965,7 @@ export default function CheckoutScreen() {
               A confirmation email has been sent to {order.shippingAddress.email}
             </ThemedText>
 
-            <Pressable style={styles.primaryButton} onPress={handleContinueShopping}>
+            <Pressable style={[styles.primaryButton, styles.confirmationContinueButton]} onPress={handleContinueShopping}>
               <ThemedText style={styles.buttonText}>Continue Shopping</ThemedText>
             </Pressable>
           </View>
@@ -833,7 +982,7 @@ export default function CheckoutScreen() {
             <Ionicons name={step === 'cart' ? 'close' : 'chevron-back'} size={28} color="#fff" />
           </Pressable>
           <ThemedText type="title" style={styles.headerTitle}>
-            {step === 'cart' ? 'Checkout' : step === 'shipping' ? 'Shipping Address' : 'Payment'}
+            {step === 'cart' ? 'Checkout' : step === 'shipping' ? 'Select Courier Partner' : step === 'address' ? 'Shipping Address' : step === 'payment-method' ? 'Payment Method' : 'Payment'}
           </ThemedText>
           <View style={{ width: 28 }} />
         </View>
@@ -851,6 +1000,8 @@ export default function CheckoutScreen() {
                 <Pressable style={styles.secondaryButton} onPress={handleContinueShopping}>
                   <ThemedText style={styles.secondaryButtonText}>Browse Products</ThemedText>
                 </Pressable>
+
+                
               </View>
             ) : (
               <>
@@ -892,6 +1043,153 @@ export default function CheckoutScreen() {
                   </View>
                 ))}
 
+                {/* Address selector and service type (cart step) */}
+                <View style={styles.addressSelectorSection}>
+                  {!addressSelectedInCart ? (
+                    <>
+                      <ThemedText style={styles.sectionTitle}>Select Delivery Address</ThemedText>
+                      {savedAddresses.length > 0 ? (
+                        <>
+                          <ThemedText style={styles.savedAddressTitle}>Saved addresses</ThemedText>
+                          {savedAddresses.map((address, index) => (
+                            <Pressable
+                              key={`cart-saved-address-${index}`}
+                              style={styles.savedAddressCard}
+                              onPress={async () => {
+                                setSelectedAddressIndex(index);
+                                setUseNewAddressForm(false);
+                                setAddressSelectedInCart(true);
+                                const shippingAddr = mapUserAddressToShippingAddress(address);
+                                setShippingAddressForOrder(shippingAddr);
+                                await fetchShippingEstimateForAddress(shippingAddr);
+                              }}>
+                              <View style={styles.savedAddressTopRow}>
+                                <ThemedText style={styles.savedAddressLabel}>{address.label || 'Address'}</ThemedText>
+                              </View>
+                              <ThemedText style={styles.savedAddressName}>{address.fullName}</ThemedText>
+                              <ThemedText style={styles.savedAddressLine}>{address.street}, {address.city}</ThemedText>
+                              <ThemedText style={styles.savedAddressLine}>{address.postalCode}</ThemedText>
+                            </Pressable>
+                          ))}
+                          <Pressable
+                            style={[styles.secondaryButton, styles.addNewAddressButton]}
+                            onPress={() => {
+                              setCartStepFormVisible(true);
+                              setUseNewAddressForm(true);
+                            }}>
+                            <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
+                          </Pressable>
+                        </>
+                      ) : null}
+
+                      {cartStepFormVisible && (
+                        <View style={styles.addressFormSection}>
+                          <ThemedText style={styles.savedAddressTitle}>Add New Address</ThemedText>
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Full Name"
+                            placeholderTextColor="#666"
+                            value={fullName}
+                            onChangeText={setFullName}
+                          />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Phone Number"
+                            placeholderTextColor="#666"
+                            value={phoneNumber}
+                            onChangeText={setPhoneNumber}
+                            keyboardType="phone-pad"
+                          />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Email Address"
+                            placeholderTextColor="#666"
+                            value={email}
+                            onChangeText={setEmail}
+                            keyboardType="email-address"
+                          />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Street Address"
+                            placeholderTextColor="#666"
+                            value={street}
+                            onChangeText={setStreet}
+                          />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="City"
+                            placeholderTextColor="#666"
+                            value={city}
+                            onChangeText={setCity}
+                          />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Postal Code"
+                            placeholderTextColor="#666"
+                            value={postalCode}
+                            onChangeText={setPostalCode}
+                          />
+                          <Pressable
+                            style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
+                            disabled={estimatingShipping}
+                            onPress={async () => {
+                              if (!validateShippingForm()) return;
+                              const shippingAddr = buildShippingAddressFromForm();
+                              const existingIndex = findMatchingAddressIndex(shippingAddr, savedAddresses);
+                              if (existingIndex >= 0) {
+                                setSelectedAddressIndex(existingIndex);
+                                setUseNewAddressForm(false);
+                                const matchedAddr = savedAddresses[existingIndex];
+                                setShippingAddressForOrder(mapUserAddressToShippingAddress(matchedAddr));
+                                await fetchShippingEstimateForAddress(mapUserAddressToShippingAddress(matchedAddr));
+                              } else {
+                                try {
+                                  const response = await addUserAddress({
+                                    label: 'Home',
+                                    fullName: shippingAddr.fullName,
+                                    phoneNumber: shippingAddr.phoneNumber,
+                                    email: shippingAddr.email,
+                                    street: shippingAddr.street,
+                                    city: shippingAddr.city,
+                                    state: shippingAddr.state || '',
+                                    postalCode: shippingAddr.postalCode,
+                                    country: shippingAddr.country,
+                                    isDefault: savedAddresses.length === 0 || setAsDefaultAddress,
+                                  });
+                                  const updatedAddresses = response.addresses || [];
+                                  setSavedAddresses(updatedAddresses);
+                                  setShippingAddressForOrder(shippingAddr);
+                                  await fetchShippingEstimateForAddress(shippingAddr);
+                                } catch (err: any) {
+                                  setError(err?.message || 'Failed to save address');
+                                }
+                              }
+                              setUseNewAddressForm(false);
+                              setCartStepFormVisible(false);
+                              setAddressSelectedInCart(true);
+                            }}>
+                            <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Setting Address...' : 'Use This Address'}</ThemedText>
+                          </Pressable>
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <View style={styles.selectedAddressCompact}>
+                      <View style={styles.selectedAddressHeaderRow}>
+                        <ThemedText style={styles.savedAddressLabel}>Deliver to</ThemedText>
+                        <Pressable style={styles.changeButton} onPress={() => setStep('address')}>
+                          <ThemedText style={styles.changeButtonText}>Change</ThemedText>
+                        </Pressable>
+                      </View>
+                      <ThemedText style={styles.savedAddressLine} numberOfLines={2}>
+                        {formatCompactAddress(getSelectedSavedAddress())}
+                      </ThemedText>
+
+                      {/* courier teaser removed from address area; moved below Add Payment Details */}
+                    </View>
+                  )}
+                </View>
+
                 <View style={styles.costSummary}>
                   <View style={styles.costRow}>
                     <ThemedText>Subtotal</ThemedText>
@@ -902,12 +1200,12 @@ export default function CheckoutScreen() {
                     <ThemedText>{shippingDisplayText}</ThemedText>
                   </View>
                   <View style={styles.costRow}>
-                    <ThemedText>Tax (5%)</ThemedText>
-                    <ThemedText>₹{tax.toFixed(2)}</ThemedText>
+                    <ThemedText>Platform fee</ThemedText>
+                    <ThemedText>₹{platformFee.toFixed(2)}</ThemedText>
                   </View>
                 <View style={styles.csrInfoRow}>
                   <ThemedText style={styles.csrInfoText}>
-                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per paid order.
+                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per successful order.
                   </ThemedText>
                 </View>
                   <View style={[styles.costRow, styles.costRowTotal]}>
@@ -918,15 +1216,58 @@ export default function CheckoutScreen() {
 
                 <ThemedText style={styles.shippingInfoText}>{shippingSourceText}</ThemedText>
 
-                <Pressable style={styles.primaryButton} onPress={handleContinueToShippingStep}>
-                  <ThemedText style={styles.buttonText}>Continue to Address</ThemedText>
+                <Pressable 
+                  style={[styles.primaryButton, (!addressSelectedInCart || estimatingShipping || !shippingSelectedForAll) && styles.disabledButton]}
+                  onPress={() => {
+                    if (!addressSelectedInCart) {
+                      setError('Please select a delivery address');
+                      return;
+                    }
+                    if (!shippingSelectedForAll) {
+                      setError('Please choose a shipping option for all shipments');
+                      return;
+                    }
+                    void handleContinueFromCart();
+                  }}
+                  disabled={!addressSelectedInCart || estimatingShipping || !shippingSelectedForAll}>
+                  <ThemedText style={styles.buttonText}>
+                    {estimatingShipping ? 'Loading...' : (!addressSelectedInCart ? 'Select Address' : (!shippingSelectedForAll ? 'Select Shipping Option' : 'Add Payment Details'))}
+                  </ThemedText>
                 </Pressable>
+
+                {/* Selected courier summary placed below the Add Payment Details button */}
+                {hasLiveNimbusQuote && (quoteDetails || []).length > 0 ? (
+                  <View style={styles.courierSummaryBelowButton}>
+                    {(quoteDetails || []).map((detail, detailIndex) => {
+                      const key = String(detail.shipmentRef || detail.sellerId || `shipment-${detailIndex}`);
+                      const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+                      const selectedOption = (detail.options || []).find((opt: any) => String(opt.courierId || '') === selectedCourierId) || detail.options?.[0] || null;
+                      if (!selectedOption) return null;
+                      return (
+                        <View key={`courier-summary-${detailIndex}`} style={styles.courierSummaryCard}>
+                          <View style={styles.courierSummaryInner}>
+                            <View style={styles.courierSummaryLeft}>
+                              <ThemedText style={styles.courierSummaryName}>{selectedOption.courierName}</ThemedText>
+                              <ThemedText style={styles.courierSummaryMeta}>Delivery by {formatDeliveryDate(selectedOption.etd)} • Chargeable {selectedOption.chargeableWeight || detail.weight}g</ThemedText>
+                            </View>
+                            <View style={styles.courierSummaryRight}>
+                              <ThemedText style={styles.courierSummaryPrice}>₹{Number(selectedOption.totalCharges || 0).toFixed(2)}</ThemedText>
+                              <Pressable style={styles.changeSmallButton} onPress={() => setStep('shipping')}>
+                                <ThemedText style={styles.changeSmallButtonText}>Change</ThemedText>
+                              </Pressable>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
               </>
             )}
           </>
         )}
 
-        {step === 'shipping' && (
+        {isAddressStep && (
           <>
             <ThemedText style={styles.sectionTitle}>Shipping Address</ThemedText>
 
@@ -1036,14 +1377,127 @@ export default function CheckoutScreen() {
 
             <Pressable
               style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
-              onPress={() => void handleContinueToReview()}
+              onPress={() => void handleConfirmAddressAndReturn()}
               disabled={estimatingShipping}>
-              <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Calculating Shipping...' : 'Continue to Payment'}</ThemedText>
+              <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Calculating Shipping...' : 'Okay'}</ThemedText>
+            </Pressable>
+          </>
+          )}
+
+        {isShippingStep && (
+          <>
+            <ThemedText style={styles.sectionTitle}>Select Courier Partner</ThemedText>
+            {hasLiveNimbusQuote ? (
+            <View style={styles.quoteListWrap}>
+              {(quoteDetails || []).map((detail, detailIndex) => {
+                const key = String(detail.shipmentRef || detail.sellerId || `shipment-${detailIndex}`);
+                const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
+
+                return (
+                  <View key={`quote-detail-${detailIndex}`} style={styles.quoteShipmentCard}>
+                    <ThemedText style={styles.quoteShipmentTitle}>
+                      Shipment {detailIndex + 1}: {detail.origin} to {detail.destination} ({detail.weight}g)
+                    </ThemedText>
+
+                    {(detail.options || []).map((option: any, optionIndex: number) => {
+                      const isSelected = String(option.courierId || '') === selectedCourierId;
+                      return (
+                        <Pressable
+                          key={`quote-option-${detailIndex}-${optionIndex}`}
+                          style={[styles.quoteOptionRow, isSelected && styles.quoteOptionRowSelected]}
+                          onPress={() => setSelectedQuotesMap((prev) => ({ ...prev, [key]: String(option.courierId || '') }))}>
+                          <View style={styles.quoteOptionTextWrap}>
+                            <ThemedText style={styles.quoteOptionName}>{option.courierName || option.courierId}</ThemedText>
+                            <ThemedText style={styles.quoteOptionMeta}>Delivery by {formatDeliveryDate(option.etd)} • Chargeable {option.chargeableWeight || detail.weight}g</ThemedText>
+                            <View style={styles.quoteOptionBadges}>
+                              <View style={[styles.quoteOptionBadge, option.codAvailable ? styles.quoteOptionBadgeSuccess : styles.quoteOptionBadgeMuted]}>
+                                <ThemedText style={styles.quoteOptionBadgeText}>
+                                  {option.codAvailable
+                                    ? `COD ${option.codCharges !== null ? `₹${Number(option.codCharges || 0).toFixed(2)}` : 'available'}`
+                                    : 'COD unavailable'}
+                                </ThemedText>
+                              </View>
+                            </View>
+                          </View>
+                          <ThemedText style={styles.quoteOptionPrice}>₹{Number(option.totalCharges || 0).toFixed(2)}</ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </View>
+            ) : null}
+
+            <Pressable
+              style={[styles.primaryButton, !shippingSelectedForAll && styles.disabledButton]}
+              onPress={() => {
+                if (!shippingSelectedForAll) {
+                  setError('Please choose a shipping option for all shipments');
+                  return;
+                }
+                setError(null);
+                setStep('cart');
+              }}
+              disabled={!shippingSelectedForAll}>
+              <ThemedText style={styles.buttonText}>Okay</ThemedText>
             </Pressable>
           </>
         )}
 
-        {step === 'payment' && (
+        {isPaymentMethodStep && (
+          <>
+            <ThemedText style={styles.sectionTitle}>Select Payment Method</ThemedText>
+
+            <View style={styles.paymentMethodContainer}>
+              {/* COD Option */}
+              <Pressable
+                style={[styles.paymentMethodCard, selectedPaymentMethod === 'cod' && styles.paymentMethodCardSelected]}
+                onPress={() => setSelectedPaymentMethod('cod')}
+                disabled={!isCodAvailable}>
+                <View style={styles.paymentMethodRadio}>
+                  {selectedPaymentMethod === 'cod' && <View style={styles.paymentMethodRadioInner} />}
+                </View>
+                <View style={styles.paymentMethodContent}>
+                  <ThemedText style={[styles.paymentMethodLabel, !isCodAvailable && styles.paymentMethodDisabled]}>
+                    Cash on Delivery (COD)
+                  </ThemedText>
+                  {!isCodAvailable && (
+                    <ThemedText style={styles.paymentMethodDisabledText}>Not available for selected couriers</ThemedText>
+                  )}
+                </View>
+              </Pressable>
+
+              {/* Razorpay Option */}
+              <Pressable
+                style={[styles.paymentMethodCard, selectedPaymentMethod === 'razorpay' && styles.paymentMethodCardSelected]}
+                onPress={() => setSelectedPaymentMethod('razorpay')}>
+                <View style={styles.paymentMethodRadio}>
+                  {selectedPaymentMethod === 'razorpay' && <View style={styles.paymentMethodRadioInner} />}
+                </View>
+                <View style={styles.paymentMethodContent}>
+                  <ThemedText style={styles.paymentMethodLabel}>Online Payment</ThemedText>
+                  <ThemedText style={styles.paymentMethodSubtext}>Credit Card, Debit Card, UPI, Net Banking</ThemedText>
+                </View>
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={[styles.primaryButton, (!isCodAvailable && selectedPaymentMethod === 'cod') && styles.disabledButton]}
+              onPress={() => {
+                if (selectedPaymentMethod === 'cod') {
+                  void handleProcessPayment();
+                } else {
+                  setStep('payment');
+                }
+              }}
+              disabled={(!isCodAvailable && selectedPaymentMethod === 'cod')}>
+              <ThemedText style={styles.buttonText}>Continue</ThemedText>
+            </Pressable>
+          </>
+        )}
+
+        {isPaymentStep && (
           <>
             <ThemedText style={styles.sectionTitle}>Payment Details</ThemedText>
 
@@ -1061,60 +1515,25 @@ export default function CheckoutScreen() {
                   <ThemedText style={styles.summaryLineValue}>{shippingDisplayText}</ThemedText>
                 </View>
                 <View style={styles.costRow}>
-                  <ThemedText style={styles.summaryLineLabel}>Tax</ThemedText>
-                  <ThemedText style={styles.summaryLineValue}>₹{tax.toFixed(2)}</ThemedText>
+                  <ThemedText style={styles.summaryLineLabel}>Platform fee</ThemedText>
+                  <ThemedText style={styles.summaryLineValue}>₹{platformFee.toFixed(2)}</ThemedText>
                 </View>
                 <View style={styles.csrInfoRow}>
                   <ThemedText style={styles.csrInfoText}>
-                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per paid order.
+                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per successful order.
                   </ThemedText>
                 </View>
               </View>
 
               <ThemedText style={styles.shippingInfoText}>{shippingSourceText}</ThemedText>
 
-              {hasLiveNimbusQuote ? (
-                <View style={styles.quoteListWrap}>
-                  {(quoteDetails || []).map((detail, detailIndex) => {
-                    const key = String(detail.shipmentRef || detail.sellerId || `shipment-${detailIndex}`);
-                    const selectedCourierId = String(selectedQuotesMap[key] || detail.selectedCourierId || detail.options?.[0]?.courierId || '');
 
-                    return (
-                      <View key={`quote-detail-${detailIndex}`} style={styles.quoteShipmentCard}>
-                        <ThemedText style={styles.quoteShipmentTitle}>
-                          Shipment {detailIndex + 1}: {detail.origin} to {detail.destination} ({detail.weight}g)
-                        </ThemedText>
-
-                        {(detail.options || []).map((option, optionIndex) => {
-                          const isSelected = String(option.courierId || '') === selectedCourierId;
-                          return (
-                            <Pressable
-                              key={`quote-option-${detailIndex}-${optionIndex}`}
-                              style={[styles.quoteOptionRow, isSelected && styles.quoteOptionRowSelected]}
-                              onPress={() => setSelectedQuotesMap((prev) => ({ ...prev, [key]: String(option.courierId || '') }))}>
-                              <View style={styles.quoteOptionTextWrap}>
-                                <ThemedText style={styles.quoteOptionName}>{option.courierName || option.courierId}</ThemedText>
-                                <ThemedText style={styles.quoteOptionMeta}>ETA {option.etd || 'NA'} • Chargeable {option.chargeableWeight || detail.weight}g</ThemedText>
-                              </View>
-                              <ThemedText style={styles.quoteOptionPrice}>₹{Number(option.totalCharges || 0).toFixed(2)}</ThemedText>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    );
-                  })}
-                </View>
-              ) : null}
             </View>
 
             <ThemedText style={[styles.sectionTitle, { marginTop: 16 }]}>Razorpay Checkout</ThemedText>
             <ThemedText style={styles.paymentHintText}>
               Tap pay to open Razorpay secure checkout. Use Razorpay test mode cards/UPI/netbanking in the popup.
             </ThemedText>
-
-            {!razorpayRuntime.open ? (
-              <ThemedText style={styles.paymentUnavailableText}>{razorpayRuntime.reason}</ThemedText>
-            ) : null}
 
             <ThemedText style={styles.secureText}>
               <Ionicons name="lock-closed" size={12} color="#4caf50" /> Secure payment powered by Razorpay
@@ -1123,13 +1542,9 @@ export default function CheckoutScreen() {
             <Pressable
               style={[styles.primaryButton, processing && styles.disabledButton]}
               onPress={handleProcessPayment}
-              disabled={processing || !razorpayRuntime.open}>
+              disabled={processing}>
               <ThemedText style={styles.buttonText}>
-                {processing
-                  ? 'Processing...'
-                  : razorpayRuntime.open
-                    ? `Pay ₹${totalAmount.toFixed(2)}`
-                    : 'Razorpay unavailable in this build'}
+                {processing ? 'Processing...' : `Pay ₹${totalAmount.toFixed(2)}`}
               </ThemedText>
             </Pressable>
           </>
@@ -1138,9 +1553,6 @@ export default function CheckoutScreen() {
     </ThemedView>
   );
 }
-
-// Typo fix from ScrollView
-const ScatterView = ScrollView;
 
 const styles = StyleSheet.create({
   container: {
@@ -1457,6 +1869,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  quoteOptionBadges: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 4,
+  },
+  quoteOptionBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+  },
+  quoteOptionBadgeSuccess: {
+    backgroundColor: '#082912',
+    borderColor: '#1f5b2f',
+  },
+  quoteOptionBadgeMuted: {
+    backgroundColor: '#1c1222',
+    borderColor: '#4f2c3b',
+  },
+  quoteOptionBadgeText: {
+    color: '#dce7f8',
+    fontSize: 10,
+    fontWeight: '600',
+  },
   input: {
     backgroundColor: '#141922',
     borderColor: '#2d3d4f',
@@ -1499,6 +1935,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginTop: 20,
+  },
+  confirmationContinueButton: {
+    width: '100%',
+    borderRadius: 10,
+    paddingVertical: 18,
+    marginTop: 24,
+    alignSelf: 'stretch',
   },
   disabledButton: {
     backgroundColor: '#666',
@@ -1595,5 +2038,281 @@ const styles = StyleSheet.create({
     color: '#dce7f8',
     fontSize: 12,
     fontWeight: '600',
+  },
+  addressSelectorSection: {
+    marginTop: 16,
+    backgroundColor: '#111',
+    borderRadius: 10,
+    padding: 14,
+  },
+  addressFormSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2a3d4f',
+  },
+  serviceTypeSelectorSection: {
+    marginTop: 16,
+    backgroundColor: '#111',
+    borderRadius: 10,
+    padding: 14,
+  },
+  serviceTypeTabsContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+    marginTop: 8,
+  },
+  serviceTypeTab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2d3d4f',
+    backgroundColor: '#0e1622',
+    alignItems: 'center',
+  },
+  serviceTypeTabActive: {
+    backgroundColor: '#1a3a2a',
+    borderColor: '#6ec77a',
+  },
+  serviceTypeTabText: {
+    color: '#9eb0c8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  serviceTypeTabTextActive: {
+    color: '#9df0a2',
+  },
+  serviceOptionsList: {
+    gap: 10,
+    marginTop: 8,
+  },
+  serviceOptionCard: {
+    borderWidth: 1,
+    borderColor: '#223045',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#0e1622',
+  },
+  optionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  courierName: {
+    color: '#f5fbff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  optionPrice: {
+    color: '#9df0a2',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  optionDetails: {
+    gap: 6,
+  },
+  optionDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  optionDetailLabel: {
+    color: '#9eb0c8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  optionDetailValue: {
+    color: '#dce7f8',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  optionBadges: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+  },
+  badge: {
+    backgroundColor: '#1a2d40',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#2d3d4f',
+  },
+  badgeText: {
+    color: '#b8d4f1',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  selectedAddressCompact: {
+    marginTop: 12,
+    backgroundColor: '#0f1720',
+    borderRadius: 10,
+    padding: 12,
+  },
+  selectedAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  selectedAddressHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  selectedAddressDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 4,
+  },
+  changeButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#101827',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2d3d4f',
+  },
+  changeButtonText: {
+    color: '#9df0a2',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  cheapestCourierCard: {
+    marginTop: 10,
+    backgroundColor: '#0b1a14',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#183224',
+  },
+  quoteSelectedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  quoteSelectedInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  quoteSelectedRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  changeSmallButton: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#0f1720',
+    borderWidth: 1,
+    borderColor: '#2d3d4f',
+  },
+  changeSmallButtonText: {
+    color: '#9df0a2',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  courierSummaryBelowButton: {
+    marginTop: 14,
+    gap: 10,
+  },
+  courierSummaryCard: {
+    backgroundColor: '#082912',
+    borderWidth: 1,
+    borderColor: '#1f5b2f',
+    borderRadius: 12,
+    padding: 12,
+  },
+  courierSummaryInner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  courierSummaryLeft: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  courierSummaryName: {
+    color: '#e8fced',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  courierSummaryMeta: {
+    color: '#bcdcc1',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  courierSummaryRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  courierSummaryPrice: {
+    color: '#9df0a2',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  paymentMethodContainer: {
+    gap: 12,
+    marginBottom: 16,
+  },
+  paymentMethodCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f1720',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 2,
+    borderColor: '#2d3d4f',
+    gap: 12,
+  },
+  paymentMethodCardSelected: {
+    borderColor: '#4caf50',
+    backgroundColor: '#082912',
+  },
+  paymentMethodRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#2d3d4f',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentMethodRadioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4caf50',
+  },
+  paymentMethodContent: {
+    flex: 1,
+    gap: 4,
+  },
+  paymentMethodLabel: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  paymentMethodSubtext: {
+    color: '#9eb0c8',
+    fontSize: 12,
+  },
+  paymentMethodDisabled: {
+    opacity: 0.5,
+  },
+  paymentMethodDisabledText: {
+    color: '#ff6b6b',
+    fontSize: 11,
+    fontWeight: '500',
   },
 });

@@ -16,7 +16,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import AddressPickerModal from '@/components/AddressPickerModal';
-import { getProfile, updateSellerProfile, uploadProductFile } from '@/utils/api';
+import { getProfile, updateSellerProfile, updateSellerPickupAddress, uploadProductFile } from '@/utils/api';
 import type { UserAddress } from '@/utils/api';
 
 type SellerFormState = {
@@ -41,6 +41,19 @@ const EMPTY_FORM: SellerFormState = {
   sellerContactPhone: '',
   sellerWebsite: '',
   sellerLocation: '',
+};
+
+const EMPTY_PICKUP_ADDRESS: UserAddress = {
+  label: 'Pickup',
+  fullName: '',
+  phoneNumber: '',
+  email: '',
+  street: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'India',
+  isDefault: false,
 };
 
 function mapSellerPickupToAddress(pickup: any): UserAddress | null {
@@ -181,6 +194,13 @@ export default function EditSellerProfileScreen() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const setPickupField = (key: keyof Omit<UserAddress, '_id' | 'isDefault'>, value: string) => {
+    setPickupAddressSnapshot((prev) => ({
+      ...(prev || EMPTY_PICKUP_ADDRESS),
+      [key]: value,
+    } as UserAddress));
+  };
+
   const handlePickStoryVideo = async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -269,6 +289,56 @@ export default function EditSellerProfileScreen() {
       ]);
     } catch (err: any) {
       Alert.alert('Save failed', err?.message || 'Could not update seller profile.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSavePickupAddress = async () => {
+    if (!pickupAddressSnapshot) {
+      Alert.alert('Pickup address required', 'Please select or enter a pickup address first.');
+      return;
+    }
+
+    if (!String(pickupAddressSnapshot.fullName || '').trim()
+      || !String(pickupAddressSnapshot.phoneNumber || '').trim()
+      || !String(pickupAddressSnapshot.street || '').trim()
+      || !String(pickupAddressSnapshot.city || '').trim()
+      || !String(pickupAddressSnapshot.state || '').trim()
+      || !String(pickupAddressSnapshot.postalCode || '').trim()) {
+      Alert.alert('Address incomplete', 'Pickup address must include name, phone, street, city, state and postal code.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await updateSellerPickupAddress({
+        sellerPickupAddressId: pickupAddressId || undefined,
+        sellerPickupAddress: {
+          label: String(pickupAddressSnapshot.label || 'Pickup'),
+          fullName: String(pickupAddressSnapshot.fullName || ''),
+          phoneNumber: String(pickupAddressSnapshot.phoneNumber || ''),
+          email: String(pickupAddressSnapshot.email || ''),
+          street: String(pickupAddressSnapshot.street || ''),
+          city: String(pickupAddressSnapshot.city || ''),
+          state: String(pickupAddressSnapshot.state || ''),
+          postalCode: String(pickupAddressSnapshot.postalCode || ''),
+          country: String(pickupAddressSnapshot.country || 'India'),
+        },
+      });
+
+      const nextPickupAddress: UserAddress = {
+        ...(pickupAddressSnapshot || EMPTY_PICKUP_ADDRESS),
+        ...(response?.sellerPickupAddress || {}),
+      };
+      setPickupAddressSnapshot(nextPickupAddress);
+      setPickupAddressId(response?.sellerPickupAddress?.addressId || pickupAddressId);
+      setInitialPickupAddressSnapshot(nextPickupAddress);
+      setInitialPickupAddressId(response?.sellerPickupAddress?.addressId || pickupAddressId);
+
+      Alert.alert('Saved', 'Pickup address updated successfully.');
+    } catch (err: any) {
+      Alert.alert('Save failed', err?.message || 'Could not update pickup address.');
     } finally {
       setSaving(false);
     }
@@ -418,6 +488,84 @@ export default function EditSellerProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={16} color="#9aa7b8" />
           </Pressable>
+
+          <View style={styles.pickupEditor}>
+            <ThemedText style={styles.pickupEditorTitle}>Pickup details</ThemedText>
+            <TextInput
+              style={styles.input}
+              placeholder="Pickup label"
+              placeholderTextColor="#7f8ea4"
+              value={pickupAddressSnapshot?.label || ''}
+              onChangeText={(value) => setPickupField('label', value)}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Full name"
+              placeholderTextColor="#7f8ea4"
+              value={pickupAddressSnapshot?.fullName || ''}
+              onChangeText={(value) => setPickupField('fullName', value)}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Phone number"
+              placeholderTextColor="#7f8ea4"
+              value={pickupAddressSnapshot?.phoneNumber || ''}
+              onChangeText={(value) => setPickupField('phoneNumber', value)}
+              keyboardType="phone-pad"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor="#7f8ea4"
+              value={pickupAddressSnapshot?.email || ''}
+              onChangeText={(value) => setPickupField('email', value)}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Street"
+              placeholderTextColor="#7f8ea4"
+              value={pickupAddressSnapshot?.street || ''}
+              onChangeText={(value) => setPickupField('street', value)}
+            />
+            <View style={styles.pickupTwoCol}>
+              <TextInput
+                style={[styles.input, styles.pickupTwoColInput]}
+                placeholder="City"
+                placeholderTextColor="#7f8ea4"
+                value={pickupAddressSnapshot?.city || ''}
+                onChangeText={(value) => setPickupField('city', value)}
+              />
+              <TextInput
+                style={[styles.input, styles.pickupTwoColInput]}
+                placeholder="State"
+                placeholderTextColor="#7f8ea4"
+                value={pickupAddressSnapshot?.state || ''}
+                onChangeText={(value) => setPickupField('state', value)}
+              />
+            </View>
+            <View style={styles.pickupTwoCol}>
+              <TextInput
+                style={[styles.input, styles.pickupTwoColInput]}
+                placeholder="Postal code"
+                placeholderTextColor="#7f8ea4"
+                value={pickupAddressSnapshot?.postalCode || ''}
+                onChangeText={(value) => setPickupField('postalCode', value)}
+                keyboardType="numeric"
+              />
+              <TextInput
+                style={[styles.input, styles.pickupTwoColInput]}
+                placeholder="Country"
+                placeholderTextColor="#7f8ea4"
+                value={pickupAddressSnapshot?.country || ''}
+                onChangeText={(value) => setPickupField('country', value)}
+              />
+            </View>
+            <Pressable style={styles.pickupSaveBtn} onPress={handleSavePickupAddress} disabled={saving}>
+              {saving ? <ActivityIndicator size="small" color="#0a0a0a" /> : <ThemedText style={styles.pickupSaveBtnText}>Save pickup address</ThemedText>}
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.fieldWrap}>
@@ -503,8 +651,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2f4a3a',
-    backgroundColor: '#14241c',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     paddingHorizontal: 10,
     paddingVertical: 9,
     flexDirection: 'row',
@@ -535,8 +683,8 @@ const styles = StyleSheet.create({
   input: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2d3f57',
-    backgroundColor: '#141f2f',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     color: '#ffffff',
     paddingHorizontal: 12,
     paddingVertical: 11,
@@ -545,8 +693,8 @@ const styles = StyleSheet.create({
   addressPicker: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2d3f57',
-    backgroundColor: '#141f2f',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     paddingHorizontal: 12,
     paddingVertical: 11,
     flexDirection: 'row',
@@ -568,6 +716,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '500',
+  },
+  pickupEditor: {
+    marginTop: 10,
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27384d',
+    backgroundColor: '#0d141f',
+  },
+  pickupEditorTitle: {
+    color: '#cfe0ff',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  pickupTwoCol: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  pickupTwoColInput: {
+    flex: 1,
+  },
+  pickupSaveBtn: {
+    marginTop: 2,
+    borderRadius: 10,
+    backgroundColor: '#9df0a2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  pickupSaveBtnText: {
+    color: '#0a0a0a',
+    fontSize: 13,
+    fontWeight: '800',
   },
   storyInput: {
     minHeight: 104,
@@ -601,8 +785,8 @@ const styles = StyleSheet.create({
   removeVideoBtn: {
     borderRadius: 9,
     borderWidth: 1,
-    borderColor: '#583235',
-    backgroundColor: '#2a1719',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: 'row',
@@ -628,8 +812,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2f425d',
-    backgroundColor: '#162335',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 11,

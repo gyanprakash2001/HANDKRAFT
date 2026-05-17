@@ -85,6 +85,39 @@ function cacheBustUrl(url: any) {
     return url;
   }
 }
+
+function resolveOrderImageUri(url?: string) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('/')) return `${resolveFileBaseUrl()}${raw}`;
+  return raw;
+}
+
+function getExpectedDeliveryLabel(expectedDeliveryDate?: string | null, createdAt?: string) {
+  const source = expectedDeliveryDate || createdAt || '';
+  const expected = new Date(source);
+  if (!Number.isNaN(expected.getTime())) {
+    return `Expected delivery ${expected.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })}`;
+  }
+
+  const created = new Date(String(createdAt || ''));
+  if (Number.isNaN(created.getTime())) {
+    return 'Expected delivery date unavailable';
+  }
+
+  const fallback = new Date(created);
+  fallback.setDate(fallback.getDate() + 5);
+
+  return `Expected delivery ${fallback.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })}`;
+}
 // Avatar Picker Modal
 function AvatarPickerModal({ visible, avatars, onSelect, onClose, currentAvatar }: { visible: boolean; avatars: any[]; onSelect: (a: any) => void; onClose: () => void; currentAvatar?: string | null }) {
   return (
@@ -508,6 +541,13 @@ export default function ProfileScreen() {
     }, [syncProfileModeFromStorage])
   );
 
+  // Refresh dashboard when screen gains focus so newly placed orders appear
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+    }, [loadDashboard])
+  );
+
   const onModeChange = (isSeller: boolean) => {
     const nextMode: ProfileMode = isSeller ? 'seller' : 'buyer';
     setMode(nextMode);
@@ -631,32 +671,47 @@ export default function ProfileScreen() {
   const sellerListHeader = useMemo(() => (
     <View style={styles.sellerHeaderWrap}>
       <View style={styles.sellerStageTabsRow}>
-        {SELLER_STAGE_TABS.map((tab) => {
+        {SELLER_STAGE_TABS.map((tab, index) => {
           const count = tab.key === 'new'
             ? sellerOrderStats.newOrders
             : tab.key === 'shipment'
               ? sellerOrderStats.inShipment
               : sellerOrderStats.delivered;
 
+          const tabIconName = tab.key === 'new'
+            ? 'bag-handle-outline'
+            : tab.key === 'shipment'
+              ? 'cube-outline'
+              : 'checkmark-circle-outline';
+
           return (
-            <Pressable
-              key={tab.key}
-              style={({ pressed }) => [styles.sellerStageTabBtn, pressed && styles.sellerQuickActionBtnPressed]}
-              onPress={() => {
-                if (tab.key === 'new') {
-                  clearNewOrderNotification(sellerOrderStats.newOrders);
-                }
-                router.push({
-                  pathname: '/seller-orders/[stage]',
-                  params: { stage: tab.key },
-                });
-              }}>
-              <ThemedText style={styles.sellerStageTabTitle}>{tab.label}</ThemedText>
-              <ThemedText style={styles.sellerStageTabCount}>{count}</ThemedText>
-              {tab.key === 'new' && showNewOrdersTabBadge && (
-                <View style={styles.newOrdersBellTag} />
+            <View key={tab.key} style={styles.sellerTabWithArrow}>
+              <Pressable
+                style={({ pressed }) => [styles.sellerStageTabBtn, pressed && styles.sellerQuickActionBtnPressed]}
+                onPress={() => {
+                  if (tab.key === 'new') {
+                    clearNewOrderNotification(sellerOrderStats.newOrders);
+                  }
+                  router.push({
+                    pathname: '/seller-orders/[stage]',
+                    params: { stage: tab.key },
+                  });
+                }}>
+                <View style={styles.sellerStageTabTitleRow}>
+                  <Ionicons name={tabIconName} size={12} color="#FFFFFF" />
+                  <ThemedText style={styles.sellerStageTabTitle}>{tab.label}</ThemedText>
+                </View>
+                <ThemedText style={styles.sellerStageTabCount}>{count}</ThemedText>
+                {tab.key === 'new' && showNewOrdersTabBadge && (
+                  <View style={styles.newOrdersBellTag} />
+                )}
+              </Pressable>
+              {index < SELLER_STAGE_TABS.length - 1 && (
+                <View style={styles.sellerTabArrow}>
+                  <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                </View>
               )}
-            </Pressable>
+            </View>
           );
         })}
       </View>
@@ -944,96 +999,118 @@ export default function ProfileScreen() {
     const imageKey = String(item._id || item.title || '');
     const useFallback = !imageUri || Boolean(imageKey && failedProductImageIds[imageKey]);
 
+    const pricing = resolveSellerCardPricing(item);
+
     return (
-    <Pressable
-      style={sellerModeCard ? styles.card : styles.buyerSavedCard}
-      onPress={() =>
-        router.push({
-          pathname: sellerModeCard ? '/seller-product/[id]' : '/product/[id]',
-          params: { id: item._id },
-        })
-      }>
-      <Image
-        source={useFallback ? PRODUCT_FALLBACK_IMAGE : { uri: imageUri }}
-        style={sellerModeCard ? styles.cardImage : styles.buyerSavedCardImage}
-        contentFit="cover"
-        onError={() => handleProductImageError(imageKey)}
-      />
-      <View style={sellerModeCard ? styles.cardBody : styles.buyerSavedCardBody}>
-        <ThemedText numberOfLines={2} style={sellerModeCard ? styles.cardTitle : styles.buyerSavedCardTitle}>{item.title}</ThemedText>
-        {sellerModeCard ? (() => {
-          const pricing = resolveSellerCardPricing(item);
-          return pricing.discountedPrice !== null ? (
+      <Pressable
+        style={sellerModeCard ? styles.card : styles.buyerSavedCard}
+        onPress={() =>
+          router.push({
+            pathname: sellerModeCard ? '/seller-product/[id]' : '/product/[id]',
+            params: { id: item._id },
+          })
+        }>
+        <Image
+          source={useFallback ? PRODUCT_FALLBACK_IMAGE : { uri: imageUri }}
+          style={sellerModeCard ? styles.cardImage : styles.buyerSavedCardImage}
+          contentFit="cover"
+          onError={() => handleProductImageError(imageKey)}
+        />
+        <View style={sellerModeCard ? styles.cardBody : styles.buyerSavedCardBody}>
+          <ThemedText numberOfLines={2} style={sellerModeCard ? styles.cardTitle : styles.buyerSavedCardTitle}>{item.title}</ThemedText>
+
+          {pricing.discountedPrice !== null ? (
             <View style={styles.priceRow}>
               <ThemedText style={styles.discountedPrice}>₹{Number(pricing.effectivePrice).toLocaleString('en-IN')}</ThemedText>
               <ThemedText style={styles.originalPrice}>₹{Number(pricing.realPrice).toLocaleString('en-IN')}</ThemedText>
             </View>
           ) : (
-            <ThemedText style={styles.priceText}>₹{Number(pricing.effectivePrice).toLocaleString('en-IN')}</ThemedText>
-          );
-        })() : (
-          <ThemedText style={styles.buyerSavedCardPrice}>₹{Number(item.price || 0).toLocaleString('en-IN')}</ThemedText>
-        )}
-        <ThemedText style={sellerModeCard ? styles.subtleText : styles.buyerSavedCardMeta}>
-          {sellerModeCard
-            ? item.category
-            : `${item.category} • ${item.stock > 0 ? `Stock ${item.stock}` : 'Out of stock'}`}
-        </ThemedText>
-        {sellerModeCard ? (
-          <View style={styles.sellerStockRow}>
-            <ThemedText style={styles.subtleText}>{item.stock > 0 ? `Stock: ${item.stock}` : 'Out of stock'}</ThemedText>
-            <Pressable
-              style={[styles.addStockButton, stockUpdatingId === item._id && styles.addStockButtonDisabled]}
-              onPress={() => handleOpenStockPrompt(item)}
-              disabled={stockUpdatingId === item._id}>
-              {stockUpdatingId === item._id ? (
-                <ActivityIndicator size="small" color="#0a0a0a" />
-              ) : (
-                <Ionicons name="add" size={16} color="#0a0a0a" />
-              )}
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
-    </Pressable>
+            <ThemedText style={sellerModeCard ? styles.priceText : styles.buyerSavedCardPrice}>₹{Number(pricing.effectivePrice).toLocaleString('en-IN')}</ThemedText>
+          )}
+
+          <ThemedText style={sellerModeCard ? styles.subtleText : styles.buyerSavedCardMeta}>
+            {sellerModeCard
+              ? item.category
+              : `${item.category} • ${item.stock > 0 ? `Stock ${item.stock}` : 'Out of stock'}`}
+          </ThemedText>
+
+          {sellerModeCard ? (
+            <View style={styles.sellerStockRow}>
+              <ThemedText style={styles.subtleText}>{item.stock > 0 ? `Stock: ${item.stock}` : 'Out of stock'}</ThemedText>
+              <Pressable
+                style={[styles.addStockButton, stockUpdatingId === item._id && styles.addStockButtonDisabled]}
+                onPress={() => handleOpenStockPrompt(item)}
+                disabled={stockUpdatingId === item._id}>
+                {stockUpdatingId === item._id ? (
+                  <ActivityIndicator size="small" color="#0a0a0a" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#0a0a0a" />
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+      </Pressable>
     );
   };
 
-  const renderOrderItem = ({ item }: { item: Order }) => (
-    <Pressable
-      style={styles.orderCard}
-      onPress={() =>
-        router.push({
-          pathname: '/order-details',
-          params: { orderId: item._id },
-        })
-      }>
-      <View style={styles.orderHeader}>
-        <ThemedText style={styles.orderIdText}>Order #{item._id.slice(-8).toUpperCase()}</ThemedText>
-        <View
-          style={[
-            styles.statusBadge,
-            item.status === 'delivered' && styles.statusDelivered,
-            item.status === 'shipped' && styles.statusShipped,
-            item.status === 'pending' && styles.statusPending,
-            item.status === 'cancelled' && styles.statusCancelled,
-          ]}>
-          <ThemedText style={styles.statusText}>{item.status.toUpperCase()}</ThemedText>
+  const renderOrderItem = ({ item }: { item: Order }) => {
+    const firstItem = item.items?.[0];
+    const productName = firstItem?.title || 'Order';
+    const itemCount = item.items.reduce((sum, entry) => sum + Math.max(1, Number(entry.quantity) || 1), 0);
+    const awbNumber = (item as any).sellerShipments?.[0]?.awbNumber || '';
+    const courierName = (item as any).sellerShipments?.[0]?.courierName || '';
+
+    return (
+      <Pressable
+        style={styles.orderCard}
+        onPress={() =>
+          router.push({
+            pathname: '/order-details',
+            params: { orderId: item._id },
+          })
+        }>
+        <View style={styles.orderHeader}>
+          <View style={styles.orderSummaryLeft}>
+            <Image
+              source={firstItem?.image
+                ? { uri: resolveOrderImageUri(firstItem.image) }
+                : PRODUCT_FALLBACK_IMAGE}
+              style={styles.orderThumb}
+              contentFit="cover"
+            />
+            <View style={styles.orderSummaryMeta}>
+              <ThemedText numberOfLines={1} style={styles.orderProductName}>{productName}</ThemedText>
+              {item.items.length > 1 && (
+                <ThemedText style={styles.orderItemCount}>+{item.items.length - 1} more item{item.items.length > 2 ? 's' : ''}</ThemedText>
+              )}
+              <ThemedText style={styles.orderDateText}>
+                {new Date(item.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </ThemedText>
+              {awbNumber ? (
+                <View style={styles.orderTrackingRow}>
+                  <Ionicons name="locate-outline" size={11} color="#9df0a2" />
+                  <ThemedText numberOfLines={1} style={styles.orderTrackingText}>
+                    {courierName ? `${courierName} • ` : ''}AWB: {awbNumber}
+                  </ThemedText>
+                </View>
+              ) : null}
+            </View>
+          </View>
+          <View
+            style={[
+              styles.statusBadge,
+              item.status === 'delivered' && styles.statusDelivered,
+              item.status === 'shipped' && styles.statusShipped,
+              item.status === 'pending' && styles.statusPending,
+              item.status === 'cancelled' && styles.statusCancelled,
+            ]}>
+            <ThemedText style={styles.statusText}>{item.status.toUpperCase()}</ThemedText>
+          </View>
         </View>
-      </View>
-      <ThemedText style={styles.orderDateText}>
-        {new Date(item.createdAt).toLocaleDateString('en-IN', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        })}
-      </ThemedText>
-      <View style={styles.orderItemsPreview}>
-        <ThemedText style={styles.orderItemCount}>{item.items.length} item(s)</ThemedText>
-        <ThemedText style={styles.orderTotalText}>₹{item.totalAmount.toFixed(2)}</ThemedText>
-      </View>
-    </Pressable>
-  );
+      </Pressable>
+    );
+  };
 
   const renderAddressItem = ({ item, index }: { item: UserAddress; index: number }) => (
     <Pressable
@@ -1727,8 +1804,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#223346',
-    backgroundColor: '#0f1824',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
   },
   buyerProfileCard: {
     paddingHorizontal: 12,
@@ -1741,8 +1818,8 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#223346',
-    backgroundColor: '#0f1824',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
   },
   avatar: {
     width: 76,
@@ -1815,34 +1892,40 @@ const styles = StyleSheet.create({
     marginTop: 9,
     marginBottom: 4,
     marginHorizontal: 2,
-    gap: 8,
+    gap: 12,
     backgroundColor: 'transparent',
     borderRadius: 0,
     padding: 0,
     borderWidth: 0,
   },
   profileTabButton: {
-    flex: 1,
-    borderWidth: 0,
-    borderRadius: 12,
-    paddingVertical: 10,
+    width: 80,
+    height: 80,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    borderRadius: 40,
+    paddingVertical: 8,
     alignItems: 'center',
-    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    backgroundColor: '#000000',
   },
   profileTabButtonActive: {
-    backgroundColor: '#122031',
+    backgroundColor: '#000000',
     borderWidth: 1,
-    borderColor: '#26384c',
+    borderColor: '#FFFFFF',
+    borderRadius: 40,
+    width: 80,
+    height: 80,
   },
   profileTabText: {
     color: '#becbde',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 10,
   },
   profileTabTitleRow: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    gap: 5,
+    gap: 4,
   },
   profileTabCount: {
     marginTop: 2,
@@ -1858,27 +1941,31 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginTop: 0,
     marginBottom: 10,
-    padding: 3,
-    gap: 4,
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: '#223346',
-    backgroundColor: '#0f1824',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    gap: 16,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingHorizontal: 0,
+    paddingVertical: 8,
+    borderRadius: 0,
     borderBottomWidth: 0,
+    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   tabActive: {
-    borderBottomColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#37516f',
-    backgroundColor: '#162739',
+    borderBottomWidth: 2,
+    borderBottomColor: '#ffffff',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   tabInner: {
     flexDirection: 'row',
@@ -1886,12 +1973,14 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   tabText: {
-    color: '#95abc4',
+    color: '#ffffff',
     fontWeight: '700',
-    fontSize: 11,
+    fontSize: 12,
   },
   tabTextActive: {
-    color: '#e9f4ff',
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 12,
   },
   buyerContent: {
     flex: 1,
@@ -1902,16 +1991,37 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     marginBottom: 12,
     padding: 12,
-    backgroundColor: '#101a27',
+    backgroundColor: '#000000',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#24364a',
+    borderColor: '#FFFFFF',
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  orderSummaryLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    flex: 1,
+    marginRight: 10,
+    gap: 10,
+  },
+  orderThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    backgroundColor: '#101820',
+  },
+  orderSummaryMeta: {
+    flex: 1,
+  },
+  orderProductName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#f0f6ff',
+    marginBottom: 2,
   },
   orderIdText: {
     fontSize: 15,
@@ -1942,9 +2052,21 @@ const styles = StyleSheet.create({
     color: '#deebfc',
   },
   orderDateText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#8da4be',
-    marginBottom: 8,
+    marginTop: 2,
+  },
+  orderTrackingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  orderTrackingText: {
+    fontSize: 10,
+    color: '#9df0a2',
+    fontWeight: '600',
+    flex: 1,
   },
   orderItemsPreview: {
     flexDirection: 'row',
@@ -1952,7 +2074,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   orderItemCount: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#9fb1c6',
   },
   orderTotalText: {
@@ -1973,10 +2095,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 12,
-    backgroundColor: '#101a27',
+    backgroundColor: '#000000',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#24364a',
+    borderColor: '#FFFFFF',
     gap: 10,
   },
   addAddressText: {
@@ -1987,10 +2109,10 @@ const styles = StyleSheet.create({
   addressCard: {
     marginBottom: 10,
     padding: 12,
-    backgroundColor: '#101a27',
+    backgroundColor: '#000000',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#24364a',
+    borderColor: '#FFFFFF',
   },
   addressHeader: {
     flexDirection: 'row',
@@ -2191,10 +2313,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     marginBottom: 10,
-    backgroundColor: '#101a27',
+    backgroundColor: '#000000',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#24364a',
+    borderColor: '#FFFFFF',
   },
   settingItemLeft: {
     flex: 1,
@@ -2221,10 +2343,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 12,
     paddingVertical: 14,
-    backgroundColor: '#101a27',
+    backgroundColor: '#000000',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#24364a',
+    borderColor: '#FFFFFF',
     alignItems: 'center',
   },
   statValue: {
@@ -2428,29 +2550,53 @@ const styles = StyleSheet.create({
   },
   sellerStageTabsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     marginHorizontal: 0,
+    alignItems: 'center',
+    backgroundColor: '#000000',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  sellerTabWithArrow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    justifyContent: 'center',
+  },
+  sellerTabArrow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 16,
   },
   sellerStageTabBtn: {
     flex: 1,
     position: 'relative',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#28394d',
-    backgroundColor: '#101a28',
-    paddingVertical: 11,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: '#000000',
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sellerStageTabTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   sellerStageTabTitle: {
-    color: '#a8bdd7',
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '700',
   },
   sellerStageTabCount: {
-    marginTop: 4,
-    color: '#eef6ff',
-    fontSize: 14,
+    marginTop: 2,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '800',
   },
   sellerQuickActionsRow: {
@@ -2466,8 +2612,8 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#28394d',
-    backgroundColor: '#101a28',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000000',
     paddingVertical: 10,
   },
   sellerQuickActionBtnPressed: {
@@ -2826,11 +2972,13 @@ const styles = StyleSheet.create({
   buyerSavedCardImage: {
     width: '100%',
     height: 110,
+    backgroundColor: '#000000',
   },
   buyerSavedCardBody: {
     paddingHorizontal: 9,
     paddingVertical: 8,
     minHeight: 76,
+    backgroundColor: '#000000',
   },
   buyerSavedCardTitle: {
     color: '#edf5ff',

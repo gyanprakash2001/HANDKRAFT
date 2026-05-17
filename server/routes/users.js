@@ -11,6 +11,13 @@ const Product = require('../models/Product');
 const Order = require('../models/Order');
 const Review = require('../models/Review');
 const { getPayoutPolicy, maskBankDetails } = require('../services/payouts');
+const {
+  mapAddressToSellerPickup,
+  sanitizeSellerPickupAddress,
+  buildSellerPickupAddressResponse,
+  resolveSellerPickupAddressUpdate,
+} = require('../services/seller-pickup-address');
+const { logSellerAction } = require('../services/audit');
 
 const AVATAR_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
 const DATA_URI_IMAGE_REGEX = /^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i;
@@ -153,37 +160,6 @@ function normalizeSellerWebsite(value) {
   }
 
   return `https://${trimmed}`;
-}
-
-function mapAddressToSellerPickup(addressDoc = {}, overrides = {}) {
-  return {
-    addressId: String(overrides.addressId || addressDoc?._id || '').trim(),
-    label: String(overrides.label || addressDoc?.label || 'Pickup').trim().slice(0, 60),
-    fullName: String(overrides.fullName || addressDoc?.fullName || '').trim().slice(0, 120),
-    phoneNumber: String(overrides.phoneNumber || addressDoc?.phoneNumber || '').trim().slice(0, 40),
-    email: String(overrides.email || addressDoc?.email || '').trim().slice(0, 140),
-    street: String(overrides.street || addressDoc?.street || '').trim().slice(0, 240),
-    city: String(overrides.city || addressDoc?.city || '').trim().slice(0, 120),
-    state: String(overrides.state || addressDoc?.state || '').trim().slice(0, 120),
-    postalCode: String(overrides.postalCode || addressDoc?.postalCode || '').trim().slice(0, 20),
-    country: String(overrides.country || addressDoc?.country || 'India').trim().slice(0, 80) || 'India',
-  };
-}
-
-function sanitizeSellerPickupAddress(raw) {
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-
-  const next = mapAddressToSellerPickup(raw, {
-    addressId: typeof raw.addressId === 'string' ? raw.addressId : '',
-  });
-
-  if (!next.fullName || !next.phoneNumber || !next.street || !next.city || !next.state || !next.postalCode) {
-    return null;
-  }
-
-  return next;
 }
 
 function toNonNegativeNumber(value, fallback = 0) {
@@ -354,40 +330,15 @@ router.put('/me/seller-profile', auth, async (req, res) => {
     if (sellerWebsite !== undefined) updates.sellerWebsite = sellerWebsite;
     if (sellerLocation !== undefined) updates.sellerLocation = sellerLocation;
 
-    const pickupAddressId = typeof req.body?.sellerPickupAddressId === 'string'
-      ? req.body.sellerPickupAddressId.trim()
-      : '';
-    const pickupAddressPayload = sanitizeSellerPickupAddress(req.body?.sellerPickupAddress);
+    const pickupUpdate = resolveSellerPickupAddressUpdate(user, {
+      sellerPickupAddressId: req.body?.sellerPickupAddressId,
+      sellerPickupAddress: req.body?.sellerPickupAddress,
+    });
 
-    if (pickupAddressId) {
-      if (!mongoose.Types.ObjectId.isValid(pickupAddressId)) {
-        return res.status(400).json({ message: 'Invalid sellerPickupAddressId value' });
-      }
-
-      const selectedAddress = (user.addresses || []).find(
-        (entry) => String(entry?._id || '') === pickupAddressId
-      );
-
-      if (!selectedAddress) {
-        return res.status(400).json({ message: 'Selected pickup address was not found in your saved addresses.' });
-      }
-
-      if (!String(selectedAddress?.state || '').trim()) {
-        return res.status(400).json({ message: 'Selected pickup address is missing state. Please edit the address and add state.' });
-      }
-
-      updates.sellerPickupAddress = {
-        ...mapAddressToSellerPickup(selectedAddress, {
-          addressId: pickupAddressId,
-          label: selectedAddress.label || 'Pickup',
-        }),
-        updatedAt: new Date(),
-      };
-    } else if (pickupAddressPayload) {
-      updates.sellerPickupAddress = {
-        ...pickupAddressPayload,
-        updatedAt: new Date(),
-      };
+    if (pickupUpdate?.sellerPickupAddress) {
+      updates.sellerPickupAddress = pickupUpdate.sellerPickupAddress;
+    } else if (String(req.body?.sellerPickupAddressId || '').trim() || req.body?.sellerPickupAddress) {
+      return res.status(pickupUpdate.statusCode || 400).json({ message: pickupUpdate.message || 'Invalid pickup address' });
     }
 
     Object.entries(updates).forEach(([key, value]) => {
@@ -395,6 +346,32 @@ router.put('/me/seller-profile', auth, async (req, res) => {
     });
     user.updatedAt = new Date();
     await user.save();
+
+    // Audit: seller profile and/or pickup address updated
+    if (updates.sellerPickupAddress) {
+      logSellerAction({
+        sellerId: req.user._id,
+        action: 'pickup_address_updated',
+        after: updates.sellerPickupAddress,
+        note: 'Seller pickup address updated via profile endpoint.',
+        source: 'seller',
+        ip: req.ip || '',
+        userAgent: req.headers['user-agent'] || '',
+      });
+    }
+    const profileFields = ['sellerDisplayName', 'sellerTagline', 'sellerStory', 'sellerContactEmail', 'sellerContactPhone', 'sellerWebsite', 'sellerLocation'];
+    const profileUpdated = profileFields.some((key) => updates[key] !== undefined);
+    if (profileUpdated) {
+      logSellerAction({
+        sellerId: req.user._id,
+        action: 'profile_updated',
+        after: Object.fromEntries(profileFields.filter((k) => updates[k] !== undefined).map((k) => [k, updates[k]])),
+        note: 'Seller profile fields updated.',
+        source: 'seller',
+        ip: req.ip || '',
+        userAgent: req.headers['user-agent'] || '',
+      });
+    }
 
     const persistedUser = await User.findById(req.user._id)
       .select('-password -likedProducts -cartItems -addresses');
@@ -426,20 +403,55 @@ router.put('/me/seller-profile', auth, async (req, res) => {
         contactPhone: String(persistedUser.sellerContactPhone || persistedUser.phoneNumber || ''),
         website: String(persistedUser.sellerWebsite || ''),
         location: String(persistedUser.sellerLocation || ''),
-        sellerPickupAddress: {
-          addressId: String(persistedUser?.sellerPickupAddress?.addressId || ''),
-          label: String(persistedUser?.sellerPickupAddress?.label || ''),
-          fullName: String(persistedUser?.sellerPickupAddress?.fullName || ''),
-          phoneNumber: String(persistedUser?.sellerPickupAddress?.phoneNumber || ''),
-          email: String(persistedUser?.sellerPickupAddress?.email || ''),
-          street: String(persistedUser?.sellerPickupAddress?.street || ''),
-          city: String(persistedUser?.sellerPickupAddress?.city || ''),
-          state: String(persistedUser?.sellerPickupAddress?.state || ''),
-          postalCode: String(persistedUser?.sellerPickupAddress?.postalCode || ''),
-          country: String(persistedUser?.sellerPickupAddress?.country || 'India'),
-          updatedAt: persistedUser?.sellerPickupAddress?.updatedAt || null,
-        },
+        sellerPickupAddress: buildSellerPickupAddressResponse(persistedUser?.sellerPickupAddress || {}),
       },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT /api/users/seller/pickup-address
+router.put('/seller/pickup-address', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('addresses sellerPickupAddress updatedAt');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const pickupUpdate = resolveSellerPickupAddressUpdate(user, {
+      sellerPickupAddressId: req.body?.sellerPickupAddressId,
+      sellerPickupAddress: req.body?.sellerPickupAddress,
+    });
+
+    if (!pickupUpdate.ok) {
+      return res.status(pickupUpdate.statusCode || 400).json({ message: pickupUpdate.message || 'Invalid pickup address' });
+    }
+
+    user.sellerPickupAddress = pickupUpdate.sellerPickupAddress;
+    user.updatedAt = new Date();
+    await user.save();
+
+    // Audit: dedicated pickup address update
+    logSellerAction({
+      sellerId: req.user._id,
+      action: 'pickup_address_updated',
+      after: pickupUpdate.sellerPickupAddress,
+      note: 'Seller pickup address updated via dedicated endpoint.',
+      source: 'seller',
+      ip: req.ip || '',
+      userAgent: req.headers['user-agent'] || '',
+    });
+
+    const persistedUser = await User.findById(req.user._id)
+      .select('sellerPickupAddress');
+
+    return res.json({
+      message: 'Seller pickup address updated successfully',
+      sellerPickupAddress: buildSellerPickupAddressResponse(persistedUser?.sellerPickupAddress || {}),
     });
   } catch (err) {
     console.error(err);
@@ -569,6 +581,41 @@ router.put('/me/seller-payout-profile', auth, async (req, res) => {
 
     user.updatedAt = new Date();
     await user.save();
+
+    // Audit: bank details / payout settings updated
+    if (kycStatus || Object.keys(bankPayload).length > 0) {
+      logSellerAction({
+        sellerId: req.user._id,
+        action: 'bank_details_updated',
+        after: {
+          kycStatus: user.sellerPayoutProfile?.kycStatus,
+          accountType: user.sellerPayoutProfile?.bankDetails?.accountType,
+          hasAccountNumber: Boolean(user.sellerPayoutProfile?.bankDetails?.accountNumber),
+          hasIfsc: Boolean(user.sellerPayoutProfile?.bankDetails?.ifsc),
+          hasUpiId: Boolean(user.sellerPayoutProfile?.bankDetails?.upiId),
+        },
+        note: 'Seller bank/payout details updated.',
+        source: 'seller',
+        ip: req.ip || '',
+        userAgent: req.headers['user-agent'] || '',
+      });
+    }
+    if (Object.keys(settingsPayload).length > 0) {
+      logSellerAction({
+        sellerId: req.user._id,
+        action: 'payout_settings_updated',
+        after: {
+          autoPayoutEnabled: user.sellerPayoutSettings?.autoPayoutEnabled,
+          minimumPayoutAmount: user.sellerPayoutSettings?.minimumPayoutAmount,
+          reservePercent: user.sellerPayoutSettings?.reservePercent,
+          overrideCoolingDays: user.sellerPayoutSettings?.overrideCoolingDays,
+        },
+        note: 'Seller payout settings updated.',
+        source: 'seller',
+        ip: req.ip || '',
+        userAgent: req.headers['user-agent'] || '',
+      });
+    }
 
     return res.json({
       message: 'Seller payout profile updated successfully',
@@ -880,8 +927,9 @@ router.get('/me/orders', auth, async (req, res) => {
   try {
     const Order = require('../models/Order');
     // Lightweight list payload for profile + recommendation features.
+    // Include paymentStatus and isDraft so clients can filter reliably.
     const orders = await Order.find({ user: req.user._id })
-      .select('_id status createdAt totalAmount items.product items.title')
+      .select('_id status paymentStatus isDraft createdAt expectedDeliveryDate totalAmount items.product items.title items.image items.quantity')
       .sort({ createdAt: -1 })
       .lean();
 

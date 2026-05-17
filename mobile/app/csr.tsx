@@ -108,7 +108,7 @@ export default function CsrScreen() {
           ListEmptyComponent={(
             <View style={styles.emptyCard}>
               <ThemedText style={styles.emptyTitle}>No CSR activities published yet</ThemedText>
-              <ThemedText style={styles.emptySubTitle}>After each ₹20,000 milestone, activities posted by admin will appear here.</ThemedText>
+              <ThemedText style={styles.emptySubTitle}>After each ₹20,000 milestone, activities posted by us will appear here.</ThemedText>
             </View>
           )}
           renderItem={({ item }) => (
@@ -166,18 +166,18 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#213247',
+    borderColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0f1b2a',
+    backgroundColor: '#000000',
   },
   title: { color: '#edf4ff', fontSize: 20, fontWeight: '700' },
   content: { paddingHorizontal: 12, paddingBottom: 22, gap: 10 },
   summaryCard: {
     borderWidth: 1,
-    borderColor: '#223346',
+    borderColor: '#ffffff',
     borderRadius: 14,
-    backgroundColor: '#0f1824',
+    backgroundColor: '#000000',
     padding: 12,
     marginBottom: 8,
   },
@@ -201,17 +201,17 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2a3d52',
-    backgroundColor: '#121f2d',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
     padding: 8,
   },
   metricLabel: { color: '#a8bbd2', fontSize: 10 },
   metricValue: { color: '#ecf6ff', fontSize: 13, fontWeight: '700', marginTop: 3 },
   activityCard: {
     borderWidth: 1,
-    borderColor: '#223346',
+    borderColor: '#ffffff',
     borderRadius: 14,
-    backgroundColor: '#0f1824',
+    backgroundColor: '#000000',
     padding: 12,
   },
   activityHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
@@ -226,8 +226,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2a3d53',
-    backgroundColor: '#0b1019',
+    borderColor: '#ffffff',
+    backgroundColor: '#000000',
   },
   mediaImage: { width: '100%', height: '100%' },
   videoBadge: {
@@ -243,9 +243,9 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     borderWidth: 1,
-    borderColor: '#223346',
+    borderColor: '#ffffff',
     borderRadius: 14,
-    backgroundColor: '#0f1824',
+    backgroundColor: '#000000',
     padding: 14,
   },
   emptyTitle: { color: '#ecf4ff', fontSize: 14, fontWeight: '700' },

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -20,6 +21,18 @@ type Params = {
 
 function formatCurrency(value: number) {
   return `₹${Number(value || 0).toLocaleString('en-IN')}`;
+}
+
+function resolveDisplayPricing(item: ProductItem | null) {
+  const realPrice = Number(item?.realPrice ?? item?.price ?? 0);
+  const discountedPrice = Number(item?.discountedPrice);
+  const hasDiscount = Number.isFinite(discountedPrice) && discountedPrice >= 0 && discountedPrice < realPrice;
+
+  return {
+    realPrice,
+    discountedPrice: hasDiscount ? discountedPrice : null,
+    displayPrice: hasDiscount ? discountedPrice : realPrice,
+  };
 }
 
 export default function SellerProductInsightsScreen() {
@@ -55,9 +68,11 @@ export default function SellerProductInsightsScreen() {
     }
   }, [id]);
 
-  useEffect(() => {
-    loadInsights();
-  }, [loadInsights]);
+  useFocusEffect(
+    useCallback(() => {
+      loadInsights();
+    }, [loadInsights])
+  );
 
   const stockBadgeStyle = useMemo(() => {
     if (!insights) return styles.stockBadgeHealthy;
@@ -81,6 +96,8 @@ export default function SellerProductInsightsScreen() {
     const normalized = normalizeAssetUrl(candidate);
     return normalized || 'https://placehold.co/900x600?text=Handmade+Item';
   }, [item]);
+
+  const pricing = useMemo(() => resolveDisplayPricing(item), [item]);
 
   const handleAddStock = async (qty: number) => {
     if (!item || updatingStock) return;
@@ -153,7 +170,14 @@ export default function SellerProductInsightsScreen() {
             <View style={styles.heroBody}>
               <ThemedText numberOfLines={2} style={styles.titleText}>{item.title}</ThemedText>
               <View style={styles.titleMetaRow}>
-                <ThemedText style={styles.priceText}>{formatCurrency(item.price)}</ThemedText>
+                {pricing.discountedPrice !== null ? (
+                  <View style={styles.priceStack}>
+                    <ThemedText style={styles.priceText}>{formatCurrency(pricing.displayPrice)}</ThemedText>
+                    <ThemedText style={styles.mrpText}>{formatCurrency(pricing.realPrice)}</ThemedText>
+                  </View>
+                ) : (
+                  <ThemedText style={styles.priceText}>{formatCurrency(pricing.displayPrice)}</ThemedText>
+                )}
                 <View style={[styles.stockBadge, stockBadgeStyle]}>
                   <ThemedText style={styles.stockBadgeText}>{stockBadgeText}</ThemedText>
                 </View>
@@ -317,6 +341,16 @@ const styles = StyleSheet.create({
     color: '#9df0a2',
     fontWeight: '700',
     fontSize: 16,
+  },
+  priceStack: {
+    gap: 2,
+  },
+  mrpText: {
+    color: '#8b9bb1',
+    fontSize: 11,
+    fontWeight: '600',
+    textDecorationLine: 'line-through',
+    textDecorationStyle: 'solid',
   },
   stockBadge: {
     paddingHorizontal: 8,
