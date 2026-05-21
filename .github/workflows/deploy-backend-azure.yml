@@ -152,7 +152,7 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: server
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Verify dependency tree
         working-directory: server
@@ -238,6 +238,22 @@ jobs:
             map.set('PUBLIC_BASE_URL', {
               name: 'PUBLIC_BASE_URL',
               value: `https://${appName}.azurewebsites.net`,
+              slotSetting: false,
+            });
+          }
+
+          // Ensure Azure rebuilds native dependencies (e.g. sharp) on the target Linux environment
+          map.set('SCM_DO_BUILD_DURING_DEPLOYMENT', {
+            name: 'SCM_DO_BUILD_DURING_DEPLOYMENT',
+            value: 'true',
+            slotSetting: false,
+          });
+
+          // Pin Azure App Service Node.js version
+          if (!map.has('WEBSITE_NODE_DEFAULT_VERSION')) {
+            map.set('WEBSITE_NODE_DEFAULT_VERSION', {
+              name: 'WEBSITE_NODE_DEFAULT_VERSION',
+              value: '~20',
               slotSetting: false,
             });
           }

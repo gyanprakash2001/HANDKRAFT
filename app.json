@@ -1,5 +1,8 @@
 {
   "android": {
     "package": "com.anonymous.handkraft"
-  }
+  },
+  "plugins": [
+    "@sentry/react-native"
+  ]
 }

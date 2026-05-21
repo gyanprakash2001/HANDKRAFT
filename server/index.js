@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const compression = require('compression');
@@ -93,32 +93,34 @@ app.get('/health/db', (req, res) => {
 });
 
 // routes
-const authRouter = require('./routes/auth');
-app.use('/api/auth', authRouter);
-const usersRouter = require('./routes/users');
-app.use('/api/users', usersRouter);
-const productsRouter = require('./routes/products');
-app.use('/api/products', productsRouter);
-const ordersRouter = require('./routes/orders');
-app.use('/api/orders', ordersRouter);
-const payoutsRouter = require('./routes/payouts');
-app.use('/api/payouts', payoutsRouter);
-const csrRouter = require('./routes/csr');
-app.use('/api/csr', csrRouter);
+function safeRequireRoute(modulePath, mountPath, routerName) {
+  try {
+    const routerModule = require(modulePath);
+    app.use(mountPath, routerModule);
+    console.log(`[ROUTES] Mounted ${routerName} at ${mountPath}`);
+  } catch (err) {
+    console.error(`[ROUTES] Failed to load ${routerName} from ${modulePath}:`, err.message);
+    // Mount a fallback that returns 503 for this route
+    app.use(mountPath, (req, res) => {
+      res.status(503).json({ message: `${routerName} is temporarily unavailable: ${err.message}` });
+    });
+  }
+}
 
-const webhooksRouter = require('./routes/webhooks');
-app.use('/api/webhooks', webhooksRouter);
+safeRequireRoute('./routes/auth', '/api/auth', 'auth');
+safeRequireRoute('./routes/users', '/api/users', 'users');
+safeRequireRoute('./routes/products', '/api/products', 'products');
+safeRequireRoute('./routes/orders', '/api/orders', 'orders');
+safeRequireRoute('./routes/payouts', '/api/payouts', 'payouts');
+safeRequireRoute('./routes/csr', '/api/csr', 'csr');
+safeRequireRoute('./routes/webhooks', '/api/webhooks', 'webhooks');
 
 // Debug routes (protected) for dry-run Nimbus calls
-const debugRouter = require('./routes/debug');
-app.use('/api/debug', debugRouter);
-
-const chatRouter = require('./routes/chat');
-app.use('/api/chat', chatRouter);
+safeRequireRoute('./routes/debug', '/api/debug', 'debug');
+safeRequireRoute('./routes/chat', '/api/chat', 'chat');
 
 // Admin routes
-const adminRouter = require('./routes/admin');
-app.use('/api/admin', adminRouter);
+safeRequireRoute('./routes/admin', '/api/admin', 'admin');
 
 // Return readable JSON when request body is too large (e.g. base64 image uploads).
 app.use((err, req, res, next) => {

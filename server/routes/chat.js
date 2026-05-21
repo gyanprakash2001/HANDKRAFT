@@ -162,7 +162,7 @@ router.post('/conversations/ensure', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -217,7 +217,7 @@ router.get('/conversations', auth, async (req, res) => {
     res.json({ conversations: formatted });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -270,7 +270,7 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
     res.json({ messages: formatted });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -370,7 +370,7 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 

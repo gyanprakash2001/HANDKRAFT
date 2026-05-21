@@ -15,18 +15,22 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
+    "@sentry/node": "^10.53.1",
+    "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "google-auth-library": "^9.15.1",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.2.3",
+    "mongoose": "^8.14.0",
     "multer": "^1.4.5-lts.1",
     "razorpay": "^2.9.6",
-    "sharp": "^0.34.4"
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

@@ -294,7 +294,7 @@ router.get('/seller-public', async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -408,7 +408,7 @@ router.put('/me/seller-profile', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -455,7 +455,7 @@ router.put('/seller/pickup-address', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -490,7 +490,7 @@ router.get('/me/seller-payout-profile', auth, async (req, res) => {
     });
   } catch (err) {
     console.error('[USERS][SELLER_PAYOUT_PROFILE][GET] Error:', err?.message || err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -633,7 +633,7 @@ router.put('/me/seller-payout-profile', auth, async (req, res) => {
     });
   } catch (err) {
     console.error('[USERS][SELLER_PAYOUT_PROFILE][PUT] Error:', err?.message || err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -645,7 +645,7 @@ router.get('/me', auth, async (req, res) => {
     res.json(user);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -659,7 +659,7 @@ router.get('/me/profile-dashboard', auth, async (req, res) => {
     res.json(payload);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -680,7 +680,7 @@ router.get('/me/listed-items', auth, async (req, res) => {
     res.json({ items: listedItems });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -730,7 +730,7 @@ router.post('/me/liked/:productId', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -767,7 +767,7 @@ router.post('/me/cart/:productId', auth, async (req, res) => {
     res.json({ message: 'Added to cart' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -808,7 +808,7 @@ router.put('/me/cart', auth, async (req, res) => {
     res.json({ message: 'Cart synchronized successfully' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -830,7 +830,7 @@ router.delete('/me/cart/:productId', auth, async (req, res) => {
     res.json({ message: 'Removed from cart' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -861,7 +861,7 @@ router.put('/me', auth, async (req, res) => {
     res.json(user);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -894,7 +894,7 @@ router.post('/me/avatar', auth, async (req, res) => {
     res.json({ message: 'Avatar uploaded', user });
   } catch (err) {
     console.error('Upload avatar error:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -918,7 +918,7 @@ router.get('/avatars', async (req, res) => {
     res.json({ avatars: images });
   } catch (err) {
     console.error('List avatars error:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -936,7 +936,7 @@ router.get('/me/orders', auth, async (req, res) => {
     res.json({ orders });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -957,7 +957,7 @@ router.get('/me/orders/:orderId', auth, async (req, res) => {
     res.json(order);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -969,7 +969,7 @@ router.get('/me/addresses', auth, async (req, res) => {
     res.json({ addresses: user.addresses || [] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1010,7 +1010,7 @@ router.post('/me/addresses', auth, async (req, res) => {
     res.json({ message: 'Address added successfully', addresses: user.addresses });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1054,7 +1054,7 @@ router.put('/me/addresses/:addressIndex', auth, async (req, res) => {
     res.json({ message: 'Address updated successfully', addresses: user.addresses });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1076,7 +1076,7 @@ router.delete('/me/addresses/:addressIndex', auth, async (req, res) => {
     res.json({ message: 'Address deleted successfully', addresses: user.addresses });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 

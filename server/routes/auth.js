@@ -96,7 +96,7 @@ router.post('/signup', async (req, res) => {
     res.json({ token, user: buildPublicUserPayload(user) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -123,7 +123,7 @@ router.post('/login', async (req, res) => {
     res.json({ token, user: buildPublicUserPayload(user) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -287,7 +287,7 @@ router.post('/google', async (req, res) => {
     res.json({ token, user: buildPublicUserPayload(user) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 

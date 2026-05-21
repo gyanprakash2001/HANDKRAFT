@@ -3,7 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
-const sharp = require('sharp');
+let sharp;
+try {
+  sharp = require('sharp');
+} catch (e) {
+  console.warn('[PRODUCTS] sharp module not available – thumbnail generation disabled:', e.message);
+  sharp = null;
+}
 const router = express.Router();
 const Product = require('../models/Product');
 const Review = require('../models/Review');
@@ -260,6 +266,7 @@ function sanitizeThumbnailDataUri(value) {
 }
 
 async function createThumbnailBuffer(source) {
+  if (!sharp) return null;
   try {
     return await sharp(source)
       .resize({ width: THUMBNAIL_WIDTH, withoutEnlargement: true })
@@ -590,7 +597,7 @@ async function seedProducts(req, res) {
     res.json({ message: 'Sample products seeded', count: inserted.length });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 }
 
@@ -689,7 +696,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -831,7 +838,7 @@ router.get('/:id/seller-insights', auth, async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1049,7 +1056,7 @@ router.get('/:id/reviews', async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1089,7 +1096,7 @@ router.get('/:id/reviews/eligibility', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1159,7 +1166,7 @@ router.post('/:id/reviews', auth, async (req, res) => {
       return res.status(409).json({ message: 'You already reviewed this product. Please update your existing review.' });
     }
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1201,7 +1208,7 @@ router.post('/:id/reviews/:reviewId/helpful', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1216,7 +1223,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1261,7 +1268,7 @@ async function deleteProductHandler(req, res) {
       return res.status(404).json({ message: 'Product not found' });
     }
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 }
 
@@ -1491,7 +1498,7 @@ router.post('/', auth, async (req, res) => {
     res.status(201).json({ message: 'Item posted successfully', item: normalizeProductMediaForResponse(req, product) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 
@@ -1535,7 +1542,7 @@ async function updateStockHandler(req, res) {
       return res.status(404).json({ message: 'Product not found' });
     }
     console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: err.message || 'Server error' });
   }
 }
 
