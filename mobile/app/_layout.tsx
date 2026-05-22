@@ -1,19 +1,44 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useNavigationContainerRef } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Sentry from '@sentry/react-native';
+import { useEffect } from 'react';
 
 import { CartNotificationProvider } from '@/contexts/cart-notification-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+// Sentry navigation integration for automatic screen tracking
+const routingInstrumentation = Sentry.reactNavigationIntegration({
+  enableTimeToInitialDisplay: true,
+});
+
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+  integrations: [routingInstrumentation],
+  // Performance Monitoring — capture 20% of transactions in production
+  tracesSampleRate: __DEV__ ? 1.0 : 0.2,
+  // Disable Sentry in dev to avoid noise (set to true to test locally)
+  enabled: !__DEV__,
+  debug: __DEV__,
+  environment: __DEV__ ? 'development' : 'production',
+});
 
 export const unstable_settings = {
   initialRouteName: 'index',
 };
 
-export default function RootLayout() {
+function RootLayout() {
   const colorScheme = useColorScheme();
+  const ref = useNavigationContainerRef();
+
+  useEffect(() => {
+    if (ref?.current) {
+      routingInstrumentation.registerNavigationContainer(ref);
+    }
+  }, [ref]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -56,3 +81,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default Sentry.wrap(RootLayout);

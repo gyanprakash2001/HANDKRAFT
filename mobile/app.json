@@ -44,7 +44,15 @@
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "organization": "handkraft-md",
+          "project": "handkraft-mobile"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

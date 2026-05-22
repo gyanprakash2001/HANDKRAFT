@@ -155,6 +155,10 @@ const env = {
       : 'soft',
     deleteReasonMinLength: Math.max(5, parsePositiveNumber(process.env.ADMIN_DELETE_REASON_MIN_LENGTH, 12)),
   },
+  sentry: {
+    dsn: process.env.SENTRY_DSN || '',
+    enabled: Boolean(process.env.SENTRY_DSN),
+  },
 };
 
 if (env.razorpay.enabled) {

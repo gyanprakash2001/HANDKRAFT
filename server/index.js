@@ -1,3 +1,7 @@
+// Sentry must be initialized before all other requires for auto-instrumentation
+require('./instrument');
+const Sentry = require('@sentry/node');
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -121,6 +125,9 @@ safeRequireRoute('./routes/chat', '/api/chat', 'chat');
 
 // Admin routes
 safeRequireRoute('./routes/admin', '/api/admin', 'admin');
+
+// Sentry error handler — must be after all routes, before other error handlers
+Sentry.setupExpressErrorHandler(app);
 
 // Return readable JSON when request body is too large (e.g. base64 image uploads).
 app.use((err, req, res, next) => {
