@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, Pressable, TextInput, Alert, NativeModules } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
@@ -137,8 +137,9 @@ export default function CheckoutScreen() {
   const [postalCode, setPostalCode] = useState('');
 
   // Load cart items from profile
-  useEffect(() => {
-    const loadCart = async () => {
+  useFocusEffect(
+    useCallback(() => {
+      const loadCart = async () => {
       try {
         setLoading(true);
         const [dashboard, addresses] = await Promise.all([getProfileDashboard(), getUserAddresses()]);
@@ -168,9 +169,9 @@ export default function CheckoutScreen() {
           setAddressSelectedInCart(true);
         } else {
           setSelectedAddressIndex(null);
-          setUseNewAddressForm(true);
-          setSetAsDefaultAddress(true);
-          setCartStepFormVisible(true);
+          setUseNewAddressForm(false);
+          setSetAsDefaultAddress(false);
+          setCartStepFormVisible(false);
         }
 
         if (dashboard.cartItems.length === 0) {
@@ -186,7 +187,8 @@ export default function CheckoutScreen() {
     };
 
     void loadCart();
-  }, [hydrateCartFromBackend]);
+    }, [hydrateCartFromBackend])
+  );
 
   // When a default/selected address is present on load, fetch shipping estimate
   useEffect(() => {
@@ -1058,7 +1060,6 @@ const ScatterView = ScrollView;
                               style={styles.savedAddressCard}
                               onPress={async () => {
                                 setSelectedAddressIndex(index);
-                                setUseNewAddressForm(false);
                                 setAddressSelectedInCart(true);
                                 const shippingAddr = mapUserAddressToShippingAddress(address);
                                 setShippingAddressForOrder(shippingAddr);
@@ -1072,107 +1073,21 @@ const ScatterView = ScrollView;
                               <ThemedText style={styles.savedAddressLine}>{address.postalCode}</ThemedText>
                             </Pressable>
                           ))}
+                          <Pressable
+                            style={[styles.secondaryButton, styles.addNewAddressButton]}
+                            onPress={() => router.push('/add-address')}>
+                            <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
+                          </Pressable>
                         </>
                       )}
 
-                      {!cartStepFormVisible && (
-                        <Pressable
-                          style={[styles.secondaryButton, styles.addNewAddressButton, savedAddresses.length === 0 && { marginTop: 12 }]}
-                          onPress={() => {
-                            setCartStepFormVisible(true);
-                            setUseNewAddressForm(true);
-                          }}>
-                          <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
-                        </Pressable>
-                      )}
-
-                      {cartStepFormVisible && (
-                        <View style={styles.addressFormSection}>
-                          <ThemedText style={styles.savedAddressTitle}>Add New Address</ThemedText>
-                          <TextInput
-                            style={styles.input}
-                            placeholder="Full Name"
-                            placeholderTextColor="#666"
-                            value={fullName}
-                            onChangeText={setFullName}
-                          />
-                          <TextInput
-                            style={styles.input}
-                            placeholder="Phone Number"
-                            placeholderTextColor="#666"
-                            value={phoneNumber}
-                            onChangeText={setPhoneNumber}
-                            keyboardType="phone-pad"
-                          />
-                          <TextInput
-                            style={styles.input}
-                            placeholder="Email Address"
-                            placeholderTextColor="#666"
-                            value={email}
-                            onChangeText={setEmail}
-                            keyboardType="email-address"
-                          />
-                          <TextInput
-                            style={styles.input}
-                            placeholder="Street Address"
-                            placeholderTextColor="#666"
-                            value={street}
-                            onChangeText={setStreet}
-                          />
-                          <TextInput
-                            style={styles.input}
-                            placeholder="City"
-                            placeholderTextColor="#666"
-                            value={city}
-                            onChangeText={setCity}
-                          />
-                          <TextInput
-                            style={styles.input}
-                            placeholder="Postal Code"
-                            placeholderTextColor="#666"
-                            value={postalCode}
-                            onChangeText={setPostalCode}
-                          />
+                      {savedAddresses.length === 0 && (
+                        <View style={{ marginTop: 12, alignItems: 'center' }}>
+                          <ThemedText style={{ color: '#8e9bb2', marginBottom: 12 }}>Add address to view shipping cost</ThemedText>
                           <Pressable
-                            style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
-                            disabled={estimatingShipping}
-                            onPress={async () => {
-                              if (!validateShippingForm()) return;
-                              const shippingAddr = buildShippingAddressFromForm();
-                              const existingIndex = findMatchingAddressIndex(shippingAddr, savedAddresses);
-                              if (existingIndex >= 0) {
-                                setSelectedAddressIndex(existingIndex);
-                                setUseNewAddressForm(false);
-                                const matchedAddr = savedAddresses[existingIndex];
-                                setShippingAddressForOrder(mapUserAddressToShippingAddress(matchedAddr));
-                                await fetchShippingEstimateForAddress(mapUserAddressToShippingAddress(matchedAddr));
-                              } else {
-                                try {
-                                  const response = await addUserAddress({
-                                    label: 'Home',
-                                    fullName: shippingAddr.fullName,
-                                    phoneNumber: shippingAddr.phoneNumber,
-                                    email: shippingAddr.email,
-                                    street: shippingAddr.street,
-                                    city: shippingAddr.city,
-                                    state: shippingAddr.state || '',
-                                    postalCode: shippingAddr.postalCode,
-                                    country: shippingAddr.country,
-                                    isDefault: savedAddresses.length === 0 || setAsDefaultAddress,
-                                  });
-                                  const updatedAddresses = response.addresses || [];
-                                  setSavedAddresses(updatedAddresses);
-                                  setShippingAddressForOrder(shippingAddr);
-                                  await fetchShippingEstimateForAddress(shippingAddr);
-                                } catch (err: any) {
-                                  setError(err?.message || 'Failed to save address');
-                                }
-                              }
-                              setUseNewAddressForm(false);
-                              setCartStepFormVisible(false);
-                              setAddressSelectedInCart(true);
-                            }}>
-                            <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Setting Address...' : 'Use This Address'}</ThemedText>
+                            style={[styles.primaryButton, { width: '100%' }]}
+                            onPress={() => router.push('/add-address')}>
+                            <ThemedText style={styles.buttonText}>Add Address</ThemedText>
                           </Pressable>
                         </View>
                       )}
@@ -1306,83 +1221,26 @@ const ScatterView = ScrollView;
                 <Pressable
                   style={[styles.secondaryButton, styles.addNewAddressButton]}
                   onPress={() => {
-                    setUseNewAddressForm(true);
-                    setSelectedAddressIndex(null);
-                    setSetAsDefaultAddress(savedAddresses.length === 0);
-                    setShippingEstimate(null);
-                    setSelectedQuotesMap({});
-                    setShippingEstimateError(null);
-                    setError(null);
+                    router.push('/add-address');
                   }}>
                   <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
                 </Pressable>
               </>
-            ) : null}
-
-            {useNewAddressForm ? (
-              <>
-                <ThemedText style={styles.savedAddressTitle}>Add new address</ThemedText>
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Full Name"
-                  placeholderTextColor="#666"
-                  value={fullName}
-                  onChangeText={setFullName}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone Number"
-                  placeholderTextColor="#666"
-                  value={phoneNumber}
-                  onChangeText={setPhoneNumber}
-                  keyboardType="phone-pad"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email Address"
-                  placeholderTextColor="#666"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Street Address"
-                  placeholderTextColor="#666"
-                  value={street}
-                  onChangeText={setStreet}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="City"
-                  placeholderTextColor="#666"
-                  value={city}
-                  onChangeText={setCity}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Postal Code"
-                  placeholderTextColor="#666"
-                  value={postalCode}
-                  onChangeText={setPostalCode}
-                />
-
+            ) : (
+              <View style={{ marginTop: 12, alignItems: 'center' }}>
+                <ThemedText style={{ color: '#8e9bb2', marginBottom: 12 }}>Add address to view shipping cost</ThemedText>
                 <Pressable
-                  style={styles.defaultToggleRow}
-                  onPress={() => setSetAsDefaultAddress((prev) => !prev)}>
-                  <View style={[styles.defaultToggleBox, setAsDefaultAddress && styles.defaultToggleBoxActive]}>
-                    {setAsDefaultAddress ? <Ionicons name="checkmark" size={14} color="#0a0a0a" /> : null}
-                  </View>
-                  <ThemedText style={styles.defaultToggleText}>Set as default address</ThemedText>
+                  style={[styles.primaryButton, { width: '100%' }]}
+                  onPress={() => router.push('/add-address')}>
+                  <ThemedText style={styles.buttonText}>Add Address</ThemedText>
                 </Pressable>
-              </>
-            ) : null}
+              </View>
+            )}
 
             <Pressable
-              style={[styles.primaryButton, estimatingShipping && styles.disabledButton]}
+              style={[styles.primaryButton, estimatingShipping && styles.disabledButton, savedAddresses.length === 0 && styles.disabledButton]}
               onPress={() => void handleConfirmAddressAndReturn()}
-              disabled={estimatingShipping}>
+              disabled={estimatingShipping || savedAddresses.length === 0}>
               <ThemedText style={styles.buttonText}>{estimatingShipping ? 'Calculating Shipping...' : 'Okay'}</ThemedText>
             </Pressable>
           </>

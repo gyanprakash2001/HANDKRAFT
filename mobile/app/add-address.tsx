@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
-import { addUserAddress } from '@/utils/api';
+import { addUserAddress, getProfileDashboard } from '@/utils/api';
 
 export default function AddAddressScreen() {
   const router = useRouter();
@@ -24,6 +24,24 @@ export default function AddAddressScreen() {
   const [postalCode, setPostalCode] = useState('');
   const [country, setCountry] = useState('India');
   const [isDefault, setIsDefault] = useState(false);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const dashboard = await getProfileDashboard();
+        const profileName = String(dashboard?.user?.name || '').trim();
+        const profileEmail = String(dashboard?.user?.email || '').trim();
+        const profilePhone = String(dashboard?.user?.phoneNumber || '').trim();
+
+        if (profileName) setFullName((prev) => prev || profileName);
+        if (profileEmail) setEmail((prev) => prev || profileEmail);
+        if (profilePhone) setPhoneNumber((prev) => prev || profilePhone);
+      } catch (err) {
+        // silently ignore
+      }
+    };
+    loadProfile();
+  }, []);
 
   const handleSave = async () => {
     if (!fullName.trim() || !phoneNumber.trim() || !email.trim() || !street.trim() || !city.trim() || !postalCode.trim()) {
