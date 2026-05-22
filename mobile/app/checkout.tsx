@@ -170,6 +170,7 @@ export default function CheckoutScreen() {
           setSelectedAddressIndex(null);
           setUseNewAddressForm(true);
           setSetAsDefaultAddress(true);
+          setCartStepFormVisible(true);
         }
 
         if (dashboard.cartItems.length === 0) {
@@ -1048,7 +1049,7 @@ const ScatterView = ScrollView;
                   {!addressSelectedInCart ? (
                     <>
                       <ThemedText style={styles.sectionTitle}>Select Delivery Address</ThemedText>
-                      {savedAddresses.length > 0 ? (
+                      {savedAddresses.length > 0 && (
                         <>
                           <ThemedText style={styles.savedAddressTitle}>Saved addresses</ThemedText>
                           {savedAddresses.map((address, index) => (
@@ -1071,16 +1072,19 @@ const ScatterView = ScrollView;
                               <ThemedText style={styles.savedAddressLine}>{address.postalCode}</ThemedText>
                             </Pressable>
                           ))}
-                          <Pressable
-                            style={[styles.secondaryButton, styles.addNewAddressButton]}
-                            onPress={() => {
-                              setCartStepFormVisible(true);
-                              setUseNewAddressForm(true);
-                            }}>
-                            <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
-                          </Pressable>
                         </>
-                      ) : null}
+                      )}
+
+                      {!cartStepFormVisible && (
+                        <Pressable
+                          style={[styles.secondaryButton, styles.addNewAddressButton, savedAddresses.length === 0 && { marginTop: 12 }]}
+                          onPress={() => {
+                            setCartStepFormVisible(true);
+                            setUseNewAddressForm(true);
+                          }}>
+                          <ThemedText style={styles.secondaryButtonText}>+ Add New Address</ThemedText>
+                        </Pressable>
+                      )}
 
                       {cartStepFormVisible && (
                         <View style={styles.addressFormSection}>
