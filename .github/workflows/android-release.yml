@@ -111,6 +111,19 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon --stacktrace --info \
             | tee "${RUNNER_TEMP}/gradle-release.log"
 
+      - name: Print release signing SHA-1 (for Google Cloud Console)
+        working-directory: mobile/android
+        shell: bash
+        env:
+          HANDKRAFT_UPLOAD_STORE_FILE: ${{ github.workspace }}/mobile/android/app/release.keystore
+          HANDKRAFT_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HANDKRAFT_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          HANDKRAFT_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "=== RELEASE KEYSTORE SHA-1 (add this to Google Cloud Console Android OAuth client) ==="
+          ./gradlew :app:signingReport --no-daemon 2>&1 | grep -A 3 "Variant: release" | grep "SHA1" || true
+          echo "================================================================================"
+
       - name: Upload Gradle build log
         if: always()
         uses: actions/upload-artifact@v4
