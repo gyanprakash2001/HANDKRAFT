@@ -2,7 +2,7 @@
   "expo": {
     "name": "Handkraft",
     "slug": "handkraft",
-    "version": "1.0.28",
+    "version": "1.0.29",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.png",
     "scheme": "handkraft",
@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.handkraft",
-      "buildNumber": "28",
+      "buildNumber": "29",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -23,7 +23,7 @@
         "monochromeImage": "./assets/images/app-icon-android-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 28,
+      "versionCode": 29,
       "package": "com.handkraft"
     },
     "web": {
