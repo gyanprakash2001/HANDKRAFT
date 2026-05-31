@@ -87,10 +87,12 @@ const hasNimbusCredentials = hasNimbusV1Credentials || hasNimbusV2Credentials;
 const configuredCorsOrigins = parseCsv(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '');
 
 const env = {
+  nodeEnv: String(process.env.NODE_ENV || 'development').trim().toLowerCase(),
   port: Number(process.env.PORT || 5000),
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/handkraft',
   cors: {
-    allowAnyOrigin: configuredCorsOrigins.length === 0 || configuredCorsOrigins.includes('*'),
+    allowAnyOrigin: configuredCorsOrigins.includes('*')
+      || (configuredCorsOrigins.length === 0 && String(process.env.NODE_ENV || 'development').trim().toLowerCase() !== 'production'),
     origins: configuredCorsOrigins.filter((origin) => origin !== '*'),
   },
   razorpay: {

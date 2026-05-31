@@ -745,6 +745,7 @@ export default function ProductDetailsScreen() {
                       style={styles.heroImage}
                       // Keep image look consistent with feed.
                       contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
                   </View>
                 );
@@ -871,6 +872,7 @@ export default function ProductDetailsScreen() {
                             source={{ uri: entry.thumbnailUrl || entry.url }}
                             style={styles.reviewGalleryThumb}
                             contentFit="cover"
+                            cachePolicy="memory-disk"
                           />
                           {entry.type === 'video' ? (
                             <View style={styles.reviewMediaVideoTag}>
@@ -940,7 +942,7 @@ export default function ProductDetailsScreen() {
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reviewMediaRow}>
                         {reviewMedia.map((entry, index) => (
                           <View key={`draft-media-${entry.url}-${index}`} style={styles.reviewMediaThumbWrap}>
-                            <Image source={{ uri: entry.thumbnailUrl || entry.url }} style={styles.reviewMediaThumb} contentFit="cover" />
+                            <Image source={{ uri: entry.thumbnailUrl || entry.url }} style={styles.reviewMediaThumb} contentFit="cover" cachePolicy="memory-disk" />
                             {entry.type === 'video' ? (
                               <View style={styles.reviewMediaVideoTag}>
                                 <Ionicons name="videocam" size={10} color="#fff" />
@@ -1049,6 +1051,7 @@ export default function ProductDetailsScreen() {
                                   source={{ uri: entry.thumbnailUrl || entry.url }}
                                   style={styles.reviewMediaThumb}
                                   contentFit="cover"
+                                  cachePolicy="memory-disk"
                                 />
                                 {entry.type === 'video' ? (
                                   <View style={styles.reviewMediaVideoTag}>
@@ -1106,6 +1109,7 @@ export default function ProductDetailsScreen() {
                 source={useRelatedFallback ? RELATED_FALLBACK_IMAGE : { uri: relatedImageUri }}
                 style={styles.relatedImage}
                 contentFit="cover"
+                cachePolicy="memory-disk"
                 onError={() => {
                   if (!relatedImageKey) return;
                   setRelatedImageErrorLevels((prev) => ({ ...prev, [relatedImageKey]: Number(prev[relatedImageKey] || 0) + 1 }));
@@ -1151,6 +1155,7 @@ export default function ProductDetailsScreen() {
                   source={{ uri: reviewViewerCurrentItem.url }}
                   style={styles.mediaViewerImage}
                   contentFit="contain"
+                  cachePolicy="memory-disk"
                 />
               )
             ) : null}

@@ -8,6 +8,7 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const User = require('../models/User');
 const { env } = require('../config/env');
+const IS_DEV = env.nodeEnv !== 'production';
 const { recordCsrContributionForPaidOrder } = require('../services/csr');
 const {
   createShipment,
@@ -49,6 +50,12 @@ const {
 
 const CSR_CONTRIBUTION_PER_ORDER = 1;
 const PLATFORM_FEE_PER_ORDER = 8;
+
+function debugLog(...args) {
+  if (IS_DEV) {
+    console.log(...args);
+  }
+}
 
 // Helper: Calculate tax (assumed 5% for demo)
 function calculateTax(subtotal) {
@@ -1258,7 +1265,7 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
     );
 
     if (shipmentsToBook.length > 0) {
-      console.log(`[PAYMENT][NIMBUS] Attempting booking for ${shipmentsToBook.length} seller shipments...`);
+      debugLog(`[PAYMENT][NIMBUS] Attempting booking for ${shipmentsToBook.length} seller shipments...`);
 
       const sellerIds = Array.from(new Set(
         shipmentsToBook
@@ -1289,7 +1296,7 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
       });
 
       await order.save();
-      console.log('[PAYMENT][NIMBUS] Shipment booking pass completed.');
+      debugLog('[PAYMENT][NIMBUS] Shipment booking pass completed.');
 
       // Audit: shipment booking results
       for (const shipment of shipmentsToBook) {
@@ -1467,46 +1474,46 @@ router.post('/estimate-shipping', auth, async (req, res) => {
 // POST /api/orders - Create a new order from cart
 router.post('/', auth, async (req, res) => {
   try {
-    console.log('[CREATE_ORDER] Starting order creation for user:', req.user);
+    debugLog('[CREATE_ORDER] Starting order creation for user:', req.user);
     const user = await User.findById(req.user._id);
     if (!user) {
-      console.log('[CREATE_ORDER] User not found:', req.user);
+      debugLog('[CREATE_ORDER] User not found:', req.user);
       return res.status(404).json({ message: 'User not found' });
     }
-    console.log('[CREATE_ORDER] Found user, cart items:', user.cartItems?.length || 0);
+    debugLog('[CREATE_ORDER] Found user, cart items:', user.cartItems?.length || 0);
 
     if (!user.cartItems || user.cartItems.length === 0) {
-      console.log('[CREATE_ORDER] Cart is empty for user:', req.user);
+      debugLog('[CREATE_ORDER] Cart is empty for user:', req.user);
       return res.status(400).json({ message: 'Cart is empty' });
     }
 
     const { shippingAddress, notes, selectedShippingQuotes } = req.body;
-    console.log('[CREATE_ORDER] Shipping address provided:', shippingAddress ? 'yes' : 'no');
+    debugLog('[CREATE_ORDER] Shipping address provided:', shippingAddress ? 'yes' : 'no');
 
     // Validate shipping address
     if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phoneNumber 
         || !shippingAddress.email || !shippingAddress.street || !shippingAddress.city 
         || !shippingAddress.postalCode || !shippingAddress.country) {
-      console.log('[CREATE_ORDER] Incomplete shipping address:', shippingAddress);
+      debugLog('[CREATE_ORDER] Incomplete shipping address:', shippingAddress);
       return res.status(400).json({ message: 'Incomplete shipping address' });
     }
 
     // Build order items and calculate subtotal
-    console.log('[CREATE_ORDER] Building order items...');
+    debugLog('[CREATE_ORDER] Building order items...');
     const orderItems = [];
     let subtotal = 0;
     const sellerCache = new Map();
 
     for (const cartItem of user.cartItems) {
-      console.log('[CREATE_ORDER] Processing cart item:', cartItem.product, 'qty:', cartItem.quantity);
+      debugLog('[CREATE_ORDER] Processing cart item:', cartItem.product, 'qty:', cartItem.quantity);
       const product = await Product.findById(cartItem.product);
       if (!product) {
-        console.log('[CREATE_ORDER] Product not found:', cartItem.product);
+        debugLog('[CREATE_ORDER] Product not found:', cartItem.product);
         return res.status(404).json({ message: `Product ${cartItem.product} not found` });
       }
 
       if (product.stock < cartItem.quantity) {
-        console.log('[CREATE_ORDER] Insufficient stock for', product._id, '- available:', product.stock, 'requested:', cartItem.quantity);
+        debugLog('[CREATE_ORDER] Insufficient stock for', product._id, '- available:', product.stock, 'requested:', cartItem.quantity);
         return res.status(400).json({ message: `Insufficient stock for ${product.title}` });
       }
 
@@ -1587,10 +1594,10 @@ router.post('/', auth, async (req, res) => {
     const shippingCost = roundCurrency(shippingQuote.shippingCost);
     const checkoutTotal = calculateCheckoutTotal(subtotal, shippingCost);
     const expectedDeliveryDate = computeExpectedDeliveryDateFromShippingQuote(shippingQuote);
-    console.log('[CREATE_ORDER] Calculated totals - subtotal:', subtotal, 'shipping:', shippingCost, 'platformFee:', checkoutTotal.platformFee, 'csr:', checkoutTotal.csrContributionAmount, 'total:', checkoutTotal.totalAmount);
+    debugLog('[CREATE_ORDER] Calculated totals - subtotal:', subtotal, 'shipping:', shippingCost, 'platformFee:', checkoutTotal.platformFee, 'csr:', checkoutTotal.csrContributionAmount, 'total:', checkoutTotal.totalAmount);
 
     // Create order
-    console.log('[CREATE_ORDER] Creating order document...');
+    debugLog('[CREATE_ORDER] Creating order document...');
     const order = new Order({
       user: user._id,
       items: orderItems,
@@ -1610,7 +1617,7 @@ router.post('/', auth, async (req, res) => {
     });
 
     // Validate order items have sellers before building shipments
-    console.log('[CREATE_ORDER] Validating order sellers...');
+    debugLog('[CREATE_ORDER] Validating order sellers...');
     const shipmentValidation = buildAndValidateShipments(orderItems, order._id);
     
     if (!shipmentValidation.isValid) {
@@ -1645,9 +1652,9 @@ router.post('/', auth, async (req, res) => {
       };
     });
 
-    console.log('[CREATE_ORDER] Saving order...');
+    debugLog('[CREATE_ORDER] Saving order...');
     await order.save();
-    console.log('[CREATE_ORDER] Order saved successfully:', order._id);
+    debugLog('[CREATE_ORDER] Order saved successfully:', order._id);
 
     // Audit: order created + shipping quote
     logOrderAudit({
@@ -1833,7 +1840,7 @@ router.post('/:id/pay/razorpay-order', auth, async (req, res) => {
 router.post('/:id/pay', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('[PAYMENT] Starting payment process for order:', id, 'user:', req.user);
+    debugLog('[PAYMENT] Starting payment process for order:', id, 'user:', req.user);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: 'Invalid order id' });
@@ -2199,11 +2206,12 @@ router.get('/user/me', auth, async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id })
       .populate('items.product', 'title price')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     // Include a lightweight sellerShipments summary for tracking info
     const ordersWithTracking = (orders || []).map((order) => {
-      const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+      const orderObj = { ...order };
       orderObj.sellerShipments = (orderObj.sellerShipments || []).map((s) => ({
         seller: s.seller,
         localShipmentRef: s.localShipmentRef || '',
@@ -2227,8 +2235,9 @@ router.get('/user/me', auth, async (req, res) => {
 router.get('/seller/me', auth, async (req, res) => {
   try {
     const sellerId = String(req.user._id);
-    console.log('[SELLER_ORDERS][DEBUG] sellerId:', sellerId, 'typeof:', typeof sellerId);
-    console.log('[SELLER_ORDERS][DEBUG] sellerId:', sellerId, 'typeof:', typeof sellerId);
+    if (IS_DEV) {
+      console.log('[SELLER_ORDERS][DEBUG] sellerId:', sellerId, 'typeof:', typeof sellerId);
+    }
 
     // Defensive check: if sellerId is not a 24-char hex string something went wrong upstream.
     const isHex24 = /^[0-9a-fA-F]{24}$/.test(sellerId);
@@ -2241,16 +2250,21 @@ router.get('/seller/me', auth, async (req, res) => {
           return { error: 'failed to serialize req.user' };
         }
       })();
-      return res.status(500).json({ message: 'Invalid seller id computed', debug: { sellerId, sellerIdType: typeof sellerId, sampleUser } });
-    }
-    try {
-      console.log('[SELLER_ORDERS][DEBUG] req.user (truncated):', {
-        id: req.user?._id,
-        name: req.user?.name,
-        email: req.user?.email,
+      return res.status(500).json({
+        message: 'Invalid seller id computed',
+        ...(IS_DEV ? { debug: { sellerId, sellerIdType: typeof sellerId, sampleUser } } : {}),
       });
-    } catch (e) {
-      console.log('[SELLER_ORDERS][DEBUG] failed to log req.user:', e?.message || e);
+    }
+
+    if (IS_DEV) {
+      try {
+        console.log('[SELLER_ORDERS][DEBUG] req.user (truncated):', {
+          id: req.user?._id,
+          email: req.user?.email,
+        });
+      } catch (e) {
+        console.log('[SELLER_ORDERS][DEBUG] failed to log req.user:', e?.message || e);
+      }
     }
 
     // Build safe match: match either real ObjectId equality OR string fields containing the hex id
@@ -2262,7 +2276,7 @@ router.get('/seller/me', auth, async (req, res) => {
     // Match stringified seller fields that contain the hex id (covers malformed stringified user objects)
     matchOr.push({ 'items.seller': new RegExp(escapeRegex(sellerHex)) });
 
-    console.log('[SELLER_ORDERS][DEBUG] Aggregation matchOr (raw):', matchOr);
+    debugLog('[SELLER_ORDERS][DEBUG] Aggregation matchOr (raw):', matchOr);
 
     // Use the raw MongoDB collection aggregation to avoid Mongoose casting of schema paths
     const agg = await mongoose.connection.db
@@ -2276,7 +2290,7 @@ router.get('/seller/me', auth, async (req, res) => {
       .toArray();
 
     const orderIds = (agg || []).map((a) => a._id).filter(Boolean);
-    console.log('[SELLER_ORDERS][DEBUG] Matched order ids count (raw):', orderIds.length);
+    debugLog('[SELLER_ORDERS][DEBUG] Matched order ids count (raw):', orderIds.length);
 
     let orders = [];
     if (orderIds.length > 0) {
@@ -2393,6 +2407,7 @@ router.patch('/seller/:orderId/items/:itemIndex/status', auth, async (req, res) 
       return res.status(403).json({ message: 'Unauthorized to update this item' });
     }
 
+    const currentStatus = String(item.fulfillmentStatus || 'new').trim().toLowerCase();
     item.fulfillmentStatus = nextStatus;
     item.trackingEvents = Array.isArray(item.trackingEvents) ? item.trackingEvents : [];
     item.trackingEvents.push({
@@ -2620,7 +2635,7 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid order id' });
     }
 
-    const order = await Order.findById(id).populate('items.product');
+    const order = await Order.findById(id).populate('items.product').lean();
 
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
@@ -2632,7 +2647,7 @@ router.get('/:id', auth, async (req, res) => {
     }
 
     // Include shipment tracking summary for buyer
-    const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+    const orderObj = { ...order };
     orderObj.sellerShipments = (orderObj.sellerShipments || []).map((s) => ({
       seller: s.seller,
       localShipmentRef: s.localShipmentRef || '',

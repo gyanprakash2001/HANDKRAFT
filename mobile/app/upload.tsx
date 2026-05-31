@@ -1519,7 +1519,7 @@ export default function UploadScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.samplePackagingRow}>
             {SAMPLE_PACKAGING_IMAGES.map((source, index) => (
               <View key={`sample-packaging-${index}`} style={styles.samplePackagingCard}>
-                <ExpoImage source={source} style={styles.samplePackagingImage} contentFit="cover" />
+                <ExpoImage source={source} style={styles.samplePackagingImage} contentFit="cover" cachePolicy="memory-disk" />
               </View>
             ))}
           </ScrollView>
@@ -1763,7 +1763,7 @@ export default function UploadScreen() {
                   }}>
                   {item.type === 'image' ? (
                     <View style={styles.gridImageWrap}>
-                      <ExpoImage source={{ uri: item.url }} style={styles.previewImage} contentFit="cover" />
+                      <ExpoImage source={{ uri: item.url }} style={styles.previewImage} contentFit="cover" cachePolicy="memory-disk" />
                     </View>
                   ) : (
                     <View style={styles.videoPreviewStub}>
@@ -1854,7 +1854,7 @@ export default function UploadScreen() {
         {isLocalTabAvatar ? (
           <LocalAvatar id={userAvatar || 'local:avatar01'} size={36} style={styles.tabAvatar} />
         ) : tabAvatarSource ? (
-          <ExpoImage source={tabAvatarSource} style={styles.tabAvatar} contentFit="cover" />
+          <ExpoImage source={tabAvatarSource} style={styles.tabAvatar} contentFit="cover" cachePolicy="memory-disk" />
         ) : (
           <Ionicons name="person-outline" size={26} color="#fff" />
         )}

@@ -139,6 +139,7 @@ export default function SellerPostsScreen() {
             source={useFallback ? POST_FALLBACK_IMAGE : { uri: imageUri }}
             style={styles.postImage}
             contentFit="cover"
+            cachePolicy="memory-disk"
             onError={() => handlePostImageError(imageKey)}
           />
         </View>

@@ -181,6 +181,7 @@ export default function SellerStageOrdersScreen() {
               source={{ uri: resolveImageUri(firstItemImage) }}
               style={styles.orderThumbnail}
               contentFit="cover"
+              cachePolicy="memory-disk"
             />
           ) : (
             <View style={[styles.orderThumbnail, styles.orderThumbnailPlaceholder]}>
@@ -270,6 +271,7 @@ export default function SellerStageOrdersScreen() {
                         source={{ uri: resolveImageUri(orderItem.image) }}
                         style={styles.itemImage}
                         contentFit="cover"
+                        cachePolicy="memory-disk"
                       />
                     ) : (
                       <View style={[styles.itemImage, styles.itemImagePlaceholder]}>

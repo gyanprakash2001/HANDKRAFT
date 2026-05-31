@@ -77,6 +77,7 @@ export function CartDrawer({
                     source={{ uri: resolveCartImageSource(item.product) }}
                     style={styles.itemThumbnail}
                     contentFit="cover"
+                    cachePolicy="memory-disk"
                   />
 
                   <View style={styles.itemInfo}>

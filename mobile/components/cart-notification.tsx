@@ -78,6 +78,7 @@ export function CartNotification({
                 source={{ uri: resolveCartImageSource(entry.product) }}
                 style={styles.itemImage}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
 
               <View style={styles.infoSection}>
