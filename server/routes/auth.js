@@ -93,7 +93,7 @@ router.post('/signup', async (req, res) => {
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret', {
       expiresIn: '7d',
     });
-    res.json({ token, user: buildPublicUserPayload(user) });
+    res.json({ token, user: buildPublicUserPayload(user), isNewUser: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });
@@ -120,7 +120,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret', {
       expiresIn: '7d',
     });
-    res.json({ token, user: buildPublicUserPayload(user) });
+    res.json({ token, user: buildPublicUserPayload(user), isNewUser: false });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });
@@ -221,6 +221,7 @@ router.post('/google', async (req, res) => {
 
     // Find existing user by googleId or email
     let user = await User.findOne({ $or: [{ googleId: sub }, { email: normalizedEmail }] });
+    const isNewUser = !user;
     if (!user) {
       // Create a new user for first-time Google sign-in
       user = new User({
@@ -284,7 +285,7 @@ router.post('/google', async (req, res) => {
       expiresIn: '7d',
     });
 
-    res.json({ token, user: buildPublicUserPayload(user) });
+    res.json({ token, user: buildPublicUserPayload(user), isNewUser });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });

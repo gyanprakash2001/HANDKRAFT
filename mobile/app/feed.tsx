@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PanGestureHandler, PanGestureHandlerStateChangeEvent, State } from 'react-native-gesture-handler';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -467,6 +468,41 @@ export default function FeedScreen() {
     loadFeed(true);
   }, [loadFeed]);
 
+  const switchCategoryBySwipe = useCallback((direction: 'next' | 'prev') => {
+    const currentIndex = BUYER_FEED_CATEGORIES.indexOf(selectedCategory);
+    if (currentIndex < 0) return;
+
+    const lastIndex = BUYER_FEED_CATEGORIES.length - 1;
+    const nextIndex = direction === 'next'
+      ? (currentIndex >= lastIndex ? 0 : currentIndex + 1)
+      : (currentIndex <= 0 ? lastIndex : currentIndex - 1);
+
+    if (nextIndex !== currentIndex) {
+      setSelectedCategory(BUYER_FEED_CATEGORIES[nextIndex]);
+    }
+  }, [selectedCategory]);
+
+  const onCategorySwipeStateChange = useCallback((event: PanGestureHandlerStateChangeEvent) => {
+    const { state, translationX, translationY, velocityX } = event.nativeEvent;
+    if (state !== State.END) return;
+
+    const absDx = Math.abs(translationX);
+    const absDy = Math.abs(translationY);
+
+    if (absDx < 48 || absDx < absDy * 1.1) return;
+
+    const isMovingRight = translationX > 0;
+    const isMovingLeft = translationX < 0;
+    const hasHighVelocityRight = velocityX > 450;
+    const hasHighVelocityLeft = velocityX < -450;
+
+    if (isMovingRight && !hasHighVelocityLeft) {
+      switchCategoryBySwipe('prev');
+    } else if (isMovingLeft && !hasHighVelocityRight) {
+      switchCategoryBySwipe('next');
+    }
+  }, [switchCategoryBySwipe]);
+
   useEffect(() => {
     const unsub = currentUser.subscribe((p) => {
       try { setUserAvatar(p?.avatarUrl || null); } catch { /* ignore */ }
@@ -768,26 +804,33 @@ export default function FeedScreen() {
           ))}
         </ScrollView>
       ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoryRow}
-          style={styles.categoryScroller}>
-          {BUYER_FEED_CATEGORIES.map((category) => (
-            <Pressable
-              key={category}
-              style={({ pressed }) => [
-                styles.categoryChip,
-                selectedCategory === category && styles.categoryChipActive,
-                pressed && styles.categoryChipPressed,
-              ]}
-              onPress={() => setSelectedCategory(category)}>
-              <ThemedText style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]}>
-                {category}
-              </ThemedText>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <PanGestureHandler
+          activeOffsetX={[-16, 16]}
+          failOffsetY={[-14, 14]}
+          onHandlerStateChange={onCategorySwipeStateChange}>
+          <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoryRow}
+              style={styles.categoryScroller}>
+              {BUYER_FEED_CATEGORIES.map((category) => (
+                <Pressable
+                  key={category}
+                  style={({ pressed }) => [
+                    styles.categoryChip,
+                    selectedCategory === category && styles.categoryChipActive,
+                    pressed && styles.categoryChipPressed,
+                  ]}
+                  onPress={() => setSelectedCategory(category)}>
+                  <ThemedText style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]}>
+                    {category}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </PanGestureHandler>
       )}
 
       <ScrollView

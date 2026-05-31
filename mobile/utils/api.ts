@@ -302,6 +302,7 @@ export interface SellerPickupAddress {
 interface AuthResponse {
   token: string;
   user: AppUser;
+  isNewUser?: boolean;
 }
 
 export interface ProductMediaItem {

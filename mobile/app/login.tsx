@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Modal, Animated } from 'react-native';
+import { StyleSheet, TextInput, Button, View, Alert, Modal, ActivityIndicator } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,7 +21,9 @@ export default function LoginScreen() {
 
   const [successVisible, setSuccessVisible] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [successDetail, setSuccessDetail] = useState('');
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [authLoading, setAuthLoading] = useState<'login' | 'google' | null>(null);
 
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
@@ -36,13 +38,25 @@ export default function LoginScreen() {
     selectAccount: true,
   } as any);
 
+  const showSuccess = useCallback((title: string, detail: string) => {
+    setSuccessMessage(title);
+    setSuccessDetail(detail);
+    setSuccessVisible(true);
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    successTimerRef.current = setTimeout(() => {
+      setSuccessVisible(false);
+      router.replace('/feed');
+    }, 1200);
+  }, [router]);
+
   const completeGoogleAuth = useCallback(async (idToken?: string, accessToken?: string) => {
-    const { token, user } = await signInWithGoogle(idToken, accessToken);
+    const { token, user, isNewUser } = await signInWithGoogle(idToken, accessToken);
     await saveToken(token);
     if (user) currentUser.setProfile(user);
 
     const hasPhoneNumber = Boolean(String(user?.phoneNumber || '').trim());
     if (!hasPhoneNumber) {
+      setAuthLoading(null);
       Alert.alert(
         'Add phone number',
         'Signed in successfully. We could not fetch your phone from Google. Add it now.',
@@ -54,27 +68,26 @@ export default function LoginScreen() {
       return;
     }
 
-    setSuccessMessage('Logged in with Google');
-    setSuccessVisible(true);
-    if (successTimerRef.current) clearTimeout(successTimerRef.current);
-    successTimerRef.current = setTimeout(() => {
-      setSuccessVisible(false);
-      router.replace('/feed');
-    }, 1200);
-  }, [router]);
+    const isNew = typeof isNewUser === 'boolean' ? isNewUser : false;
+    const successTitle = isNew ? 'Success login' : 'Welcome Back';
+    const successDetailText = isNew ? 'Your account is ready.' : 'Great to see you again.';
+    setAuthLoading(null);
+    showSuccess(successTitle, successDetailText);
+  }, [router, showSuccess]);
 
   const handleSubmit = async () => {
     try {
-      const { token } = await loginUser(email, password);
+      if (authLoading) return;
+      setAuthLoading('login');
+      const { token, isNewUser } = await loginUser(email, password);
       await saveToken(token);
-      setSuccessMessage('Logged in');
-      setSuccessVisible(true);
-      if (successTimerRef.current) clearTimeout(successTimerRef.current);
-      successTimerRef.current = setTimeout(() => {
-        setSuccessVisible(false);
-        router.replace('/feed');
-      }, 1200);
+      const isNew = typeof isNewUser === 'boolean' ? isNewUser : false;
+      const successTitle = isNew ? 'Success login' : 'Welcome Back';
+      const successDetailText = isNew ? 'Your account is ready.' : 'Great to see you again.';
+      setAuthLoading(null);
+      showSuccess(successTitle, successDetailText);
     } catch (err: any) {
+      setAuthLoading(null);
       Alert.alert('Error', err.message || 'Login failed');
     }
   };
@@ -88,7 +101,11 @@ export default function LoginScreen() {
   }, []);
 
   useEffect(() => {
-    if (response?.type !== 'success') return;
+    if (!response) return;
+    if (response.type !== 'success') {
+      if (authLoading === 'google') setAuthLoading(null);
+      return;
+    }
 
     (async () => {
       try {
@@ -102,16 +119,19 @@ export default function LoginScreen() {
         if (!idToken && !accessToken) throw new Error('No id/access token returned from Google');
         await completeGoogleAuth(idToken || undefined, accessToken || undefined);
       } catch (err: any) {
+        setAuthLoading(null);
         Alert.alert('Google Sign-in Error', err.message || 'Failed to sign in with Google');
       }
     })();
-  }, [response, completeGoogleAuth]);
+  }, [response, completeGoogleAuth, authLoading]);
 
   const handleGoogleSignIn = async () => {
     if (!request) {
       Alert.alert('Google Sign-in Error', 'Google sign-in is initializing. Please try again.');
       return;
     }
+    if (authLoading) return;
+    setAuthLoading('google');
 
     // Debug: log OAuth request parameters so Metro shows them when sign-in is initiated
     try {
@@ -139,19 +159,27 @@ export default function LoginScreen() {
           return;
         } catch (err) {
           console.warn('Native Google sign-in failed', err);
+          setAuthLoading(null);
           Alert.alert('Google Sign-in Error', getNativeGoogleErrorMessage(err));
           return;
         }
       }
 
-      await promptAsync(useProxyForExpo ? ({ useProxy: true } as any) : undefined);
+      const result = await promptAsync(useProxyForExpo ? ({ useProxy: true } as any) : undefined);
+      if (result?.type !== 'success') {
+        setAuthLoading(null);
+      }
     } catch (firstError) {
       console.warn('Google AuthSession sign-in failed', firstError);
-
+      setAuthLoading(null);
       const authSessionMessage = firstError instanceof Error ? firstError.message : 'Failed to start Google sign-in.';
       Alert.alert('Google Sign-in Error', authSessionMessage);
     }
   };
+
+  const isLoginLoading = authLoading === 'login';
+  const isGoogleLoading = authLoading === 'google';
+  const isAnyLoading = authLoading !== null;
 
   return (
     <ThemedView style={styles.container}>
@@ -164,11 +192,13 @@ export default function LoginScreen() {
         <View style={styles.successBackdrop}>
           <View style={styles.successCard}>
             <View style={styles.successIconWrap}>
-              <Ionicons name="checkmark-circle" size={56} color="#9df0a2" />
+              <Ionicons name="checkmark" size={32} color="#0a0a0a" />
             </View>
-            <ThemedText style={styles.successTitle}>Success</ThemedText>
-            <ThemedText style={styles.successText}>{successMessage}</ThemedText>
-            <View style={styles.successDot} />
+            <ThemedText style={styles.successTitle}>{successMessage}</ThemedText>
+            <ThemedText style={styles.successText}>{successDetail}</ThemedText>
+            <View style={styles.successTag}>
+              <ThemedText style={styles.successTagText}>Taking you to your feed</ThemedText>
+            </View>
           </View>
         </View>
       </Modal>
@@ -191,9 +221,27 @@ export default function LoginScreen() {
         onChangeText={setPassword}
       />
       <View style={styles.buttonContainer}>
-        <Button title="Log In" onPress={handleSubmit} />
+        <View style={styles.buttonWrap}>
+          <Button title={isLoginLoading ? ' ' : 'Log In'} onPress={handleSubmit} disabled={isAnyLoading} />
+          {isLoginLoading ? (
+            <View style={styles.buttonSpinner}>
+              <ActivityIndicator color="#ffffff" />
+            </View>
+          ) : null}
+        </View>
         <View style={styles.buttonSpacer} />
-        <Button title="Sign in with Google" onPress={handleGoogleSignIn} disabled={!request} />
+        <View style={styles.buttonWrap}>
+          <Button
+            title={isGoogleLoading ? ' ' : 'Sign in with Google'}
+            onPress={handleGoogleSignIn}
+            disabled={!request || isAnyLoading}
+          />
+          {isGoogleLoading ? (
+            <View style={styles.buttonSpinner}>
+              <ActivityIndicator color="#ffffff" />
+            </View>
+          ) : null}
+        </View>
       </View>
       <Link href="/signup" style={styles.link}>
         <ThemedText type="link">Don&apos;t have an account? Sign up</ThemedText>
@@ -221,6 +269,18 @@ const styles = StyleSheet.create({
   buttonContainer: {
     marginTop: 16,
   },
+  buttonWrap: {
+    position: 'relative',
+  },
+  buttonSpinner: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   buttonSpacer: {
     height: 12,
   },
@@ -230,23 +290,23 @@ const styles = StyleSheet.create({
   },
   successBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.68)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   successCard: {
-    paddingHorizontal: 24,
-    paddingVertical: 32,
-    borderRadius: 16,
+    paddingHorizontal: 26,
+    paddingVertical: 28,
+    borderRadius: 18,
     alignItems: 'center',
-    backgroundColor: '#111a27',
+    backgroundColor: '#0b1118',
     borderWidth: 1,
-    borderColor: 'rgba(157, 240, 162, 0.15)',
+    borderColor: '#1e2b38',
     minWidth: 280,
     maxWidth: '82%',
     shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
+    shadowOpacity: 0.38,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 12 },
     elevation: 12,
   },
@@ -256,29 +316,41 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(157, 240, 162, 0.08)',
-    borderWidth: 0,
+    backgroundColor: '#9df0a2',
+    shadowColor: '#9df0a2',
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
   },
   successTitle: {
-    marginTop: 16,
-    color: '#ffffff',
+    marginTop: 14,
+    color: '#f5fbff',
     fontWeight: '700',
     fontSize: 20,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   successText: {
-    marginTop: 8,
-    color: '#b8c9dd',
+    marginTop: 6,
+    color: '#9fb0c1',
     fontWeight: '500',
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 19,
   },
-  successDot: {
+  successTag: {
     marginTop: 14,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#9df0a2',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(157, 240, 162, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(157, 240, 162, 0.3)',
+  },
+  successTagText: {
+    color: '#9df0a2',
+    fontWeight: '700',
+    fontSize: 11,
+    letterSpacing: 0.2,
   },
 });
