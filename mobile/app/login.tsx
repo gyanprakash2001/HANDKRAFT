@@ -103,7 +103,7 @@ export default function LoginScreen() {
   useEffect(() => {
     if (!response) return;
     if (response.type !== 'success') {
-      if (authLoading === 'google') setAuthLoading(null);
+      setAuthLoading(null);
       return;
     }
 
@@ -123,7 +123,7 @@ export default function LoginScreen() {
         Alert.alert('Google Sign-in Error', err.message || 'Failed to sign in with Google');
       }
     })();
-  }, [response, completeGoogleAuth, authLoading]);
+  }, [response, completeGoogleAuth]);
 
   const handleGoogleSignIn = async () => {
     if (!request) {

@@ -97,7 +97,7 @@ export default function SignupScreen() {
   useEffect(() => {
     if (!response) return;
     if (response.type !== 'success') {
-      if (authLoading === 'google') setAuthLoading(null);
+      setAuthLoading(null);
       return;
     }
 
@@ -117,7 +117,7 @@ export default function SignupScreen() {
         Alert.alert('Google Sign-up Error', err.message || 'Failed to sign up with Google');
       }
     })();
-  }, [response, completeGoogleAuth, authLoading]);
+  }, [response, completeGoogleAuth]);
 
   const handleGoogleSignUp = async () => {
     if (!request) {
