@@ -1014,6 +1014,7 @@ const ScatterView = ScrollView;
                       source={{ uri: resolveCartImageSource(item.product) }}
                       style={styles.itemImage}
                       contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
                     <View style={styles.itemDetails}>
                       <ThemedText numberOfLines={2} style={styles.itemTitle}>{item.product.title}</ThemedText>

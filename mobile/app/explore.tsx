@@ -544,6 +544,7 @@ export default function ExploreScreen() {
             source={{ uri: resolveProductImageSource(item) }}
             style={[styles.feedCardImage, { aspectRatio: ratio }]}
             contentFit="cover"
+            cachePolicy="memory-disk"
           />
         </Pressable>
         {pricing.hasDiscount ? (
@@ -725,7 +726,7 @@ export default function ExploreScreen() {
           {isLocalTabAvatar ? (
             <LocalAvatar id={userAvatar || 'local:avatar01'} size={36} style={styles.tabAvatar} />
           ) : tabAvatarSource ? (
-            <Image source={tabAvatarSource} style={styles.tabAvatar} contentFit="cover" />
+            <Image source={tabAvatarSource} style={styles.tabAvatar} contentFit="cover" cachePolicy="memory-disk" />
           ) : (
             <Ionicons name="person-outline" size={26} color="#fff" />
           )}

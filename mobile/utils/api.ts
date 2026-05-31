@@ -5,6 +5,19 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 const INVALID_ASSET_VALUES = new Set(['null', 'undefined', 'nan']);
+const IS_DEV = process.env.NODE_ENV !== 'production';
+
+function devLog(...args: unknown[]) {
+  if (IS_DEV) {
+    console.log(...args);
+  }
+}
+
+function devWarn(...args: unknown[]) {
+  if (IS_DEV) {
+    console.warn(...args);
+  }
+}
 
 function sanitizeAssetValue(value: unknown) {
   const raw = String(value ?? '').trim();
@@ -68,21 +81,47 @@ function getCandidateBaseUrls() {
 const API_BASE_URLS = getCandidateBaseUrls();
 const API_BASE_URL = API_BASE_URLS[0] || 'http://localhost:5000/api';
 const FETCH_BASE_URLS = API_BASE_URLS.length ? API_BASE_URLS : [API_BASE_URL];
-const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, '');
+let preferredFetchBaseUrl = API_BASE_URL;
+let API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, '');
 
 let API_ROOT_PROTOCOL = '';
 let API_ROOT_HOST = '';
 
-try {
-  const parsedApiRoot = new URL(API_ROOT_URL);
-  API_ROOT_PROTOCOL = parsedApiRoot.protocol;
-  API_ROOT_HOST = parsedApiRoot.host;
-} catch {
-  API_ROOT_PROTOCOL = '';
-  API_ROOT_HOST = '';
+function updateApiRootFromBaseUrl(baseUrl: string) {
+  API_ROOT_URL = baseUrl.replace(/\/api\/?$/, '');
+
+  try {
+    const parsedApiRoot = new URL(API_ROOT_URL);
+    API_ROOT_PROTOCOL = parsedApiRoot.protocol;
+    API_ROOT_HOST = parsedApiRoot.host;
+  } catch {
+    API_ROOT_PROTOCOL = '';
+    API_ROOT_HOST = '';
+  }
 }
 
-console.log(`[API] Base URL candidates: ${API_BASE_URLS.join(' -> ')}`);
+function getFetchBaseUrlOrder() {
+  const preferred = FETCH_BASE_URLS.includes(preferredFetchBaseUrl)
+    ? preferredFetchBaseUrl
+    : FETCH_BASE_URLS[0];
+
+  return [
+    preferred,
+    ...FETCH_BASE_URLS.filter((baseUrl) => baseUrl !== preferred),
+  ].filter(Boolean);
+}
+
+function markFetchBaseUrlHealthy(baseUrl: string) {
+  preferredFetchBaseUrl = baseUrl;
+  updateApiRootFromBaseUrl(baseUrl);
+}
+
+function getActiveApiBaseUrl() {
+  return preferredFetchBaseUrl || API_BASE_URL;
+}
+
+updateApiRootFromBaseUrl(API_BASE_URL);
+devLog(`[API] Base URL candidates: ${API_BASE_URLS.join(' -> ')}`);
 
 export function normalizeAssetUrl(value?: string | null) {
   const raw = sanitizeAssetValue(value);
@@ -205,9 +244,11 @@ function normalizeProductItem(item: any): ProductItem {
 async function safeFetch(path: string, opts: RequestInit = {}) {
   let lastError: any = null;
 
-  for (const baseUrl of FETCH_BASE_URLS) {
+  for (const baseUrl of getFetchBaseUrlOrder()) {
     try {
-      return await fetch(`${baseUrl}${path}`, opts);
+      const response = await fetch(`${baseUrl}${path}`, opts);
+      markFetchBaseUrlHealthy(baseUrl);
+      return response;
     } catch (err: any) {
       lastError = err;
     }
@@ -2295,7 +2336,7 @@ async function fetchFormUpload(url: string, uploadTarget: string, fieldName: str
     // Let fetch set Content-Type and boundary for multipart form data
     if (fetchHeaders['Content-Type']) delete fetchHeaders['Content-Type'];
 
-    console.log('[fetchFormUpload] attempting fetch fallback', { url, uploadTarget, fieldName, filename, mimeType });
+    devLog('[fetchFormUpload] attempting fetch fallback', { url, uploadTarget, fieldName, filename, mimeType });
 
     try {
       const res = await fetch(url, {
@@ -2321,9 +2362,9 @@ async function fetchFormUpload(url: string, uploadTarget: string, fieldName: str
       } catch {
         if (raw) message = raw;
       }
-      console.warn('[fetchFormUpload] multipart FormData upload responded with non-OK, will try JSON base64 fallback', { status: res.status, message });
+      devWarn('[fetchFormUpload] multipart FormData upload responded with non-OK, will try JSON base64 fallback', { status: res.status, message });
     } catch (e) {
-      console.warn('[fetchFormUpload] multipart FormData upload failed', String(e));
+      devWarn('[fetchFormUpload] multipart FormData upload failed', String(e));
     }
 
     // JSON Base64 fallback: some runtimes can't send multipart correctly. Read file as base64 and POST JSON.
@@ -2331,7 +2372,7 @@ async function fetchFormUpload(url: string, uploadTarget: string, fieldName: str
       const filename = String(uploadTarget).split('/').pop() || `upload-${Date.now()}`;
       const mimeType = guessMimeTypeFromName(filename);
       const encodingOption = (FileSystem as any).EncodingType?.Base64 ?? 'base64';
-      console.log('[fetchFormUpload] attempting JSON base64 fallback', { url, uploadTarget, filename, mimeType });
+      devLog('[fetchFormUpload] attempting JSON base64 fallback', { url, uploadTarget, filename, mimeType });
       const base64 = await (FileSystem as any).readAsStringAsync?.(uploadTarget, { encoding: encodingOption } as any);
       if (!base64) throw new Error('Could not read file as base64');
 
@@ -2356,11 +2397,11 @@ async function fetchFormUpload(url: string, uploadTarget: string, fieldName: str
         return {};
       }
     } catch (jsonErr) {
-      console.warn('[fetchFormUpload] fallback failed', String(jsonErr));
+      devWarn('[fetchFormUpload] fallback failed', String(jsonErr));
       throw jsonErr;
     }
   } catch (e) {
-    console.warn('[fetchFormUpload] fallback failed', String(e));
+    devWarn('[fetchFormUpload] fallback failed', String(e));
     throw e;
   }
 }
@@ -2370,7 +2411,7 @@ export async function uploadChatImage(conversationId: string, fileUri: string): 
   const headers: Record<string, string> = {};
   if (headersObj && headersObj.Authorization) headers.Authorization = headersObj.Authorization;
 
-  const url = `${API_BASE_URL}/chat/conversations/${conversationId}/messages`;
+  const url = `${getActiveApiBaseUrl()}/chat/conversations/${conversationId}/messages`;
 
   const prepared = await prepareLocalUploadUri(fileUri);
   const uploadTarget = prepared.uri;
@@ -2386,31 +2427,31 @@ export async function uploadChatImage(conversationId: string, fileUri: string): 
   if (uploadType) uploadOpts.uploadType = uploadType;
 
   try {
-    console.log('[uploadChatImage] uploading', { url, uploadTarget, tempPath: prepared.tempPath });
+    devLog('[uploadChatImage] uploading', { url, uploadTarget, tempPath: prepared.tempPath });
     try {
       const info = await (FileSystem as any).getInfoAsync?.(uploadTarget) ;
-      console.log('[uploadChatImage] file info', info);
+      devLog('[uploadChatImage] file info', info);
     } catch (e) {
-      console.log('[uploadChatImage] getInfoAsync failed', String(e));
+      devLog('[uploadChatImage] getInfoAsync failed', String(e));
     }
 
     try {
       const res = await FileSystem.uploadAsync(url, uploadTarget, uploadOpts);
       if (res.status >= 200 && res.status < 300) {
         const data = res.body ? JSON.parse(res.body) : {};
-        console.log('[uploadChatImage] upload response', { status: res.status, body: data });
+        devLog('[uploadChatImage] upload response', { status: res.status, body: data });
         return data.message;
       }
 
       let body = res.body || '';
       try {
         const parsed = body ? JSON.parse(body) : {};
-        console.warn('[uploadChatImage] primary upload failed, falling back', { status: res.status, body: parsed });
+        devWarn('[uploadChatImage] primary upload failed, falling back', { status: res.status, body: parsed });
       } catch (err) {
-        console.warn('[uploadChatImage] primary upload failed, falling back', { status: res.status, body });
+        devWarn('[uploadChatImage] primary upload failed, falling back', { status: res.status, body });
       }
     } catch (e) {
-      console.warn('[uploadChatImage] uploadAsync failed, attempting fetch fallback', String(e));
+      devWarn('[uploadChatImage] uploadAsync failed, attempting fetch fallback', String(e));
     }
 
     const fallback = await fetchFormUpload(url, uploadTarget, 'image', headers);
@@ -2433,7 +2474,7 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
   const headers: Record<string, string> = {};
   if (headersObj && headersObj.Authorization) headers.Authorization = headersObj.Authorization;
 
-  const url = `${API_BASE_URL}/products/media/upload-file`;
+  const url = `${getActiveApiBaseUrl()}/products/media/upload-file`;
   const prepared = await prepareLocalUploadUri(fileUri);
   const uploadTarget = prepared.uri;
 
@@ -2448,12 +2489,12 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
   if (uploadType) uploadOpts.uploadType = uploadType;
 
   try {
-    console.log('[uploadProductFile] uploading', { url, uploadTarget, tempPath: prepared.tempPath });
+    devLog('[uploadProductFile] uploading', { url, uploadTarget, tempPath: prepared.tempPath });
     try {
       const info = await (FileSystem as any).getInfoAsync?.(uploadTarget);
-      console.log('[uploadProductFile] file info', info);
+      devLog('[uploadProductFile] file info', info);
     } catch (e) {
-      console.log('[uploadProductFile] getInfoAsync failed', String(e));
+      devLog('[uploadProductFile] getInfoAsync failed', String(e));
     }
 
     try {
@@ -2461,7 +2502,7 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
 
       if (res.status >= 200 && res.status < 300) {
         const data = res.body ? JSON.parse(res.body) : {};
-        console.log('[uploadProductFile] upload response', { status: res.status, body: data });
+        devLog('[uploadProductFile] upload response', { status: res.status, body: data });
         return { url: data.url, thumbnailUrl: data.thumbnailUrl, thumbnailDataUri: data.thumbnailDataUri };
       }
 
@@ -2469,12 +2510,12 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
       let body = res.body || '';
       try {
         const parsed = body ? JSON.parse(body) : {};
-        console.warn('[uploadProductFile] primary upload failed, falling back', { status: res.status, body: parsed });
+        devWarn('[uploadProductFile] primary upload failed, falling back', { status: res.status, body: parsed });
       } catch (err) {
-        console.warn('[uploadProductFile] primary upload failed, falling back', { status: res.status, body });
+        devWarn('[uploadProductFile] primary upload failed, falling back', { status: res.status, body });
       }
     } catch (err) {
-      console.warn('[uploadProductFile] uploadAsync failed, attempting fetch fallback', String(err));
+      devWarn('[uploadProductFile] uploadAsync failed, attempting fetch fallback', String(err));
     }
 
     // Fallback: try fetch + FormData

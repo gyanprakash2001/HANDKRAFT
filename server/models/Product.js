@@ -37,4 +37,10 @@ const productSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+productSchema.index({ isActive: 1, createdAt: -1 });
+productSchema.index({ isActive: 1, category: 1, createdAt: -1 });
+productSchema.index({ isActive: 1, price: 1 });
+productSchema.index({ seller: 1, isActive: 1, createdAt: -1 });
+productSchema.index({ sellerName: 1, isActive: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Product', productSchema);

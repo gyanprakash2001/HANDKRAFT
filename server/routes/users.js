@@ -463,7 +463,8 @@ router.put('/seller/pickup-address', auth, async (req, res) => {
 router.get('/me/seller-payout-profile', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .select('sellerPayoutProfile sellerPayoutSettings sellerTrust');
+      .select('sellerPayoutProfile sellerPayoutSettings sellerTrust')
+      .lean();
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -640,7 +641,7 @@ router.put('/me/seller-payout-profile', auth, async (req, res) => {
 // GET /api/users/me
 router.get('/me', auth, async (req, res) => {
   try {
-      const user = await User.findById(req.user._id).select('-password -likedProducts -cartItems');
+      const user = await User.findById(req.user._id).select('-password -likedProducts -cartItems').lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
   } catch (err) {
@@ -652,7 +653,7 @@ router.get('/me', auth, async (req, res) => {
 // GET /api/users/me/profile-dashboard
 router.get('/me/profile-dashboard', auth, async (req, res) => {
   try {
-      const user = await User.findById(req.user._id).select('-password');
+      const user = await User.findById(req.user._id).select('-password').lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const payload = await getDashboardPayload(user);
@@ -666,7 +667,7 @@ router.get('/me/profile-dashboard', auth, async (req, res) => {
 // GET /api/users/me/listed-items
 router.get('/me/listed-items', auth, async (req, res) => {
   try {
-      const user = await User.findById(req.user._id).select('name');
+      const user = await User.findById(req.user._id).select('name').lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const listedItems = await Product.find({

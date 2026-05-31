@@ -87,7 +87,7 @@ export default function MessageBubble({
                 onPress={() => onPressMedia?.(media)}
                 style={({ pressed }) => [styles.bubble, isOutgoing ? styles.bubbleRightImage : styles.bubbleLeftImage, pressed && styles.mediaPressed]}
               >
-                <Image source={{ uri: media.uri }} style={styles.image} contentFit="cover" />
+                <Image source={{ uri: media.uri }} style={styles.image} contentFit="cover" cachePolicy="memory-disk" />
                 <View style={styles.mediaHintBadge}>
                   <Ionicons name="expand-outline" size={12} color="#fff" />
                   <Text style={styles.mediaHintText}>Open</Text>

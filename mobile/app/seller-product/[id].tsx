@@ -166,6 +166,7 @@ export default function SellerProductInsightsScreen() {
               source={{ uri: heroImageUri }}
               style={styles.heroImage}
               contentFit="cover"
+              cachePolicy="memory-disk"
             />
             <View style={styles.heroBody}>
               <ThemedText numberOfLines={2} style={styles.titleText}>{item.title}</ThemedText>

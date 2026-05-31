@@ -46,7 +46,7 @@ function ensureParticipantStates(conversation) {
   }
 
   conversation.participantStates = (conversation.participants || []).map((id) => ({
-    user: id,
+    user: id && typeof id === 'object' && id._id ? id._id : id,
     lastReadAt: new Date(),
     unreadCount: 0,
   }));
@@ -174,7 +174,8 @@ router.get('/conversations', auth, async (req, res) => {
     const conversations = await Conversation.find({ participants: me })
       .sort({ updatedAt: -1 })
       .populate('participants', 'name avatarUrl')
-      .populate('product', 'title seller');
+      .populate('product', 'title seller')
+      .lean();
 
     const formatted = conversations.map((conversation) => {
       ensureParticipantStates(conversation);
@@ -245,7 +246,8 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
 
     const messages = await Message.find({ conversation: conversationId })
       .sort({ createdAt: 1 })
-      .select('_id sender text createdAt');
+      .select('_id sender text createdAt')
+      .lean();
 
     const formatted = messages.map((message) => {
       const text = message.text || '';

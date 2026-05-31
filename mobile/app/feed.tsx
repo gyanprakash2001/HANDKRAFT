@@ -611,6 +611,7 @@ export default function FeedScreen() {
                     source={{ uri: normalizeAssetUrl(imageSource) }}
                     style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
                     contentFit={imageFitMode}
+                    cachePolicy="memory-disk"
                   />
                 </Pressable>
               );
@@ -855,7 +856,7 @@ export default function FeedScreen() {
           {isLocalTabAvatar ? (
             <LocalAvatar id={userAvatar || 'local:avatar01'} size={36} style={styles.tabAvatar} />
           ) : tabAvatarSource ? (
-            <Image source={tabAvatarSource} style={styles.tabAvatar} contentFit="cover" />
+            <Image source={tabAvatarSource} style={styles.tabAvatar} contentFit="cover" cachePolicy="memory-disk" />
           ) : (
             <Ionicons name="person-outline" size={26} color="#fff" />
           )}

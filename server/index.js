@@ -20,6 +20,15 @@ console.log(`[ENV] CORS allowlist: ${env.cors?.allowAnyOrigin ? '*' : env.cors?.
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
+
 const corsOptions = env.cors?.allowAnyOrigin
   ? {
       origin(origin, callback) {
@@ -58,7 +67,10 @@ app.use(express.json({
     req.rawBody = buf && buf.length ? buf.toString('utf8') : '';
   },
 }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+  immutable: env.nodeEnv === 'production',
+  maxAge: env.nodeEnv === 'production' ? '7d' : 0,
+}));
 
 const mongoStatus = {
   state: 'disconnected',
@@ -148,8 +160,10 @@ app.use((err, req, res, next) => {
   console.error('  Message:', errorMsg);
   console.error('  Stack:', err?.stack?.split('\n').slice(0, 5).join('\n'));
   
-  // ALWAYS return actual error message for debugging
-  res.status(status).json({ message: errorMsg });
+  const responseMessage = env.nodeEnv === 'production' && status >= 500
+    ? 'Internal server error'
+    : errorMsg;
+  res.status(status).json({ message: responseMessage });
 });
 
 // connect to mongo

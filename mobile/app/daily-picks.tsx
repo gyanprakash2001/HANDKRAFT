@@ -382,6 +382,7 @@ export default function DailyPicksScreen() {
             source={{ uri: resolveProductImageSource(item) }}
             style={[styles.feedCardImage, { aspectRatio: ratio }]}
             contentFit="cover"
+            cachePolicy="memory-disk"
           />
         </Pressable>
         {pricing.hasDiscount ? (

@@ -58,7 +58,7 @@ export default function MediaViewerModal({ visible, mediaUri, mediaType, onClose
             {mediaType === 'video' ? (
               <FullscreenVideo uri={mediaUri} />
             ) : (
-              <Image source={{ uri: mediaUri }} style={styles.media} contentFit="contain" />
+              <Image source={{ uri: mediaUri }} style={styles.media} contentFit="contain" cachePolicy="memory-disk" />
             )}
           </View>
         </View>

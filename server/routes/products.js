@@ -636,7 +636,7 @@ router.get('/', async (req, res) => {
     const sort = sortMap[req.query.sort] || sortMap.newest;
 
     const [items, total] = await Promise.all([
-      Product.find(query).sort(sort).skip(skip).limit(limit),
+      Product.find(query).sort(sort).skip(skip).limit(limit).lean(),
       Product.countDocuments(query),
     ]);
 
@@ -678,7 +678,7 @@ router.get('/', async (req, res) => {
     }
 
     const itemsWithMetrics = items.map((item) => {
-      const plain = item.toObject();
+      const plain = { ...item };
       const key = String(item._id);
       plain.monthlySold = soldByProduct.get(key) || 0;
       plain.monthlySaves = savesByProduct.get(key) || 0;
@@ -709,12 +709,12 @@ router.get('/seed', seedProducts);
 // GET /api/products/:id/seller-insights
 router.get('/:id/seller-insights', auth, async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const product = await Product.findById(req.params.id).lean();
     if (!product || !product.isActive) {
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    const currentUser = await User.findById(req.user._id).select('name');
+    const currentUser = await User.findById(req.user._id).select('name').lean();
     if (!currentUser) {
       return res.status(401).json({ message: 'User not found' });
     }
@@ -1215,7 +1215,7 @@ router.post('/:id/reviews/:reviewId/helpful', auth, async (req, res) => {
 // GET /api/products/:id
 router.get('/:id', async (req, res) => {
   try {
-    const product = await Product.findOne({ _id: req.params.id, isActive: true });
+    const product = await Product.findOne({ _id: req.params.id, isActive: true }).lean();
     if (!product) return res.status(404).json({ message: 'Product not found' });
     res.json(normalizeProductMediaForResponse(req, product));
   } catch (err) {

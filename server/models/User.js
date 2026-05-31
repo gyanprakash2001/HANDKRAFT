@@ -143,4 +143,9 @@ const userSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
+userSchema.index({ googleId: 1 }, { sparse: true });
+userSchema.index({ likedProducts: 1 });
+userSchema.index({ 'cartItems.product': 1 });
+userSchema.index({ 'likedProductTimestamps.product': 1, 'likedProductTimestamps.likedAt': -1 });
+
 module.exports = mongoose.model('User', userSchema);

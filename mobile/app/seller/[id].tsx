@@ -252,7 +252,7 @@ export default function SellerPublicProfileScreen() {
               {String(payload.seller.avatarUrl || '').startsWith('local:') ? (
                 <LocalAvatar id={payload.seller.avatarUrl || 'local:avatar01'} size={84} style={styles.avatar} />
               ) : (
-                <Image source={resolveAvatarSource(payload.seller.avatarUrl || '')} style={styles.avatar} contentFit="cover" />
+                <Image source={resolveAvatarSource(payload.seller.avatarUrl || '')} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
               )}
             </View>
 
@@ -379,6 +379,7 @@ export default function SellerPublicProfileScreen() {
                   source={{ uri: entry.images?.[0] || 'https://placehold.co/600x600?text=Handmade' }}
                   style={styles.productImage}
                   contentFit="cover"
+                  cachePolicy="memory-disk"
                 />
                 <View style={styles.productBody}>
                   <ThemedText numberOfLines={2} style={styles.productTitle}>{entry.title}</ThemedText>
@@ -395,6 +396,7 @@ export default function SellerPublicProfileScreen() {
                   source={{ uri: entry.images?.[0] || 'https://placehold.co/600x600?text=Handmade' }}
                   style={styles.productImage}
                   contentFit="cover"
+                  cachePolicy="memory-disk"
                 />
                 <View style={styles.productBody}>
                   <ThemedText numberOfLines={2} style={styles.productTitle}>{entry.title}</ThemedText>

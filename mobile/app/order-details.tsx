@@ -80,6 +80,7 @@ export default function OrderDetailsScreen() {
         source={{ uri: item.image || 'https://placehold.co/100x100?text=Product' }}
         style={styles.itemImage}
         contentFit="cover"
+        cachePolicy="memory-disk"
       />
       <View style={styles.itemDetails}>
         <ThemedText numberOfLines={2} style={styles.itemTitle}>

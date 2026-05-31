@@ -143,7 +143,7 @@ function AvatarPickerModal({ visible, avatars, onSelect, onClose, currentAvatar 
                           {typeof av === 'string' && av.startsWith('local:') ? (
                             <LocalAvatar id={av} size={56} style={{ width: 56, height: 56, borderRadius: 28 }} />
                           ) : (
-                            <Image source={getAvatarUri(av)} style={styles.avatarOptionImg} contentFit="cover" />
+                            <Image source={getAvatarUri(av)} style={styles.avatarOptionImg} contentFit="cover" cachePolicy="memory-disk" />
                           )}
                         </Pressable>
                       );
@@ -826,6 +826,7 @@ export default function ProfileScreen() {
                 source={getAvatarUri(dashboard?.user.avatarUrl)}
                 style={styles.avatar}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
             )}
             <Pressable
@@ -1022,6 +1023,7 @@ export default function ProfileScreen() {
           source={useFallback ? PRODUCT_FALLBACK_IMAGE : { uri: imageUri }}
           style={sellerModeCard ? styles.cardImage : styles.buyerSavedCardImage}
           contentFit="cover"
+          cachePolicy="memory-disk"
           onError={() => handleProductImageError(imageKey)}
         />
         <View style={sellerModeCard ? styles.cardBody : styles.buyerSavedCardBody}>
@@ -1086,6 +1088,7 @@ export default function ProfileScreen() {
                 : PRODUCT_FALLBACK_IMAGE}
               style={styles.orderThumb}
               contentFit="cover"
+              cachePolicy="memory-disk"
             />
             <View style={styles.orderSummaryMeta}>
               <ThemedText numberOfLines={1} style={styles.orderProductName}>{productName}</ThemedText>
@@ -1400,6 +1403,7 @@ export default function ProfileScreen() {
                 source={getAvatarUri(dashboard?.user.avatarUrl)}
                 style={styles.avatar}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
             )}
             <Pressable
@@ -1720,6 +1724,7 @@ export default function ProfileScreen() {
                 source={getAvatarUri(dashboard.user.avatarUrl)}
                 style={styles.tabAvatar}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
             )
           ) : (
