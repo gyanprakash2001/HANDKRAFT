@@ -1,0 +1,72 @@
+name: Build Android Dev Client
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile/package.json'
+      - '.github/workflows/android-dev-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-dev-client:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Generate Android project from Expo config
+        working-directory: mobile
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets['EXPO_PUBLIC_API_URL'] }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID'] }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'] }}
+        run: CI=1 npx expo prebuild --platform android --no-install
+
+      - name: Build Debug APK (Dev Client)
+        working-directory: mobile/android
+        shell: bash
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets['EXPO_PUBLIC_API_URL'] }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID'] }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets['EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID'] }}
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: armeabi-v7a,arm64-v8a
+        run: |
+          set -o pipefail
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace --info
+
+      - name: Generate APK checksum
+        working-directory: mobile/android/app/build/outputs/apk/debug
+        shell: bash
+        run: sha256sum app-debug.apk > app-debug.apk.sha256
+
+      - name: Upload Dev Client APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: handkraft-dev-client
+          path: |
+            mobile/android/app/build/outputs/apk/debug/app-debug.apk
+            mobile/android/app/build/outputs/apk/debug/app-debug.apk.sha256
