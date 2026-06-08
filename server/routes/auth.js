@@ -6,6 +6,9 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const Otp = require('../models/Otp');
+const { sendEmailOtp, sendWhatsAppOtp } = require('../services/messaging');
+
 
 const GOOGLE_AUDIENCE_KEYS = [
   'GOOGLE_CLIENT_ID',
@@ -65,17 +68,86 @@ router.get('/profile', auth, async (req, res) => {
   res.json({ user });
 });
 
+// Send Verification OTPs to Email and WhatsApp (separately or together)
+router.post('/send-otp', async (req, res) => {
+  try {
+    const { email, phoneNumber } = req.body;
+    const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+    const normalizedPhone = phoneNumber ? String(phoneNumber).trim() : null;
+
+    if (!normalizedEmail && !normalizedPhone) {
+      return res.status(400).json({ message: 'Email or phone number is required' });
+    }
+
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes TTL
+
+    if (normalizedEmail) {
+      const emailOtp = String(Math.floor(100000 + Math.random() * 900000));
+      await Otp.findOneAndUpdate(
+        { identifier: normalizedEmail },
+        { otp: emailOtp, expiresAt },
+        { upsert: true, new: true }
+      );
+      await sendEmailOtp(normalizedEmail, emailOtp);
+    }
+
+    if (normalizedPhone) {
+      const phoneOtp = String(Math.floor(100000 + Math.random() * 900000));
+      await Otp.findOneAndUpdate(
+        { identifier: normalizedPhone },
+        { otp: phoneOtp, expiresAt },
+        { upsert: true, new: true }
+      );
+      await sendWhatsAppOtp(normalizedPhone, phoneOtp);
+    }
+
+    res.json({ message: 'Verification code(s) sent successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Failed to send verification codes' });
+  }
+});
+
 // signup
 router.post('/signup', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, phoneNumber, password, emailOtp, phoneOtp } = req.body;
     const normalizedName = String(name || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    if (!normalizedName || !normalizedEmail || !password) {
+    const normalizedPhone = String(phoneNumber || '').trim();
+
+    if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !emailOtp || !phoneOtp) {
       return res.status(400).json({ message: 'Missing fields' });
     }
+
+    // Strong password validation
+    const hasLetter = /[a-zA-Z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecial = /[^a-zA-Z0-9]/.test(password);
+    if (password.length < 8 || !hasLetter || !hasNumber || !hasSpecial) {
+      return res.status(400).json({
+        message: 'Password must be at least 8 characters long and contain letters, numbers, and at least one special character.',
+      });
+    }
+
+    // Verify OTPs
+    const dbEmailOtp = await Otp.findOne({ identifier: normalizedEmail });
+    const dbPhoneOtp = await Otp.findOne({ identifier: normalizedPhone });
+
+    if (!dbEmailOtp || dbEmailOtp.otp !== String(emailOtp).trim() || dbEmailOtp.expiresAt < new Date()) {
+      return res.status(400).json({ message: 'Invalid or expired email verification code' });
+    }
+    if (!dbPhoneOtp || dbPhoneOtp.otp !== String(phoneOtp).trim() || dbPhoneOtp.expiresAt < new Date()) {
+      return res.status(400).json({ message: 'Invalid or expired WhatsApp verification code' });
+    }
+
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) return res.status(400).json({ message: 'User already exists' });
+
+    // Clear/delete OTP entries since they are verified
+    await Otp.deleteOne({ identifier: normalizedEmail });
+    await Otp.deleteOne({ identifier: normalizedPhone });
+
     const hashed = await bcrypt.hash(password, 10);
     const { firstName, lastName } = splitNameParts(normalizedName);
     // Assign a random neutral avatar from the pool
@@ -86,6 +158,7 @@ router.post('/signup', async (req, res) => {
       lastName,
       email: normalizedEmail,
       password: hashed,
+      phoneNumber: normalizedPhone,
       authProvider: 'local',
       avatarUrl,
     });
