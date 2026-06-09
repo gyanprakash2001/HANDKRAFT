@@ -44,7 +44,13 @@
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.266659332527-cq3eol9hvomb67li36pqq6148cbn01de"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

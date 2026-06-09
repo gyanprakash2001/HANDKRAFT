@@ -1,24 +1,32 @@
-require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
-const { sendEmailOtp } = require('../services/messaging');
+const axios = require('axios'); // Wait, let's use standard fetch in Node 18+ to avoid adding dependencies
 
-async function testEmailApi() {
-  const apiKey = process.env.EMAIL_SMTP_PASS;
-  const from = process.env.EMAIL_FROM || '"HANDKRAFT" <noreply@handkraft.studio>';
-  const to = 'gps27sept@gmail.com';
+async function testAzureApi() {
+  const url = 'https://handkraft-api-gyan-akgwc4bwesczdage.centralindia-01.azurewebsites.net/api/auth/send-otp';
+  const payload = {
+    email: 'gps27sept@gmail.com',
+    phoneNumber: ''
+  };
 
-  console.log('--- Resend API Config ---');
-  console.log('API Key (last 5 chars):', apiKey ? apiKey.slice(-5) : 'not defined');
-  console.log('From:', from);
-  console.log('To:', to);
-  console.log('-------------------------');
+  console.log('Sending request to Azure App Service...');
+  console.log('URL:', url);
+  console.log('Payload:', payload);
 
   try {
-    console.log('Sending test email via Resend HTTP REST API...');
-    const result = await sendEmailOtp(to, '123456');
-    console.log('Success! Result:', result);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    console.log('Response Status:', res.status);
+    console.log('Response StatusText:', res.statusText);
+    const bodyText = await res.text();
+    console.log('Response Body:', bodyText);
   } catch (error) {
-    console.error('Failed to send email:', error);
+    console.error('Request failed:', error);
   }
 }
 
-testEmailApi();
+testAzureApi();

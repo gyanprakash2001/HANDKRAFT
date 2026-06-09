@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { StyleSheet, View, Pressable, ActivityIndicator, FlatList, Switch, ScrollView, Alert, Modal, TextInput, useWindowDimensions, Platform } from 'react-native';
+import { StyleSheet, View, Pressable, ActivityIndicator, FlatList, Switch, ScrollView, Modal, TextInput, useWindowDimensions, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import AvatarEditor from '@/components/AvatarEditor';
@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { ThemedAlert, AlertButton } from '@/components/ThemedAlert';
 import LocalAvatar from '@/components/LocalAvatar';
 import {
   getProfileDashboard,
@@ -38,8 +39,6 @@ import {
 import currentUser from '@/utils/currentUser';
 import { resolveProductImageUri } from '@/utils/product';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
-
-// Local in-app avatar manifest (emoji + gradient) — non-human, neutral
 const LOCAL_MANIFEST: string[] = Array.from({ length: 30 }, (_, i) => `local:avatar${String(i + 1).padStart(2, '0')}`);
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 const PRODUCT_FALLBACK_IMAGE = require('../assets/handkraft_logo_trimmed.png');
@@ -242,6 +241,19 @@ export default function ProfileScreen() {
   const [pendingSellerBadgeClear, setPendingSellerBadgeClear] = useState(false);
   const { width: screenWidth } = useWindowDimensions();
   const router = useRouter();
+
+  // ThemedAlert state
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertButtons, setAlertButtons] = useState<AlertButton[]>([]);
+
+  const showAlert = useCallback((title: string, message: string, buttons?: AlertButton[]) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertButtons(buttons || []);
+    setAlertVisible(true);
+  }, []);
   const headerTopPadding = Math.max(insets.top + 20, 54);
   const listBottomPadding = getTabBarContentPadding(insets, 18);
   const sellerBottomPadding = getTabBarContentPadding(insets, 14);
@@ -582,7 +594,7 @@ export default function ProfileScreen() {
   }, []);
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
+    showAlert('Logout', 'Are you sure you want to logout?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Logout',
@@ -1732,6 +1744,13 @@ export default function ProfileScreen() {
           )}
         </Pressable>
       </View>
+      <ThemedAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        buttons={alertButtons}
+        onClose={() => setAlertVisible(false)}
+      />
     </ThemedView>
   );
 }

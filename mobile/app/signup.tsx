@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Modal, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, TextInput, View, Modal, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { ThemedAlert, AlertButton } from '@/components/ThemedAlert';
 import { registerUser, signInWithGoogle, sendOtp, verifyOtp } from '@/utils/api';
 import { saveToken } from '@/utils/auth';
 import currentUser from '@/utils/currentUser';
@@ -32,6 +33,19 @@ export default function SignupScreen() {
   const [successDetail, setSuccessDetail] = useState('');
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [authLoading, setAuthLoading] = useState<'signup' | 'google' | null>(null);
+
+  // ThemedAlert state
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertButtons, setAlertButtons] = useState<AlertButton[]>([]);
+
+  const showAlert = useCallback((title: string, message: string, buttons?: AlertButton[]) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertButtons(buttons || []);
+    setAlertVisible(true);
+  }, []);
 
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
@@ -65,7 +79,7 @@ export default function SignupScreen() {
     const hasPhoneNumber = Boolean(String(user?.phoneNumber || '').trim());
     if (!hasPhoneNumber) {
       setAuthLoading(null);
-      Alert.alert(
+      showAlert(
         'Add phone number',
         'Account created successfully. We could not fetch your phone from Google. Add it now.',
         [
@@ -99,7 +113,7 @@ export default function SignupScreen() {
     try {
       const trimmedOtp = emailOtp.trim();
       if (!trimmedOtp) {
-        Alert.alert('Error', 'Please enter verification code');
+        showAlert('Error', 'Please enter verification code');
         return;
       }
       setEmailVerifyLoading(true);
@@ -107,12 +121,12 @@ export default function SignupScreen() {
       await verifyOtp(email.trim().toLowerCase(), trimmedOtp);
       setEmailVerifyLoading(false);
       setEmailVerified(true);
-      Alert.alert('Success', 'Email verified successfully!');
+      showAlert('Success', 'Email verified successfully!');
     } catch (err: any) {
       setEmailVerifyLoading(false);
       const errMsg = err.message || 'Incorrect OTP or verification expired';
       setEmailVerificationError(errMsg);
-      Alert.alert('Verification Failed', errMsg);
+      showAlert('Verification Failed', errMsg);
     }
   };
 
@@ -120,11 +134,11 @@ export default function SignupScreen() {
     try {
       const normalizedEmail = email.trim().toLowerCase();
       if (!normalizedEmail) {
-        Alert.alert('Error', 'Please enter email first');
+        showAlert('Error', 'Please enter email first');
         return;
       }
       if (!normalizedEmail.includes('@')) {
-        Alert.alert('Error', 'Please enter a valid email address');
+        showAlert('Error', 'Please enter a valid email address');
         return;
       }
 
@@ -133,12 +147,12 @@ export default function SignupScreen() {
       await sendOtp(normalizedEmail, '');
       setEmailOtpLoading(false);
       setEmailOtpSent(true);
-      Alert.alert('Success', 'Verification code has been sent to your email!');
+      showAlert('Success', 'Verification code has been sent to your email!');
     } catch (err: any) {
       setEmailOtpLoading(false);
       const errMsg = err.message || 'Failed to send email verification code';
       setEmailVerificationError(errMsg);
-      Alert.alert('Error', errMsg);
+      showAlert('Error', errMsg);
     }
   };
 
@@ -151,12 +165,12 @@ export default function SignupScreen() {
       const trimmedEmailOtp = emailOtp.trim();
 
       if (!normalizedName || !normalizedEmail || !password || !trimmedEmailOtp) {
-        Alert.alert('Error', 'Please fill in all fields and verify your email address');
+        showAlert('Error', 'Please fill in all fields and verify your email address');
         return;
       }
 
       if (!emailVerified) {
-        Alert.alert('Error', 'Please verify your email address first');
+        showAlert('Error', 'Please verify your email address first');
         return;
       }
 
@@ -164,7 +178,7 @@ export default function SignupScreen() {
       const hasNumber = /[0-9]/.test(password);
       const hasSpecial = /[^a-zA-Z0-9]/.test(password);
       if (password.length < 8 || !hasLetter || !hasNumber || !hasSpecial) {
-        Alert.alert(
+        showAlert(
           'Weak Password',
           'Password must be at least 8 characters long and contain a combination of letters, numbers, and at least one special character.'
         );
@@ -187,7 +201,7 @@ export default function SignupScreen() {
       showSuccess(successTitle, successDetailText);
     } catch (err: any) {
       setAuthLoading(null);
-      Alert.alert('Error', err.message || 'Signup failed');
+      showAlert('Error', err.message || 'Signup failed');
     }
   };
 
@@ -211,14 +225,14 @@ export default function SignupScreen() {
         await completeGoogleAuth(idToken || undefined, accessToken || undefined);
       } catch (err: any) {
         setAuthLoading(null);
-        Alert.alert('Google Sign-up Error', err.message || 'Failed to sign up with Google');
+        showAlert('Google Sign-up Error', err.message || 'Failed to sign up with Google');
       }
     })();
   }, [response, completeGoogleAuth]);
 
   const handleGoogleSignUp = async () => {
     if (!request) {
-      Alert.alert('Google Sign-up Error', 'Google sign-up is initializing. Please try again.');
+      showAlert('Google Sign-up Error', 'Google sign-up is initializing. Please try again.');
       return;
     }
     if (authLoading) return;
@@ -249,7 +263,7 @@ export default function SignupScreen() {
         } catch (err) {
           console.warn('Native Google sign-up failed', err);
           setAuthLoading(null);
-          Alert.alert('Google Sign-up Error', getNativeGoogleErrorMessage(err));
+          showAlert('Google Sign-up Error', getNativeGoogleErrorMessage(err));
           return;
         }
       }
@@ -262,7 +276,7 @@ export default function SignupScreen() {
       console.warn('Google AuthSession sign-up failed', firstError);
       setAuthLoading(null);
       const authSessionMessage = firstError instanceof Error ? firstError.message : 'Failed to start Google sign-up.';
-      Alert.alert('Google Sign-up Error', authSessionMessage);
+      showAlert('Google Sign-up Error', authSessionMessage);
     }
   };
 
@@ -312,6 +326,13 @@ export default function SignupScreen() {
           </View>
         </View>
       </Modal>
+      <ThemedAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        buttons={alertButtons}
+        onClose={() => setAlertVisible(false)}
+      />
       <ThemedText type="title">Sign Up</ThemedText>
       <TextInput
         style={styles.input}
@@ -414,11 +435,15 @@ export default function SignupScreen() {
 
       <View style={styles.buttonContainer}>
         <View style={styles.buttonWrap}>
-          <Button
-            title={isSignupLoading ? ' ' : 'Sign Up'}
+          <TouchableOpacity
+            style={[styles.primaryButton, (isAnyLoading || !emailVerified) && styles.primaryButtonDisabled]}
             onPress={handleSubmit}
             disabled={isAnyLoading || !emailVerified}
-          />
+          >
+            <ThemedText style={styles.primaryButtonText}>
+              {isSignupLoading ? '' : 'Sign Up'}
+            </ThemedText>
+          </TouchableOpacity>
           {isSignupLoading ? (
             <View style={styles.buttonSpinner}>
               <ActivityIndicator color="#ffffff" />
@@ -427,11 +452,15 @@ export default function SignupScreen() {
         </View>
         <View style={styles.buttonSpacer} />
         <View style={styles.buttonWrap}>
-          <Button
-            title={isGoogleLoading ? ' ' : 'Sign up with Google'}
+          <TouchableOpacity
+            style={[styles.primaryButton, (!request || isAnyLoading) && styles.primaryButtonDisabled]}
             onPress={handleGoogleSignUp}
             disabled={!request || isAnyLoading}
-          />
+          >
+            <ThemedText style={styles.primaryButtonText}>
+              {isGoogleLoading ? '' : 'Sign up with Google'}
+            </ThemedText>
+          </TouchableOpacity>
           {isGoogleLoading ? (
             <View style={styles.buttonSpinner}>
               <ActivityIndicator color="#ffffff" />
@@ -654,5 +683,28 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  primaryButton: {
+    backgroundColor: '#2196F3',
+    height: 48,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
+    shadowColor: '#2196F3',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: '#2196F3',
+    opacity: 0.6,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
 });

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Modal, ActivityIndicator } from 'react-native';
+import { StyleSheet, TextInput, View, Modal, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { ThemedAlert, AlertButton } from '@/components/ThemedAlert';
 import { loginUser, signInWithGoogle } from '@/utils/api';
 import { saveToken } from '@/utils/auth';
 import currentUser from '@/utils/currentUser';
@@ -17,6 +18,7 @@ WebBrowser.maybeCompleteAuthSession();
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
   const [successVisible, setSuccessVisible] = useState(false);
@@ -25,9 +27,22 @@ export default function LoginScreen() {
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [authLoading, setAuthLoading] = useState<'login' | 'google' | null>(null);
 
+  // ThemedAlert state
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertButtons, setAlertButtons] = useState<AlertButton[]>([]);
+
+  const showAlert = useCallback((title: string, message: string, buttons?: AlertButton[]) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertButtons(buttons || []);
+    setAlertVisible(true);
+  }, []);
+
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
-  const useNativeGoogleAuth = String(process.env.EXPO_PUBLIC_GOOGLE_NATIVE_AUTH || '').toLowerCase() === 'true';
+  const useNativeGoogleAuth = appOwnership !== 'expo';
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
@@ -57,7 +72,7 @@ export default function LoginScreen() {
     const hasPhoneNumber = Boolean(String(user?.phoneNumber || '').trim());
     if (!hasPhoneNumber) {
       setAuthLoading(null);
-      Alert.alert(
+      showAlert(
         'Add phone number',
         'Signed in successfully. We could not fetch your phone from Google. Add it now.',
         [
@@ -88,7 +103,7 @@ export default function LoginScreen() {
       showSuccess(successTitle, successDetailText);
     } catch (err: any) {
       setAuthLoading(null);
-      Alert.alert('Error', err.message || 'Login failed');
+      showAlert('Error', err.message || 'Login failed');
     }
   };
 
@@ -120,14 +135,14 @@ export default function LoginScreen() {
         await completeGoogleAuth(idToken || undefined, accessToken || undefined);
       } catch (err: any) {
         setAuthLoading(null);
-        Alert.alert('Google Sign-in Error', err.message || 'Failed to sign in with Google');
+        showAlert('Google Sign-in Error', err.message || 'Failed to sign in with Google');
       }
     })();
   }, [response, completeGoogleAuth]);
 
   const handleGoogleSignIn = async () => {
     if (!request) {
-      Alert.alert('Google Sign-in Error', 'Google sign-in is initializing. Please try again.');
+      showAlert('Google Sign-in Error', 'Google sign-in is initializing. Please try again.');
       return;
     }
     if (authLoading) return;
@@ -140,7 +155,7 @@ export default function LoginScreen() {
         iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
         androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-        redirectUri: request.redirectUri,
+        redirectUri: request?.redirectUri,
         useProxyForExpo,
         useNativeGoogleAuth,
         appOwnership,
@@ -158,9 +173,9 @@ export default function LoginScreen() {
           await completeGoogleAuth(idToken, accessToken);
           return;
         } catch (err) {
-          console.warn('Native Google sign-in failed', err);
+          console.warn('Native Google sign-up failed', err);
           setAuthLoading(null);
-          Alert.alert('Google Sign-in Error', getNativeGoogleErrorMessage(err));
+          showAlert('Google Sign-in Error', getNativeGoogleErrorMessage(err));
           return;
         }
       }
@@ -173,7 +188,7 @@ export default function LoginScreen() {
       console.warn('Google AuthSession sign-in failed', firstError);
       setAuthLoading(null);
       const authSessionMessage = firstError instanceof Error ? firstError.message : 'Failed to start Google sign-in.';
-      Alert.alert('Google Sign-in Error', authSessionMessage);
+      showAlert('Google Sign-in Error', authSessionMessage);
     }
   };
 
@@ -202,6 +217,13 @@ export default function LoginScreen() {
           </View>
         </View>
       </Modal>
+      <ThemedAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        buttons={alertButtons}
+        onClose={() => setAlertVisible(false)}
+      />
       <ThemedText type="title">Login</ThemedText>
       <TextInput
         style={styles.input}
@@ -212,17 +234,36 @@ export default function LoginScreen() {
         autoCapitalize="none"
         keyboardType="email-address"
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#b3b3b3"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={[styles.input, { marginVertical: 0, paddingRight: 45 }]}
+          placeholder="Password"
+          placeholderTextColor="#b3b3b3"
+          secureTextEntry={!showPassword}
+          value={password}
+          onChangeText={setPassword}
+        />
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowPassword(!showPassword)}>
+          <Ionicons
+            name={showPassword ? 'eye-off' : 'eye'}
+            size={20}
+            color="#b3b3b3"
+          />
+        </TouchableOpacity>
+      </View>
       <View style={styles.buttonContainer}>
         <View style={styles.buttonWrap}>
-          <Button title={isLoginLoading ? ' ' : 'Log In'} onPress={handleSubmit} disabled={isAnyLoading} />
+          <TouchableOpacity
+            style={[styles.primaryButton, isAnyLoading && styles.primaryButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={isAnyLoading}
+          >
+            <ThemedText style={styles.primaryButtonText}>
+              {isLoginLoading ? '' : 'Log In'}
+            </ThemedText>
+          </TouchableOpacity>
           {isLoginLoading ? (
             <View style={styles.buttonSpinner}>
               <ActivityIndicator color="#ffffff" />
@@ -231,11 +272,15 @@ export default function LoginScreen() {
         </View>
         <View style={styles.buttonSpacer} />
         <View style={styles.buttonWrap}>
-          <Button
-            title={isGoogleLoading ? ' ' : 'Sign in with Google'}
+          <TouchableOpacity
+            style={[styles.primaryButton, (!request || isAnyLoading) && styles.primaryButtonDisabled]}
             onPress={handleGoogleSignIn}
             disabled={!request || isAnyLoading}
-          />
+          >
+            <ThemedText style={styles.primaryButtonText}>
+              {isGoogleLoading ? '' : 'Sign in with Google'}
+            </ThemedText>
+          </TouchableOpacity>
           {isGoogleLoading ? (
             <View style={styles.buttonSpinner}>
               <ActivityIndicator color="#ffffff" />
@@ -352,5 +397,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 11,
     letterSpacing: 0.2,
+  },
+  primaryButton: {
+    backgroundColor: '#2196F3',
+    height: 48,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
+    shadowColor: '#2196F3',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: '#2196F3',
+    opacity: 0.6,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  inputContainer: {
+    position: 'relative',
+    marginVertical: 8,
+    justifyContent: 'center',
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

@@ -10,6 +10,7 @@ type GoogleSigninModule = {
     hasPlayServices: (options: { showPlayServicesUpdateDialog: boolean }) => Promise<void>;
     signIn: () => Promise<any>;
     getTokens: () => Promise<{ accessToken?: string }>;
+    signOut: () => Promise<void>;
   };
 };
 
@@ -144,6 +145,13 @@ async function performNativeSignIn(mode: ConfigureMode) {
   configureGoogleSignin(mode);
 
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+  // Force account chooser dialog by signing out first
+  try {
+    await GoogleSignin.signOut();
+  } catch (err) {
+    console.log('Google SignOut error (expected if not signed in):', err);
+  }
 
   const response = await GoogleSignin.signIn();
   if (!isSuccessResponse(response)) {
