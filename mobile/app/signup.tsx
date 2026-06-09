@@ -19,7 +19,6 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState('');
   const [emailOtp, setEmailOtp] = useState('');
   const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [emailOtpLoading, setEmailOtpLoading] = useState(false);
@@ -117,10 +116,6 @@ export default function SignupScreen() {
     }
   };
 
-  const handlePhoneChange = (text: string) => {
-    setPhoneNumber(text);
-  };
-
   const handleSendEmailOtp = async () => {
     try {
       const normalizedEmail = email.trim().toLowerCase();
@@ -153,10 +148,9 @@ export default function SignupScreen() {
 
       const normalizedName = name.trim();
       const normalizedEmail = email.trim().toLowerCase();
-      const normalizedPhone = phoneNumber.trim();
       const trimmedEmailOtp = emailOtp.trim();
 
-      if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !trimmedEmailOtp) {
+      if (!normalizedName || !normalizedEmail || !password || !trimmedEmailOtp) {
         Alert.alert('Error', 'Please fill in all fields and verify your email address');
         return;
       }
@@ -181,7 +175,6 @@ export default function SignupScreen() {
       const { token, user, isNewUser } = await registerUser(
         normalizedName,
         normalizedEmail,
-        normalizedPhone,
         password,
         trimmedEmailOtp
       );
@@ -395,15 +388,6 @@ export default function SignupScreen() {
           </TouchableOpacity>
         </View>
       )}
-
-      <TextInput
-        style={styles.input}
-        placeholder="WhatsApp Number"
-        placeholderTextColor="#b3b3b3"
-        value={phoneNumber}
-        onChangeText={handlePhoneChange}
-        keyboardType="phone-pad"
-      />
 
       <View style={styles.inputContainer}>
         <TextInput

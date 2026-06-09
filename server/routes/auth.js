@@ -139,7 +139,7 @@ router.post('/signup', async (req, res) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const normalizedPhone = String(phoneNumber || '').trim();
 
-    if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !emailOtp) {
+    if (!normalizedName || !normalizedEmail || !password || !emailOtp) {
       return res.status(400).json({ message: 'Missing fields' });
     }
 
