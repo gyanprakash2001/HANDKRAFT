@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput, Button, View, Alert, Modal, ActivityIndicator } from 'react-native';
+import { StyleSheet, TextInput, Button, View, Alert, Modal, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
-import { registerUser, signInWithGoogle } from '@/utils/api';
+import { registerUser, signInWithGoogle, sendOtp, verifyOtp } from '@/utils/api';
 import { saveToken } from '@/utils/auth';
 import currentUser from '@/utils/currentUser';
 import * as WebBrowser from 'expo-web-browser';
@@ -18,6 +18,16 @@ export default function SignupScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [emailOtp, setEmailOtp] = useState('');
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [emailOtpSent, setEmailOtpSent] = useState(false);
+  const [emailOtpLoading, setEmailOtpLoading] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [emailVerifyLoading, setEmailVerifyLoading] = useState(false);
+  const [emailVerificationError, setEmailVerificationError] = useState('');
+  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  const [phoneOtpLoading, setPhoneOtpLoading] = useState(false);
   const router = useRouter();
 
   const [successVisible, setSuccessVisible] = useState(false);
@@ -28,7 +38,7 @@ export default function SignupScreen() {
 
   const appOwnership = String((Constants as any)?.appOwnership || '').toLowerCase();
   const useProxyForExpo = appOwnership === 'expo';
-  const useNativeGoogleAuth = String(process.env.EXPO_PUBLIC_GOOGLE_NATIVE_AUTH || '').toLowerCase() === 'true';
+  const useNativeGoogleAuth = appOwnership !== 'expo';
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
@@ -76,11 +86,136 @@ export default function SignupScreen() {
     showSuccess(successTitle, successDetailText);
   }, [router, showSuccess]);
 
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    setEmailVerificationError('');
+    if (emailOtpSent) {
+      setEmailOtpSent(false);
+      setEmailOtp('');
+    }
+    if (emailVerified) {
+      setEmailVerified(false);
+    }
+  };
+
+  const handleVerifyEmailOtp = async () => {
+    try {
+      const trimmedOtp = emailOtp.trim();
+      if (!trimmedOtp) {
+        Alert.alert('Error', 'Please enter verification code');
+        return;
+      }
+      setEmailVerifyLoading(true);
+      setEmailVerificationError('');
+      await verifyOtp(email.trim().toLowerCase(), trimmedOtp);
+      setEmailVerifyLoading(false);
+      setEmailVerified(true);
+      Alert.alert('Success', 'Email verified successfully!');
+    } catch (err: any) {
+      setEmailVerifyLoading(false);
+      const errMsg = err.message || 'Incorrect OTP or verification expired';
+      setEmailVerificationError(errMsg);
+      Alert.alert('Verification Failed', errMsg);
+    }
+  };
+
+  const handlePhoneChange = (text: string) => {
+    setPhoneNumber(text);
+    if (phoneOtpSent) {
+      setPhoneOtpSent(false);
+      setPhoneOtp('');
+    }
+  };
+
+  const handleSendEmailOtp = async () => {
+    try {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) {
+        Alert.alert('Error', 'Please enter email first');
+        return;
+      }
+      if (!normalizedEmail.includes('@')) {
+        Alert.alert('Error', 'Please enter a valid email address');
+        return;
+      }
+
+      setEmailOtpLoading(true);
+      setEmailVerificationError('');
+      await sendOtp(normalizedEmail, '');
+      setEmailOtpLoading(false);
+      setEmailOtpSent(true);
+      Alert.alert('Success', 'Verification code has been sent to your email!');
+    } catch (err: any) {
+      setEmailOtpLoading(false);
+      const errMsg = err.message || 'Failed to send email verification code';
+      setEmailVerificationError(errMsg);
+      Alert.alert('Error', errMsg);
+    }
+  };
+
+  const handleSendPhoneOtp = async () => {
+    try {
+      const normalizedPhone = phoneNumber.trim();
+      if (!normalizedPhone) {
+        Alert.alert('Error', 'Please enter WhatsApp number first');
+        return;
+      }
+      if (normalizedPhone.length < 10) {
+        Alert.alert('Error', 'Please enter a valid WhatsApp number (minimum 10 digits)');
+        return;
+      }
+
+      setPhoneOtpLoading(true);
+      await sendOtp('', normalizedPhone);
+      setPhoneOtpLoading(false);
+      setPhoneOtpSent(true);
+      Alert.alert('Success', 'Verification code has been sent to your WhatsApp!');
+    } catch (err: any) {
+      setPhoneOtpLoading(false);
+      Alert.alert('Error', err.message || 'Failed to send WhatsApp verification code');
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       if (authLoading) return;
+
+      const normalizedName = name.trim();
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedPhone = phoneNumber.trim();
+      const trimmedEmailOtp = emailOtp.trim();
+      const trimmedPhoneOtp = phoneOtp.trim();
+
+      if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !trimmedEmailOtp || !trimmedPhoneOtp) {
+        Alert.alert('Error', 'Please fill in all fields and enter both verification codes');
+        return;
+      }
+
+      if (!emailVerified) {
+        Alert.alert('Error', 'Please verify your email address first');
+        return;
+      }
+
+      const hasLetter = /[a-zA-Z]/.test(password);
+      const hasNumber = /[0-9]/.test(password);
+      const hasSpecial = /[^a-zA-Z0-9]/.test(password);
+      if (password.length < 8 || !hasLetter || !hasNumber || !hasSpecial) {
+        Alert.alert(
+          'Weak Password',
+          'Password must be at least 8 characters long and contain a combination of letters, numbers, and at least one special character.'
+        );
+        return;
+      }
+
       setAuthLoading('signup');
-      const { token, user, isNewUser } = await registerUser(name, email, password);
+      const { token, user, isNewUser } = await registerUser(
+        normalizedName,
+        normalizedEmail,
+        normalizedPhone,
+        password,
+        trimmedEmailOtp,
+        trimmedPhoneOtp
+      );
       await saveToken(token);
       if (user) currentUser.setProfile(user);
       const isNew = typeof isNewUser === 'boolean' ? isNewUser : true;
@@ -127,21 +262,19 @@ export default function SignupScreen() {
     if (authLoading) return;
     setAuthLoading('google');
 
-    // Debug: log OAuth request parameters so Metro shows them when sign-up is initiated
     try {
       console.log('Google Sign-up Request Initiating', {
         expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
         iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
         androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-        redirectUri: request.redirectUri,
+        redirectUri: request?.redirectUri,
         useProxyForExpo,
         useNativeGoogleAuth,
         appOwnership,
         requestExists: Boolean(request),
       });
 
-      // Start Expo proxy only in Expo Go; otherwise use the browser/web flow by default.
       console.log(`Starting Google sign-up (useProxy=${useProxyForExpo}, useNative=${useNativeGoogleAuth})`);
       console.log('Auth request object:', request);
       if (useNativeGoogleAuth) {
@@ -212,15 +345,109 @@ export default function SignupScreen() {
         value={name}
         onChangeText={setName}
       />
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={[
+            styles.input,
+            { marginVertical: 0 },
+            emailVerified && styles.inputDisabled,
+            email.trim().length > 0 && !emailVerified && { paddingRight: 115 }
+          ]}
+          placeholder="Email"
+          placeholderTextColor="#b3b3b3"
+          value={email}
+          onChangeText={handleEmailChange}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          editable={!emailVerified}
+        />
+        {email.trim().length > 0 && !emailVerified && (
+          <TouchableOpacity
+            style={styles.inlineButton}
+            onPress={handleSendEmailOtp}
+            disabled={isAnyLoading || emailOtpLoading}>
+            {emailOtpLoading ? (
+              <ActivityIndicator size="small" color="#9df0a2" />
+            ) : (
+              <ThemedText style={styles.inlineButtonText}>
+                {emailOtpSent ? 'Resend OTP' : 'Validate Email'}
+              </ThemedText>
+            )}
+          </TouchableOpacity>
+        )}
+        {emailVerified && (
+          <View style={styles.verifiedBadge}>
+            <Ionicons name="checkmark-circle" size={18} color="#9df0a2" />
+            <ThemedText style={styles.verifiedText}>Verified</ThemedText>
+          </View>
+        )}
+      </View>
+
+      {emailVerificationError ? (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={16} color="#ff6b6b" />
+          <ThemedText style={styles.errorText}>Not Verified: {emailVerificationError}</ThemedText>
+        </View>
+      ) : null}
+
+      {emailOtpSent && !emailVerified && (
+        <View style={styles.otpContainer}>
+          <TextInput
+            style={[styles.input, styles.otpInput]}
+            placeholder="Email Verification OTP"
+            placeholderTextColor="#b3b3b3"
+            value={emailOtp}
+            onChangeText={setEmailOtp}
+            keyboardType="number-pad"
+            maxLength={6}
+          />
+          <TouchableOpacity
+            style={styles.verifyButton}
+            onPress={handleVerifyEmailOtp}
+            disabled={emailVerifyLoading}>
+            {emailVerifyLoading ? (
+              <ActivityIndicator size="small" color="#0a0a0a" />
+            ) : (
+              <ThemedText style={styles.verifyButtonText}>Verify</ThemedText>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
       <TextInput
         style={styles.input}
-        placeholder="Email"
+        placeholder="WhatsApp Number"
         placeholderTextColor="#b3b3b3"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
+        value={phoneNumber}
+        onChangeText={handlePhoneChange}
+        keyboardType="phone-pad"
       />
+      <View style={styles.inlineValidateContainer}>
+        <View style={styles.buttonWrap}>
+          <Button
+            title={phoneOtpLoading ? ' ' : (phoneOtpSent ? 'Resend WhatsApp OTP' : 'Validate WhatsApp')}
+            onPress={handleSendPhoneOtp}
+            disabled={isAnyLoading || phoneOtpLoading}
+          />
+          {phoneOtpLoading ? (
+            <View style={styles.buttonSpinner}>
+              <ActivityIndicator color="#ffffff" />
+            </View>
+          ) : null}
+        </View>
+      </View>
+      {phoneOtpSent && (
+        <TextInput
+          style={[styles.input, styles.otpInput]}
+          placeholder="WhatsApp Verification OTP"
+          placeholderTextColor="#b3b3b3"
+          value={phoneOtp}
+          onChangeText={setPhoneOtp}
+          keyboardType="number-pad"
+          maxLength={6}
+        />
+      )}
+
       <TextInput
         style={styles.input}
         placeholder="Password"
@@ -229,9 +456,17 @@ export default function SignupScreen() {
         value={password}
         onChangeText={setPassword}
       />
+      <ThemedText style={styles.disclaimer}>
+        (Password must be at least 8 characters long and contain letters, numbers, and at least one special character)
+      </ThemedText>
+
       <View style={styles.buttonContainer}>
         <View style={styles.buttonWrap}>
-          <Button title={isSignupLoading ? ' ' : 'Sign Up'} onPress={handleSubmit} disabled={isAnyLoading} />
+          <Button
+            title={isSignupLoading ? ' ' : 'Sign Up'}
+            onPress={handleSubmit}
+            disabled={isAnyLoading || !emailVerified || !phoneOtpSent}
+          />
           {isSignupLoading ? (
             <View style={styles.buttonSpinner}>
               <ActivityIndicator color="#ffffff" />
@@ -274,6 +509,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     color: '#fff',
     backgroundColor: '#111',
+  },
+  disclaimer: {
+    fontSize: 11,
+    color: '#8e8e93',
+    marginTop: -2,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+    lineHeight: 15,
+  },
+  inlineValidateContainer: {
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  otpInput: {
+    borderColor: '#9df0a2',
+    backgroundColor: '#16222f',
   },
   buttonContainer: {
     marginTop: 16,
@@ -361,5 +612,73 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 11,
     letterSpacing: 0.2,
+  },
+  inputContainer: {
+    position: 'relative',
+    marginVertical: 8,
+    justifyContent: 'center',
+  },
+  inlineButton: {
+    position: 'absolute',
+    right: 8,
+    bottom: 6,
+    backgroundColor: 'rgba(157, 240, 162, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(157, 240, 162, 0.3)',
+  },
+  inlineButtonText: {
+    color: '#9df0a2',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 12,
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  inputDisabled: {
+    borderColor: '#1e2b38',
+    color: '#8e8e93',
+    backgroundColor: '#0a0f14',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  verifiedText: {
+    color: '#9df0a2',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  otpContainer: {
+    marginVertical: 4,
+  },
+  verifyButton: {
+    backgroundColor: '#9df0a2',
+    paddingVertical: 10,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  verifyButtonText: {
+    color: '#0a0a0a',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

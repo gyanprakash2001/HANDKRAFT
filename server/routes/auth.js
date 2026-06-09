@@ -108,6 +108,29 @@ router.post('/send-otp', async (req, res) => {
   }
 });
 
+// Verify OTP (Email or Phone)
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { identifier, otp } = req.body;
+    const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
+    const trimmedOtp = String(otp || '').trim();
+
+    if (!normalizedIdentifier || !trimmedOtp) {
+      return res.status(400).json({ message: 'Identifier and OTP are required' });
+    }
+
+    const dbOtp = await Otp.findOne({ identifier: normalizedIdentifier });
+    if (!dbOtp || dbOtp.otp !== trimmedOtp || dbOtp.expiresAt < new Date()) {
+      return res.status(400).json({ message: 'Invalid or expired verification code' });
+    }
+
+    res.json({ message: 'Verification successful' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error during OTP verification' });
+  }
+});
+
 // signup
 router.post('/signup', async (req, res) => {
   try {

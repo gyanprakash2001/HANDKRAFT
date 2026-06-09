@@ -416,15 +416,48 @@ interface ProductsResponse {
   };
 }
 
-export async function registerUser(name: string, email: string, password: string): Promise<AuthResponse> {
+export async function sendOtp(email: string, phoneNumber: string): Promise<{ message: string }> {
+  const res = await safeFetch('/auth/send-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, phoneNumber }),
+  });
+  if (!res.ok) {
+    const errorPayload = await parseApiErrorResponse(res, 'Failed to send verification codes');
+    throw toApiError(errorPayload);
+  }
+  return res.json();
+}
+
+export async function verifyOtp(identifier: string, otp: string): Promise<{ message: string }> {
+  const res = await safeFetch('/auth/verify-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier, otp }),
+  });
+  if (!res.ok) {
+    const errorPayload = await parseApiErrorResponse(res, 'OTP verification failed');
+    throw toApiError(errorPayload);
+  }
+  return res.json();
+}
+
+export async function registerUser(
+  name: string,
+  email: string,
+  phoneNumber: string,
+  password: string,
+  emailOtp: string,
+  phoneOtp: string
+): Promise<AuthResponse> {
   const res = await safeFetch('/auth/signup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password }),
+    body: JSON.stringify({ name, email, phoneNumber, password, emailOtp, phoneOtp }),
   });
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.message || 'Signup failed');
+    const errorPayload = await parseApiErrorResponse(res, 'Signup failed');
+    throw toApiError(errorPayload);
   }
   return res.json();
 }
@@ -436,8 +469,8 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.message || 'Login failed');
+    const errorPayload = await parseApiErrorResponse(res, 'Login failed');
+    throw toApiError(errorPayload);
   }
   return res.json();
 }
@@ -458,8 +491,8 @@ export async function signInWithGoogle(idToken?: string, accessToken?: string): 
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(error.message || 'Google sign-in failed');
+    const errorPayload = await parseApiErrorResponse(res, 'Google sign-in failed');
+    throw toApiError(errorPayload);
   }
 
   return res.json();
