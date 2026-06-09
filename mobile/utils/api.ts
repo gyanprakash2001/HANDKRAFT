@@ -447,13 +447,12 @@ export async function registerUser(
   email: string,
   phoneNumber: string,
   password: string,
-  emailOtp: string,
-  phoneOtp: string
+  emailOtp: string
 ): Promise<AuthResponse> {
   const res = await safeFetch('/auth/signup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, phoneNumber, password, emailOtp, phoneOtp }),
+    body: JSON.stringify({ name, email, phoneNumber, password, emailOtp }),
   });
   if (!res.ok) {
     const errorPayload = await parseApiErrorResponse(res, 'Signup failed');

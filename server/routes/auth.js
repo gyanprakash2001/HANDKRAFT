@@ -134,12 +134,12 @@ router.post('/verify-otp', async (req, res) => {
 // signup
 router.post('/signup', async (req, res) => {
   try {
-    const { name, email, phoneNumber, password, emailOtp, phoneOtp } = req.body;
+    const { name, email, phoneNumber, password, emailOtp } = req.body;
     const normalizedName = String(name || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const normalizedPhone = String(phoneNumber || '').trim();
 
-    if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !emailOtp || !phoneOtp) {
+    if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !emailOtp) {
       return res.status(400).json({ message: 'Missing fields' });
     }
 
@@ -153,15 +153,11 @@ router.post('/signup', async (req, res) => {
       });
     }
 
-    // Verify OTPs
+    // Verify OTP
     const dbEmailOtp = await Otp.findOne({ identifier: normalizedEmail });
-    const dbPhoneOtp = await Otp.findOne({ identifier: normalizedPhone });
 
     if (!dbEmailOtp || dbEmailOtp.otp !== String(emailOtp).trim() || dbEmailOtp.expiresAt < new Date()) {
       return res.status(400).json({ message: 'Invalid or expired email verification code' });
-    }
-    if (!dbPhoneOtp || dbPhoneOtp.otp !== String(phoneOtp).trim() || dbPhoneOtp.expiresAt < new Date()) {
-      return res.status(400).json({ message: 'Invalid or expired WhatsApp verification code' });
     }
 
     const existing = await User.findOne({ email: normalizedEmail });
@@ -169,7 +165,6 @@ router.post('/signup', async (req, res) => {
 
     // Clear/delete OTP entries since they are verified
     await Otp.deleteOne({ identifier: normalizedEmail });
-    await Otp.deleteOne({ identifier: normalizedPhone });
 
     const hashed = await bcrypt.hash(password, 10);
     const { firstName, lastName } = splitNameParts(normalizedName);

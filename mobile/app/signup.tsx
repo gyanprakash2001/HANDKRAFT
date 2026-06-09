@@ -18,16 +18,14 @@ export default function SignupScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [emailOtp, setEmailOtp] = useState('');
-  const [phoneOtp, setPhoneOtp] = useState('');
   const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [emailOtpLoading, setEmailOtpLoading] = useState(false);
   const [emailVerified, setEmailVerified] = useState(false);
   const [emailVerifyLoading, setEmailVerifyLoading] = useState(false);
   const [emailVerificationError, setEmailVerificationError] = useState('');
-  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
-  const [phoneOtpLoading, setPhoneOtpLoading] = useState(false);
   const router = useRouter();
 
   const [successVisible, setSuccessVisible] = useState(false);
@@ -121,10 +119,6 @@ export default function SignupScreen() {
 
   const handlePhoneChange = (text: string) => {
     setPhoneNumber(text);
-    if (phoneOtpSent) {
-      setPhoneOtpSent(false);
-      setPhoneOtp('');
-    }
   };
 
   const handleSendEmailOtp = async () => {
@@ -153,29 +147,6 @@ export default function SignupScreen() {
     }
   };
 
-  const handleSendPhoneOtp = async () => {
-    try {
-      const normalizedPhone = phoneNumber.trim();
-      if (!normalizedPhone) {
-        Alert.alert('Error', 'Please enter WhatsApp number first');
-        return;
-      }
-      if (normalizedPhone.length < 10) {
-        Alert.alert('Error', 'Please enter a valid WhatsApp number (minimum 10 digits)');
-        return;
-      }
-
-      setPhoneOtpLoading(true);
-      await sendOtp('', normalizedPhone);
-      setPhoneOtpLoading(false);
-      setPhoneOtpSent(true);
-      Alert.alert('Success', 'Verification code has been sent to your WhatsApp!');
-    } catch (err: any) {
-      setPhoneOtpLoading(false);
-      Alert.alert('Error', err.message || 'Failed to send WhatsApp verification code');
-    }
-  };
-
   const handleSubmit = async () => {
     try {
       if (authLoading) return;
@@ -184,10 +155,9 @@ export default function SignupScreen() {
       const normalizedEmail = email.trim().toLowerCase();
       const normalizedPhone = phoneNumber.trim();
       const trimmedEmailOtp = emailOtp.trim();
-      const trimmedPhoneOtp = phoneOtp.trim();
 
-      if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !trimmedEmailOtp || !trimmedPhoneOtp) {
-        Alert.alert('Error', 'Please fill in all fields and enter both verification codes');
+      if (!normalizedName || !normalizedEmail || !normalizedPhone || !password || !trimmedEmailOtp) {
+        Alert.alert('Error', 'Please fill in all fields and verify your email address');
         return;
       }
 
@@ -213,8 +183,7 @@ export default function SignupScreen() {
         normalizedEmail,
         normalizedPhone,
         password,
-        trimmedEmailOtp,
-        trimmedPhoneOtp
+        trimmedEmailOtp
       );
       await saveToken(token);
       if (user) currentUser.setProfile(user);
@@ -315,6 +284,19 @@ export default function SignupScreen() {
       }
     };
   }, []);
+
+  // Real-time password strength / criteria check
+  const hasLetter = /[a-zA-Z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  const hasSpecial = /[^a-zA-Z0-9]/.test(password);
+  const isPasswordValid = password.length >= 8 && hasLetter && hasNumber && hasSpecial;
+
+  const getDisclaimerStyle = () => {
+    if (password.length === 0) {
+      return styles.disclaimer;
+    }
+    return isPasswordValid ? styles.disclaimerSuccess : styles.disclaimerError;
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -422,41 +404,27 @@ export default function SignupScreen() {
         onChangeText={handlePhoneChange}
         keyboardType="phone-pad"
       />
-      <View style={styles.inlineValidateContainer}>
-        <View style={styles.buttonWrap}>
-          <Button
-            title={phoneOtpLoading ? ' ' : (phoneOtpSent ? 'Resend WhatsApp OTP' : 'Validate WhatsApp')}
-            onPress={handleSendPhoneOtp}
-            disabled={isAnyLoading || phoneOtpLoading}
-          />
-          {phoneOtpLoading ? (
-            <View style={styles.buttonSpinner}>
-              <ActivityIndicator color="#ffffff" />
-            </View>
-          ) : null}
-        </View>
-      </View>
-      {phoneOtpSent && (
-        <TextInput
-          style={[styles.input, styles.otpInput]}
-          placeholder="WhatsApp Verification OTP"
-          placeholderTextColor="#b3b3b3"
-          value={phoneOtp}
-          onChangeText={setPhoneOtp}
-          keyboardType="number-pad"
-          maxLength={6}
-        />
-      )}
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#b3b3b3"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-      <ThemedText style={styles.disclaimer}>
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={[styles.input, { marginVertical: 0, paddingRight: 45 }]}
+          placeholder="Password"
+          placeholderTextColor="#b3b3b3"
+          secureTextEntry={!showPassword}
+          value={password}
+          onChangeText={setPassword}
+        />
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowPassword(!showPassword)}>
+          <Ionicons
+            name={showPassword ? 'eye-off' : 'eye'}
+            size={20}
+            color="#b3b3b3"
+          />
+        </TouchableOpacity>
+      </View>
+      <ThemedText style={getDisclaimerStyle()}>
         (Password must be at least 8 characters long and contain letters, numbers, and at least one special character)
       </ThemedText>
 
@@ -465,7 +433,7 @@ export default function SignupScreen() {
           <Button
             title={isSignupLoading ? ' ' : 'Sign Up'}
             onPress={handleSubmit}
-            disabled={isAnyLoading || !emailVerified || !phoneOtpSent}
+            disabled={isAnyLoading || !emailVerified}
           />
           {isSignupLoading ? (
             <View style={styles.buttonSpinner}>
@@ -513,14 +481,28 @@ const styles = StyleSheet.create({
   disclaimer: {
     fontSize: 11,
     color: '#8e8e93',
-    marginTop: -2,
+    marginTop: 4,
     marginBottom: 10,
     paddingHorizontal: 4,
     lineHeight: 15,
   },
-  inlineValidateContainer: {
+  disclaimerSuccess: {
+    fontSize: 11,
+    color: '#9df0a2',
     marginTop: 4,
-    marginBottom: 12,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+    lineHeight: 15,
+    fontWeight: '500',
+  },
+  disclaimerError: {
+    fontSize: 11,
+    color: '#ff6b6b',
+    marginTop: 4,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+    lineHeight: 15,
+    fontWeight: '500',
   },
   otpInput: {
     borderColor: '#9df0a2',
@@ -680,5 +662,13 @@ const styles = StyleSheet.create({
     color: '#0a0a0a',
     fontSize: 13,
     fontWeight: '700',
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
