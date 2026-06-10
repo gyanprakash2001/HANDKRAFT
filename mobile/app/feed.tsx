@@ -9,7 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PanGestureHandler, PanGestureHandlerStateChangeEvent, State } from 'react-native-gesture-handler';
+import { PanGestureHandler, PanGestureHandlerStateChangeEvent, State, ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -609,7 +609,7 @@ export default function FeedScreen() {
         <View
           style={styles.cardImageContainer}
           onLayout={(event) => handleMediaLayout(item._id, event.nativeEvent.layout.width)}>
-          <ScrollView
+          <GestureScrollView
             horizontal
             pagingEnabled
             scrollEnabled={media.length > 1}
@@ -644,15 +644,15 @@ export default function FeedScreen() {
                   style={[styles.mediaSlideWrap, { width: slideWidth, height: mediaHeightPx }]}
                   onPress={() => openProductDetail(item._id)}>
                   <Image
-                    source={{ uri: normalizeAssetUrl(imageSource) }}
-                    style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
-                    contentFit={imageFitMode}
-                    cachePolicy="memory-disk"
+                     source={{ uri: normalizeAssetUrl(imageSource) }}
+                     style={{ width: slideWidth, height: mediaHeightPx, backgroundColor: '#181818' }}
+                     contentFit={imageFitMode}
+                     cachePolicy="memory-disk"
                   />
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </GestureScrollView>
           {media.length > 1 ? (
             <View style={styles.mediaDotsRow}>
               {media.map((_, index) => (
@@ -833,59 +833,66 @@ export default function FeedScreen() {
         </PanGestureHandler>
       )}
 
-      <ScrollView
-        style={styles.feedScroll}
-        onScroll={handleFeedScroll}
-        scrollEventThrottle={16}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
-        contentContainerStyle={[styles.feedContent, { paddingBottom: feedBottomPadding }]}>
-        {loading ? (
-          <View style={styles.masonryWrap}>
-            <View style={styles.column}>
-              {SKELETON_LEFT_RATIOS.map((ratio, index) => (
-                <View key={`skeleton-left-${index}`} style={styles.skeletonCard}>
-                  <View style={[styles.skeletonImage, { aspectRatio: ratio }]} />
-                  <View style={styles.skeletonTextWrap}>
-                    <View style={[styles.skeletonLine, styles.skeletonTitleLine]} />
-                    <View style={[styles.skeletonLine, styles.skeletonPriceLine]} />
-                  </View>
+      <PanGestureHandler
+        activeOffsetX={[-20, 20]}
+        failOffsetY={[-16, 16]}
+        onHandlerStateChange={onCategorySwipeStateChange}>
+        <View style={{ flex: 1 }}>
+          <ScrollView
+            style={styles.feedScroll}
+            onScroll={handleFeedScroll}
+            scrollEventThrottle={16}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
+            contentContainerStyle={[styles.feedContent, { paddingBottom: feedBottomPadding }]}>
+            {loading ? (
+              <View style={styles.masonryWrap}>
+                <View style={styles.column}>
+                  {SKELETON_LEFT_RATIOS.map((ratio, index) => (
+                    <View key={`skeleton-left-${index}`} style={styles.skeletonCard}>
+                      <View style={[styles.skeletonImage, { aspectRatio: ratio }]} />
+                      <View style={styles.skeletonTextWrap}>
+                        <View style={[styles.skeletonLine, styles.skeletonTitleLine]} />
+                        <View style={[styles.skeletonLine, styles.skeletonPriceLine]} />
+                      </View>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-            <View style={styles.column}>
-              {SKELETON_RIGHT_RATIOS.map((ratio, index) => (
-                <View key={`skeleton-right-${index}`} style={styles.skeletonCard}>
-                  <View style={[styles.skeletonImage, { aspectRatio: ratio }]} />
-                  <View style={styles.skeletonTextWrap}>
-                    <View style={[styles.skeletonLine, styles.skeletonTitleLine]} />
-                    <View style={[styles.skeletonLine, styles.skeletonPriceLine]} />
-                  </View>
+                <View style={styles.column}>
+                  {SKELETON_RIGHT_RATIOS.map((ratio, index) => (
+                    <View key={`skeleton-right-${index}`} style={styles.skeletonCard}>
+                      <View style={[styles.skeletonImage, { aspectRatio: ratio }]} />
+                      <View style={styles.skeletonTextWrap}>
+                        <View style={[styles.skeletonLine, styles.skeletonTitleLine]} />
+                        <View style={[styles.skeletonLine, styles.skeletonPriceLine]} />
+                      </View>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-          </View>
-        ) : filteredProducts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <ThemedText style={styles.emptyText}>
-              {selectedCategory === 'All'
-                ? 'No handmade items found yet.'
-                : `No ${selectedCategory} items right now.`}
-            </ThemedText>
-            {selectedCategory !== 'All' ? (
-              <Pressable onPress={() => setSelectedCategory('All')} style={styles.emptyResetBtn}>
-                <ThemedText style={styles.emptyResetText}>Show all categories</ThemedText>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : (
-          <>
-            <View style={styles.masonryWrap}>
-              <View style={styles.column}>{columns.left.map(renderCard)}</View>
-              <View style={styles.column}>{columns.right.map(renderCard)}</View>
-            </View>
-          </>
-        )}
-      </ScrollView>
+              </View>
+            ) : filteredProducts.length === 0 ? (
+              <View style={styles.emptyState}>
+                <ThemedText style={styles.emptyText}>
+                  {selectedCategory === 'All'
+                    ? 'No handmade items found yet.'
+                    : `No ${selectedCategory} items right now.`}
+                </ThemedText>
+                {selectedCategory !== 'All' ? (
+                  <Pressable onPress={() => setSelectedCategory('All')} style={styles.emptyResetBtn}>
+                    <ThemedText style={styles.emptyResetText}>Show all categories</ThemedText>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : (
+              <>
+                <View style={styles.masonryWrap}>
+                  <View style={styles.column}>{columns.left.map(renderCard)}</View>
+                  <View style={styles.column}>{columns.right.map(renderCard)}</View>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </PanGestureHandler>
 
       {/* Bottom Tab Navigation */}
       <View style={[styles.tabBar, { height: tabBarHeight, paddingBottom: tabBarBottomPadding }]}>
