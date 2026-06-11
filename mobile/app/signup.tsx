@@ -453,10 +453,13 @@ export default function SignupScreen() {
         <View style={styles.buttonSpacer} />
         <View style={styles.buttonWrap}>
           <TouchableOpacity
-            style={[styles.primaryButton, (!request || isAnyLoading) && styles.primaryButtonDisabled]}
+            style={[styles.primaryButton, styles.googleButton, (!request || isAnyLoading) && styles.primaryButtonDisabled]}
             onPress={handleGoogleSignUp}
             disabled={!request || isAnyLoading}
           >
+            {!isGoogleLoading && (
+              <Ionicons name="logo-google" size={18} color="#ffffff" style={styles.googleIcon} />
+            )}
             <ThemedText style={styles.primaryButtonText}>
               {isGoogleLoading ? '' : 'Sign up with Google'}
             </ThemedText>
@@ -686,8 +689,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: '#2196F3',
-    height: 48,
-    borderRadius: 8,
+    height: 44,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 4,
@@ -703,8 +706,16 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     textTransform: 'uppercase',
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleIcon: {
+    marginRight: 8,
   },
 });
