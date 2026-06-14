@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +14,6 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const FEED_SIDE_PADDING = 14;
 const COLUMN_GAP = 8;
 const COLUMN_WIDTH = (SCREEN_WIDTH - FEED_SIDE_PADDING * 2 - COLUMN_GAP) / 2;
-const DAILY_PICKS_LIMIT_DEFAULT = 60;
 
 function formatPriceINR(price: number) {
   return `₹${Number(price || 0).toLocaleString('en-IN')}`;
@@ -133,7 +132,7 @@ function seededShuffle<T>(items: T[], loadSeed: number, keyForItem: (item: T) =>
   return next;
 }
 
-function buildDailyPicks(context: PickContext, loadSeed: number) {
+function buildDailyPicks(context: PickContext, loadSeed: number, limitCount = 20) {
   const {
     products,
     likedItems,
@@ -221,7 +220,7 @@ function buildDailyPicks(context: PickContext, loadSeed: number) {
   if (!hasSignals) {
     const base = [...products]
       .sort((a, b) => (Number(b.monthlySold) || 0) - (Number(a.monthlySold) || 0))
-      .slice(0, 28);
+      .slice(0, limitCount);
 
     return seededShuffle(base, loadSeed, (item) => item._id);
   }
@@ -253,7 +252,7 @@ function buildDailyPicks(context: PickContext, loadSeed: number) {
     })
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.product)
-    .slice(0, 28);
+    .slice(0, limitCount);
 
   if (scored.length) {
     const bucketSize = 4;
@@ -269,7 +268,7 @@ function buildDailyPicks(context: PickContext, loadSeed: number) {
 
   const fallback = [...products]
     .sort((a, b) => (Number(b.monthlySold) || 0) - (Number(a.monthlySold) || 0))
-    .slice(0, 28);
+    .slice(0, limitCount);
 
   return seededShuffle(fallback, loadSeed, (item) => item._id);
 }
@@ -278,11 +277,20 @@ export default function DailyPicksScreen() {
   const router = useRouter();
   const seenRef = useRef<Set<string>>(new Set());
   const shuffleCycleRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [picks, setPicks] = useState<ProductItem[]>([]);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const likedItemsRef = useRef<ProductItem[]>([]);
+  const ordersRef = useRef<Order[]>([]);
+  const behaviorRef = useRef<any>(null);
 
   const loadDailyPicks = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -293,7 +301,9 @@ export default function DailyPicksScreen() {
 
     try {
       setError(null);
-      const productLimit = DAILY_PICKS_LIMIT_DEFAULT;
+      setCurrentPage(1);
+      setHasMore(true);
+      const productLimit = 30;
       shuffleCycleRef.current += 1;
       const loadSeed = Date.now() + shuffleCycleRef.current * 2654435761;
 
@@ -304,20 +314,28 @@ export default function DailyPicksScreen() {
         getFeedBehavior(),
       ]);
 
+      likedItemsRef.current = dashboardRes?.likedItems || [];
+      ordersRef.current = ordersRes || [];
+      behaviorRef.current = behavior || null;
+
       const ranked = buildDailyPicks({
         products: productsRes.items || [],
-        likedItems: dashboardRes?.likedItems || [],
-        orders: ordersRes || [],
-        seenCounts: behavior.seen || {},
-        clickedCounts: behavior.clicked || {},
-        visitedCounts: behavior.visited || {},
-        lastSeenAt: behavior.lastSeenAt || {},
-        lastClickedAt: behavior.lastClickedAt || {},
-        lastVisitedAt: behavior.lastVisitedAt || {},
-      }, loadSeed);
+        likedItems: likedItemsRef.current,
+        orders: ordersRef.current,
+        seenCounts: behaviorRef.current?.seen || {},
+        clickedCounts: behaviorRef.current?.clicked || {},
+        visitedCounts: behaviorRef.current?.visited || {},
+        lastSeenAt: behaviorRef.current?.lastSeenAt || {},
+        lastClickedAt: behaviorRef.current?.lastClickedAt || {},
+        lastVisitedAt: behaviorRef.current?.lastVisitedAt || {},
+      }, loadSeed, 20);
 
       setPicks(ranked);
       seenRef.current.clear();
+
+      const pagination = productsRes.pagination || {};
+      const totalPages = pagination.totalPages || 1;
+      setHasMore(1 < totalPages);
     } catch (err: any) {
       setError(err?.message || 'Failed to load Daily Picks');
       setPicks([]);
@@ -326,6 +344,55 @@ export default function DailyPicksScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  const loadMoreDailyPicks = useCallback(async () => {
+    if (loading || refreshing || loadingMoreRef.current || loadingMore || !hasMore) return;
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      shuffleCycleRef.current += 1;
+      const loadSeed = Date.now() + shuffleCycleRef.current * 2654435761;
+
+      const productsRes = await getProducts({ page: nextPage, limit: 30, sort: 'newest' });
+
+      const ranked = buildDailyPicks({
+        products: productsRes.items || [],
+        likedItems: likedItemsRef.current,
+        orders: ordersRef.current,
+        seenCounts: behaviorRef.current?.seen || {},
+        clickedCounts: behaviorRef.current?.clicked || {},
+        visitedCounts: behaviorRef.current?.visited || {},
+        lastSeenAt: behaviorRef.current?.lastSeenAt || {},
+        lastClickedAt: behaviorRef.current?.lastClickedAt || {},
+        lastVisitedAt: behaviorRef.current?.lastVisitedAt || {},
+      }, loadSeed, 20);
+
+      setPicks((prev) => {
+        const existingIds = new Set(prev.map((item) => item._id));
+        return [...prev, ...ranked.filter((item) => !existingIds.has(item._id))];
+      });
+      setCurrentPage(nextPage);
+
+      const pagination = productsRes.pagination || {};
+      const totalPages = pagination.totalPages || 1;
+      setHasMore(nextPage < totalPages);
+    } catch (err: any) {
+      console.warn('Failed to load more Daily Picks:', err?.message);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [currentPage, hasMore, loading, refreshing, loadingMore]);
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 350;
+    if (isCloseToBottom) {
+      loadMoreDailyPicks();
+    }
+  }, [loadMoreDailyPicks]);
 
   useFocusEffect(
     useCallback(() => {
@@ -430,6 +497,8 @@ export default function DailyPicksScreen() {
       ) : (
         <ScrollView
           style={styles.resultsScroll}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
           refreshControl={refreshControl}
           contentContainerStyle={styles.listContent}>
           {picks.length === 0 ? (
@@ -437,17 +506,23 @@ export default function DailyPicksScreen() {
               <ThemedText style={styles.emptyText}>No personalized picks yet. Explore and interact with posts to train your feed.</ThemedText>
             </View>
           ) : (
-            <View style={styles.masonryWrap}>
-              <View style={styles.masonryColumn}>{columns.left.map(renderFeedLikeCard)}</View>
-              <View style={styles.masonryColumn}>{columns.right.map(renderFeedLikeCard)}</View>
-            </View>
+            <>
+              <View style={styles.masonryWrap}>
+                <View style={styles.masonryColumn}>{columns.left.map(renderFeedLikeCard)}</View>
+                <View style={styles.masonryColumn}>{columns.right.map(renderFeedLikeCard)}</View>
+              </View>
+              {loadingMore ? (
+                <View style={styles.footerLoader}>
+                  <ActivityIndicator size="small" color="#ffffff" />
+                </View>
+              ) : null}
+            </>
           )}
         </ScrollView>
       )}
     </ThemedView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -596,6 +671,10 @@ const styles = StyleSheet.create({
     color: '#7d8fa6',
     fontSize: 12,
     fontWeight: '600',
+  },
+  footerLoader: {
+    paddingVertical: 24,
+    alignItems: 'center',
   },
   emptyWrap: {
     borderRadius: 12,

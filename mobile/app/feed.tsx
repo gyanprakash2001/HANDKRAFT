@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, View, Pressable, ScrollView, RefreshControl, Dimensions, NativeSyntheticEvent, NativeScrollEvent, Platform } from 'react-native';
+import { Animated, StyleSheet, View, Pressable, ScrollView, RefreshControl, Dimensions, NativeSyntheticEvent, NativeScrollEvent, Platform, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
@@ -32,13 +32,9 @@ const FEED_SIDE_PADDING = 10;
 const COLUMN_GAP = 6;
 const COLUMN_WIDTH = (SCREEN_WIDTH - FEED_SIDE_PADDING * 2 - COLUMN_GAP) / 2;
 const BUYER_FEED_CATEGORIES = ['All', 'Jewelry', 'Home Decor', 'Kitchen', 'Textiles', 'Pottery', 'Woodwork', 'Accessories', 'Art', 'Others'];
-const PRIMARY_FEED_CATEGORIES_LOWER = BUYER_FEED_CATEGORIES
-  .filter((category) => category !== 'All' && category !== 'Others')
-  .map((category) => category.toLowerCase());
 const SKELETON_LEFT_RATIOS = [1, 0.8, 1.25];
 const SKELETON_RIGHT_RATIOS = [0.75, 1, 0.67];
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
-const FEED_LIMIT_DEFAULT = 40;
 const UNREAD_POLL_MS_DEFAULT = 12000;
 const CART_SYNC_THROTTLE_MS = 60000;
 
@@ -292,8 +288,14 @@ export default function FeedScreen() {
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [activeMediaByPost, setActiveMediaByPost] = useState<Record<string, number>>({});
   const [mediaSlideWidthByPost, setMediaSlideWidthByPost] = useState<Record<string, number>>({});
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const lastScrollYRef = useRef(0);
   const firstFocusRef = useRef(true);
+  const feedScrollRef = useRef<React.ElementRef<typeof ScrollView> | null>(null);
+  const loadingMoreRef = useRef(false);
+  const previousCategoryRef = useRef(selectedCategory);
   const lastCartSyncAtRef = useRef(0);
   const shuffleCycleRef = useRef(0);
   const seenProductIdsRef = useRef<Set<string>>(new Set());
@@ -359,12 +361,21 @@ export default function FeedScreen() {
 
     try {
       setError(null);
-      const productLimit = FEED_LIMIT_DEFAULT;
+      setCurrentPage(1);
+      setHasMore(true);
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      const productLimit = 20;
       shuffleCycleRef.current += 1;
       const loadSeed = Date.now() + shuffleCycleRef.current * 2654435761;
 
       const profilePromise = getProfile();
-      const productsPromise = getProducts({ page: 1, limit: productLimit, sort: 'newest' });
+      const productsPromise = getProducts({
+        page: 1,
+        limit: productLimit,
+        category: selectedCategory === 'All' ? undefined : selectedCategory,
+        sort: 'newest',
+      });
 
       try {
         const profile = await profilePromise;
@@ -383,6 +394,11 @@ export default function FeedScreen() {
 
       const normalizedProducts = (productsRes.items || []).map((item) => normalizeProduct(item));
       setProducts(rankFeedProducts(normalizedProducts, loadSeed));
+
+      const pagination = productsRes.pagination || {};
+      const totalPages = pagination.totalPages || 1;
+      setHasMore(1 < totalPages);
+
       loadUnreadMessageCount();
     } catch (err: any) {
       const message = err?.message || 'Failed to load feed';
@@ -391,7 +407,44 @@ export default function FeedScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [loadUnreadMessageCount, router]);
+  }, [loadUnreadMessageCount, router, selectedCategory]);
+
+  const loadMoreProducts = useCallback(async () => {
+    if (loading || refreshing || loadingMoreRef.current || loadingMore || !hasMore) return;
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      shuffleCycleRef.current += 1;
+      const loadSeed = Date.now() + shuffleCycleRef.current * 2654435761;
+
+      const productsRes = await getProducts({
+        page: nextPage,
+        limit: 20,
+        category: selectedCategory === 'All' ? undefined : selectedCategory,
+        sort: 'newest',
+      });
+
+      const normalizedProducts = (productsRes.items || []).map((item) => normalizeProduct(item));
+      const rankedProducts = rankFeedProducts(normalizedProducts, loadSeed);
+
+      setProducts((prev) => {
+        const existingIds = new Set(prev.map((item) => item._id));
+        return [...prev, ...rankedProducts.filter((item) => !existingIds.has(item._id))];
+      });
+      setCurrentPage(nextPage);
+
+      const pagination = productsRes.pagination || {};
+      const totalPages = pagination.totalPages || 1;
+      setHasMore(nextPage < totalPages);
+    } catch (err: any) {
+      console.warn('Failed to load more products:', err?.message);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [currentPage, hasMore, loading, refreshing, loadingMore, selectedCategory]);
 
   useEffect(() => {
     let mounted = true;
@@ -426,7 +479,7 @@ export default function FeedScreen() {
     return () => {
       mounted = false;
     };
-  }, [loadFeed]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -461,7 +514,13 @@ export default function FeedScreen() {
     }
 
     lastScrollYRef.current = y;
-  }, []);
+
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 350;
+    if (isCloseToBottom) {
+      loadMoreProducts();
+    }
+  }, [loadMoreProducts]);
 
   const handleRefresh = useCallback(() => {
     setHideFeedTopFilters(false);
@@ -522,24 +581,19 @@ export default function FeedScreen() {
     }).start();
   }, [hideFeedTopFilters, topFiltersAnim]);
 
-  const filteredProducts = useMemo(() => {
-    if (selectedCategory === 'All') {
-      return products;
+  useEffect(() => {
+    if (previousCategoryRef.current !== selectedCategory) {
+      previousCategoryRef.current = selectedCategory;
+      setProducts([]);
+      setLoading(true);
     }
 
-    if (selectedCategory === 'Others') {
-      return products.filter((item) => {
-        const category = String(item.category || '').toLowerCase();
-        return !PRIMARY_FEED_CATEGORIES_LOWER.includes(category);
-      });
-    }
+    lastScrollYRef.current = 0;
+    setHideFeedTopFilters(false);
+    feedScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [selectedCategory]);
 
-    const target = selectedCategory.toLowerCase();
-    return products.filter((item) => {
-      const category = String(item.category || '').toLowerCase();
-      return category === target;
-    });
-  }, [products, selectedCategory]);
+  const filteredProducts = products;
 
   const openProductDetail = useCallback((productId: string) => {
     recordFeedInteraction(productId, 'clicked').catch(() => {
@@ -839,6 +893,7 @@ export default function FeedScreen() {
         onHandlerStateChange={onCategorySwipeStateChange}>
         <View style={{ flex: 1 }}>
           <ScrollView
+            ref={feedScrollRef}
             style={styles.feedScroll}
             onScroll={handleFeedScroll}
             scrollEventThrottle={16}
@@ -888,6 +943,11 @@ export default function FeedScreen() {
                   <View style={styles.column}>{columns.left.map(renderCard)}</View>
                   <View style={styles.column}>{columns.right.map(renderCard)}</View>
                 </View>
+                {loadingMore ? (
+                  <View style={styles.footerLoader}>
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  </View>
+                ) : null}
               </>
             )}
           </ScrollView>
@@ -1145,6 +1205,10 @@ const styles = StyleSheet.create({
     color: '#b9f7c5',
     fontSize: 12,
     fontWeight: '600',
+  },
+  footerLoader: {
+    paddingVertical: 24,
+    alignItems: 'center',
   },
   masonryWrap: {
     flexDirection: 'row',

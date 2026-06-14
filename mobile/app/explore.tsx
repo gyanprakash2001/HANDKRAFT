@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, Pressable, TextInput, ActivityIndicator, ScrollView, Text, RefreshControl, Dimensions, Platform } from 'react-native';
+import { StyleSheet, View, Pressable, TextInput, ActivityIndicator, ScrollView, Text, RefreshControl, Dimensions, Platform, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
@@ -219,75 +219,15 @@ function fuzzyTokenMatchScore(queryToken: string, candidateToken: string) {
   return 0;
 }
 
-function scoreItem(item: ProductItem, rawQuery: string) {
-  const query = normalizeText(rawQuery);
-  if (!query) return 0;
-
-  const title = normalizeText(item.title);
-  const category = normalizeText(item.category);
-  const description = normalizeText(item.description || '');
-  const material = normalizeText(item.material || '');
-  const sellerName = normalizeText(item.sellerName || '');
-
-  let score = 0;
-
-  if (title === query) score += 160;
-  if (title.startsWith(query)) score += 130;
-  if (title.includes(query)) score += 100;
-
-  if (category === query) score += 95;
-  if (category.startsWith(query)) score += 70;
-  if (category.includes(query)) score += 55;
-
-  if (material.includes(query)) score += 38;
-  if (sellerName.includes(query)) score += 26;
-  if (description.includes(query)) score += 30;
-
-  const queryTokens = tokenize(query);
-  if (queryTokens.length) {
-    const titleTokens = tokenize(title);
-    const categoryTokens = tokenize(category);
-    const materialTokens = tokenize(material);
-    const descTokens = tokenize(description);
-
-    for (const token of queryTokens) {
-      if (titleTokens.some((entry) => entry.startsWith(token))) score += 24;
-      if (categoryTokens.some((entry) => entry.startsWith(token))) score += 18;
-      if (descTokens.some((entry) => entry.startsWith(token))) score += 8;
-
-      let bestTitleFuzzy = 0;
-      let bestCategoryFuzzy = 0;
-      let bestMaterialFuzzy = 0;
-
-      for (const entry of titleTokens) {
-        bestTitleFuzzy = Math.max(bestTitleFuzzy, fuzzyTokenMatchScore(token, entry));
-      }
-      for (const entry of categoryTokens) {
-        bestCategoryFuzzy = Math.max(bestCategoryFuzzy, fuzzyTokenMatchScore(token, entry));
-      }
-      for (const entry of materialTokens) {
-        bestMaterialFuzzy = Math.max(bestMaterialFuzzy, fuzzyTokenMatchScore(token, entry));
-      }
-
-      score += bestTitleFuzzy * 26;
-      score += bestCategoryFuzzy * 18;
-      score += bestMaterialFuzzy * 14;
-    }
-  }
-
-  // Keep commercially successful items slightly higher among similar textual matches.
-  score += (Number(item.monthlySold) || 0) * 0.15;
-  score += (Number(item.monthlySaves) || 0) * 0.08;
-
-  return score;
-}
-
 export default function ExploreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
+  const loadingMoreRef = useRef(false);
+  const searchRequestSeqRef = useRef(0);
 
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -295,6 +235,11 @@ export default function ExploreScreen() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<SearchSortMode>('relevant');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchResults, setSearchResults] = useState<ProductItem[]>([]);
 
   const loadRecentSearches = useCallback(async () => {
     try {
@@ -333,22 +278,115 @@ export default function ExploreScreen() {
   const loadProducts = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
       setRefreshing(true);
-    } else {
-      setLoading(true);
     }
-
     try {
       setError(null);
       const res = await getProducts({ page: 1, limit: 120, sort: 'newest' });
       setAllItems(res.items || []);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load products for search');
+      setError(err?.message || 'Failed to load products for suggestions');
       setAllItems([]);
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }, []);
+
+  const loadSearchResults = useCallback(async (pageNumber = 1, isLoadMore = false) => {
+    if (isLoadMore) {
+      if (loadingMoreRef.current) return;
+      loadingMoreRef.current = true;
+    }
+
+    const requestSeq = pageNumber === 1
+      ? searchRequestSeqRef.current + 1
+      : searchRequestSeqRef.current;
+    if (pageNumber === 1) {
+      searchRequestSeqRef.current = requestSeq;
+    }
+
+    if (pageNumber === 1) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+
+    try {
+      setError(null);
+      const trimmed = debouncedQuery.trim();
+      const res = await getProducts({
+        page: pageNumber,
+        limit: 20,
+        search: trimmed || undefined,
+        sort: sortMode === 'relevant' ? 'newest' : sortMode,
+      });
+
+      if (requestSeq !== searchRequestSeqRef.current) {
+        return;
+      }
+
+      const items = res.items || [];
+      if (isLoadMore) {
+        setSearchResults((prev) => {
+          const existingIds = new Set(prev.map((item) => item._id));
+          return [...prev, ...items.filter((item) => !existingIds.has(item._id))];
+        });
+      } else {
+        setSearchResults(items);
+      }
+
+      setCurrentPage(pageNumber);
+      const pagination = res.pagination || {};
+      const totalPages = pagination.totalPages || 1;
+      setHasMore(pageNumber < totalPages);
+    } catch (err: any) {
+      if (requestSeq !== searchRequestSeqRef.current) {
+        return;
+      }
+
+      setError(err?.message || 'Failed to search products');
+      if (!isLoadMore) {
+        setSearchResults([]);
+      }
+    } finally {
+      if (isLoadMore) {
+        loadingMoreRef.current = false;
+      }
+
+      if (requestSeq === searchRequestSeqRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        setRefreshing(false);
+      }
+    }
+  }, [debouncedQuery, sortMode]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    loadSearchResults(1, false);
+  }, [loadSearchResults]);
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 350;
+    if (isCloseToBottom && hasMore && !loadingMore && !loading) {
+      loadSearchResults(currentPage + 1, true);
+    }
+  }, [currentPage, hasMore, loadingMore, loading, loadSearchResults]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([
+      loadProducts(true),
+      loadSearchResults(1, false),
+    ]);
+    setRefreshing(false);
+  }, [loadProducts, loadSearchResults]);
 
   const loadAvatar = useCallback(async () => {
     try {
@@ -370,7 +408,7 @@ export default function ExploreScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadProducts();
+      loadProducts(false);
       loadRecentSearches();
       loadAvatar();
     }, [loadProducts, loadRecentSearches, loadAvatar])
@@ -446,44 +484,7 @@ export default function ExploreScreen() {
       .map((entry) => entry.label);
   }, [allItems, recentSearches, trimmedQuery]);
 
-  const results = useMemo(() => {
-    const withScore = (trimmedQuery
-      ? allItems.map((item) => ({ item, score: scoreItem(item, trimmedQuery) })).filter((entry) => entry.score > 0)
-      : allItems.map((item) => ({ item, score: 0 }))
-    );
-
-    if (sortMode === 'relevant' && trimmedQuery) {
-      return withScore
-        .sort((a, b) => b.score - a.score)
-        .map((entry) => entry.item)
-        .slice(0, 40);
-    }
-
-    const itemsOnly = withScore.map((entry) => entry.item);
-
-    if (sortMode === 'price_asc') {
-      return itemsOnly
-        .slice()
-        .sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0))
-        .slice(0, 40);
-    }
-
-    if (sortMode === 'price_desc') {
-      return itemsOnly
-        .slice()
-        .sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0))
-        .slice(0, 40);
-    }
-
-    return itemsOnly
-      .slice()
-      .sort((a, b) => {
-        const aTime = Date.parse(a.createdAt || '') || 0;
-        const bTime = Date.parse(b.createdAt || '') || 0;
-        return bTime - aTime;
-      })
-      .slice(0, 40);
-  }, [allItems, sortMode, trimmedQuery]);
+  const results = searchResults;
 
   const columns = useMemo(() => {
     const left: ProductItem[] = [];
@@ -691,7 +692,7 @@ export default function ExploreScreen() {
         </>
       ) : null}
 
-      {loading ? (
+      {loading && results.length === 0 ? (
         <View style={styles.loaderWrap}>
           <ActivityIndicator size="large" color="#fff" />
         </View>
@@ -699,7 +700,9 @@ export default function ExploreScreen() {
         <ScrollView
           style={styles.resultsScroll}
           keyboardShouldPersistTaps="handled"
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadProducts(true)} tintColor="#fff" />}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
           contentContainerStyle={[styles.resultsContent, { paddingBottom: resultsBottomPadding }]}>
           {results.length === 0 ? (
             <View style={styles.emptyWrap}>
@@ -707,10 +710,17 @@ export default function ExploreScreen() {
               <ThemedText style={styles.emptyText}>Try product names, categories, materials, or broader keywords.</ThemedText>
             </View>
           ) : (
-            <View style={styles.masonryWrap}>
-              <View style={styles.masonryColumn}>{columns.left.map(renderSearchFeedCard)}</View>
-              <View style={styles.masonryColumn}>{columns.right.map(renderSearchFeedCard)}</View>
-            </View>
+            <>
+              <View style={styles.masonryWrap}>
+                <View style={styles.masonryColumn}>{columns.left.map(renderSearchFeedCard)}</View>
+                <View style={styles.masonryColumn}>{columns.right.map(renderSearchFeedCard)}</View>
+              </View>
+              {loadingMore ? (
+                <View style={styles.footerLoader}>
+                  <ActivityIndicator size="small" color="#ffffff" />
+                </View>
+              ) : null}
+            </>
           )}
         </ScrollView>
       )}
@@ -1004,6 +1014,10 @@ const styles = StyleSheet.create({
     color: '#7d8fa6',
     fontSize: 12,
     fontWeight: '600',
+  },
+  footerLoader: {
+    paddingVertical: 24,
+    alignItems: 'center',
   },
   resultHighlightStrong: {
     backgroundColor: '#29486d',

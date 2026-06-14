@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { StyleSheet, View, Pressable, ActivityIndicator, FlatList, Switch, ScrollView, Modal, TextInput, useWindowDimensions, Platform } from 'react-native';
+import { StyleSheet, View, Pressable, ActivityIndicator, FlatList, Switch, ScrollView, Modal, TextInput, useWindowDimensions, Platform, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import AvatarEditor from '@/components/AvatarEditor';

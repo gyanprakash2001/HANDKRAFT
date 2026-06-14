@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 
 import FeedSkeleton from '../components/FeedSkeleton';
 import ProductCard from '../components/ProductCard';
@@ -37,6 +37,7 @@ export default function FeedPage() {
     limit: 12,
   });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
 
   const hasFilters = Boolean(search || category || sort !== 'newest');
@@ -52,11 +53,17 @@ export default function FeedPage() {
     [page, search, category, sort],
   );
 
+  const observerRef = useRef();
+
   useEffect(() => {
     const controller = new AbortController();
 
     async function loadProducts() {
-      setLoading(true);
+      if (page === 1) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
       setError('');
 
       try {
@@ -64,7 +71,7 @@ export default function FeedPage() {
         const nextItems = Array.isArray(result?.items) ? result.items : [];
         const nextPagination = result?.pagination || {};
 
-        setItems(nextItems);
+        setItems((prev) => (page === 1 ? nextItems : [...prev, ...nextItems]));
         setPagination({
           page: Number(nextPagination.page) || 1,
           totalPages: Number(nextPagination.totalPages) || 1,
@@ -77,10 +84,13 @@ export default function FeedPage() {
         }
 
         setError(requestError.message || 'Could not load products right now.');
-        setItems([]);
+        if (page === 1) {
+          setItems([]);
+        }
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
+          setLoadingMore(false);
         }
       }
     }
@@ -89,6 +99,29 @@ export default function FeedPage() {
 
     return () => controller.abort();
   }, [requestParams]);
+
+  const totalPages = Math.max(1, Number(pagination.totalPages) || 1);
+  const hasMore = page < totalPages;
+
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore) return;
+
+    const sentinel = observerRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          observer.disconnect();
+          setPage((prev) => Math.min(prev + 1, totalPages));
+        }
+      },
+      { rootMargin: '320px 0px', threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, loadingMore, hasMore, totalPages]);
 
   function handleSearchSubmit(event) {
     event.preventDefault();
@@ -104,7 +137,7 @@ export default function FeedPage() {
     setPage(1);
   }
 
-  const totalPages = Math.max(1, Number(pagination.totalPages) || 1);
+
 
   return (
     <section className="feed-page">
@@ -215,30 +248,23 @@ export default function FeedPage() {
             </div>
           ) : null}
 
-          {items.length > 0 ? (
-            <nav className="pagination" aria-label="Products pagination">
-              <button
-                type="button"
-                className="page-btn"
-                disabled={page <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-              >
-                Previous
-              </button>
-
-              <p>
-                Page <strong>{page}</strong> of <strong>{totalPages}</strong>
-              </p>
-
-              <button
-                type="button"
-                className="page-btn"
-                disabled={page >= totalPages}
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              >
-                Next
-              </button>
-            </nav>
+          {hasMore ? (
+            <div ref={observerRef} className="loading-sentinel">
+              {loadingMore ? (
+                <div className="spinner-wrap">
+                  <div className="loading-spinner"></div>
+                  <span>Loading more items...</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="load-more-btn"
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Load More
+                </button>
+              )}
+            </div>
           ) : null}
         </>
       ) : null}

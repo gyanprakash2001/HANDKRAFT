@@ -671,3 +671,54 @@ a {
     height: 58px;
   }
 }
+
+/* Infinite scroll styling */
+.loading-sentinel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2.2rem 0;
+  width: 100%;
+  grid-column: 1 / -1;
+}
+
+.load-more-btn {
+  background: var(--card);
+  color: var(--brand-dark);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.82rem 1.8rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.load-more-btn:hover {
+  background: var(--bg-soft);
+  border-color: var(--brand);
+}
+
+.spinner-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(47, 127, 102, 0.1);
+  border-radius: 50%;
+  border-top-color: var(--brand);
+  animation: spinner 0.85s linear infinite;
+}
+
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}

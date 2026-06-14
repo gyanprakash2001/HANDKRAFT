@@ -42,6 +42,10 @@ const ALLOWED_PRODUCT_CATEGORY_MAP = new Map(
   ALLOWED_PRODUCT_CATEGORIES.map((category) => [category.toLowerCase(), category])
 );
 
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function getPublicBaseUrl(req) {
   const explicitBaseUrl = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
   if (explicitBaseUrl) {
@@ -610,15 +614,21 @@ router.get('/', async (req, res) => {
 
     const query = { isActive: true };
 
-    if (req.query.category) {
-      query.category = req.query.category;
+    const requestedCategory = String(req.query.category || '').trim();
+    if (requestedCategory) {
+      query.category = ALLOWED_PRODUCT_CATEGORY_MAP.get(requestedCategory.toLowerCase()) || requestedCategory;
     }
 
-    if (req.query.search) {
+    const searchTerm = String(req.query.search || '').trim().slice(0, 80);
+    if (searchTerm) {
+      const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
       query.$or = [
-        { title: { $regex: req.query.search, $options: 'i' } },
-        { description: { $regex: req.query.search, $options: 'i' } },
-        { sellerName: { $regex: req.query.search, $options: 'i' } },
+        { title: searchRegex },
+        { description: searchRegex },
+        { sellerName: searchRegex },
+        { material: searchRegex },
+        { category: searchRegex },
+        { customCategory: searchRegex },
       ];
     }
 
@@ -691,7 +701,7 @@ router.get('/', async (req, res) => {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     });
   } catch (err) {
