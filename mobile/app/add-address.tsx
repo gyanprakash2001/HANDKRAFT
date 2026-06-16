@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, View, Pressable, ActivityIndicator, ScrollView, Alert, TextInput, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
-import { addUserAddress, getProfileDashboard } from '@/utils/api';
+import { addUserAddress, getProfileDashboard, sendOtp, verifyOtp } from '@/utils/api';
 
 export default function AddAddressScreen() {
   const router = useRouter();
@@ -24,6 +24,44 @@ export default function AddAddressScreen() {
   const [postalCode, setPostalCode] = useState('');
   const [country, setCountry] = useState('India');
   const [isDefault, setIsDefault] = useState(false);
+  const [fetchingPincode, setFetchingPincode] = useState(false);
+
+  // WhatsApp OTP states
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+
+  const handlePincodeChange = async (text: string) => {
+    const sanitized = text.replace(/[^0-9]/g, '');
+    setPostalCode(sanitized);
+
+    if (sanitized.length === 6) {
+      setFetchingPincode(true);
+      try {
+        const response = await fetch(`https://api.postalpincode.in/pincode/${sanitized}`);
+        const data = await response.json();
+        if (data && data[0] && data[0].Status === 'Success' && data[0].PostOffice && data[0].PostOffice.length > 0) {
+          const postOffice = data[0].PostOffice[0];
+          setCity(postOffice.District || '');
+          setState(postOffice.State || '');
+        } else {
+          Alert.alert('Error', 'Invalid Pincode. Please enter a valid Indian pincode.');
+          setCity('');
+          setState('');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'Failed to fetch city and state for this Pincode. Please check your internet connection.');
+        setCity('');
+        setState('');
+      } finally {
+        setFetchingPincode(false);
+      }
+    } else {
+      setCity('');
+      setState('');
+    }
+  };
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -43,9 +81,82 @@ export default function AddAddressScreen() {
     loadProfile();
   }, []);
 
+  const handlePhoneChange = (text: string) => {
+    setPhoneNumber(text);
+    if (phoneOtpSent) {
+      setPhoneOtpSent(false);
+      setOtpCode('');
+    }
+    if (phoneVerified) {
+      setPhoneVerified(false);
+    }
+  };
+
+  const handleSendPhoneOtp = async () => {
+    const trimmedPhone = phoneNumber.trim();
+    if (!trimmedPhone) {
+      Alert.alert('Error', 'Please enter a phone number first');
+      return;
+    }
+
+    setOtpSending(true);
+    try {
+      // Normalize and format phone number for WhatsApp message delivery
+      let formattedPhone = trimmedPhone.replace(/\s+/g, '');
+      if (!formattedPhone.startsWith('+')) {
+        if (formattedPhone.length === 10) {
+          formattedPhone = `+91${formattedPhone}`;
+        } else {
+          formattedPhone = `+${formattedPhone}`;
+        }
+      }
+
+      await sendOtp('', formattedPhone);
+      setPhoneOtpSent(true);
+      Alert.alert('Success', 'Verification code has been sent to your WhatsApp!');
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to send WhatsApp verification code');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async () => {
+    const trimmedOtp = otpCode.trim();
+    if (!trimmedOtp) {
+      Alert.alert('Error', 'Please enter the verification code');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let formattedPhone = phoneNumber.trim().replace(/\s+/g, '');
+      if (!formattedPhone.startsWith('+')) {
+        if (formattedPhone.length === 10) {
+          formattedPhone = `+91${formattedPhone}`;
+        } else {
+          formattedPhone = `+${formattedPhone}`;
+        }
+      }
+
+      await verifyOtp(formattedPhone, trimmedOtp);
+      setPhoneVerified(true);
+      Alert.alert('Success', 'Phone number verified successfully!');
+    } catch (err: any) {
+      Alert.alert('Verification Failed', err?.message || 'Incorrect OTP or verification expired');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!fullName.trim() || !phoneNumber.trim() || !email.trim() || !street.trim() || !city.trim() || !postalCode.trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    if (!phoneVerified) {
+      Alert.alert('Error', 'Please verify your phone number first');
       return;
     }
 
@@ -62,6 +173,7 @@ export default function AddAddressScreen() {
         postalCode: postalCode.trim(),
         country,
         isDefault,
+        otp: otpCode.trim(),
       });
 
       Alert.alert('Success', 'Address added successfully', [
@@ -122,15 +234,67 @@ export default function AddAddressScreen() {
 
           <View style={styles.section}>
             <ThemedText style={styles.label}>Phone Number *</ThemedText>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter phone number"
-              placeholderTextColor="#666"
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              keyboardType="phone-pad"
-            />
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={[
+                  styles.input,
+                  { marginVertical: 0 },
+                  phoneVerified && styles.inputDisabled,
+                  phoneNumber.trim().length > 0 && !phoneVerified && { paddingRight: 115 }
+                ]}
+                placeholder="Enter phone number"
+                placeholderTextColor="#666"
+                value={phoneNumber}
+                onChangeText={handlePhoneChange}
+                keyboardType="phone-pad"
+                editable={!phoneVerified}
+              />
+              {phoneNumber.trim().length > 0 && !phoneVerified && (
+                <Pressable
+                  style={styles.inlineButton}
+                  onPress={handleSendPhoneOtp}
+                  disabled={loading || otpSending}>
+                  {otpSending ? (
+                    <ActivityIndicator size="small" color="#9df0a2" />
+                  ) : (
+                    <ThemedText style={styles.inlineButtonText}>
+                      {phoneOtpSent ? 'Resend OTP' : 'Validate Phone'}
+                    </ThemedText>
+                  )}
+                </Pressable>
+              )}
+              {phoneVerified && (
+                <View style={styles.verifiedBadge}>
+                  <Ionicons name="checkmark-circle" size={18} color="#9df0a2" />
+                  <ThemedText style={styles.verifiedText}>Verified</ThemedText>
+                </View>
+              )}
+            </View>
           </View>
+
+          {phoneOtpSent && !phoneVerified && (
+            <View style={styles.otpContainer}>
+              <TextInput
+                style={[styles.input, styles.otpInput]}
+                placeholder="WhatsApp Verification OTP"
+                placeholderTextColor="#b3b3b3"
+                value={otpCode}
+                onChangeText={setOtpCode}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+              <Pressable
+                style={styles.verifyButton}
+                onPress={handleVerifyPhoneOtp}
+                disabled={loading}>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#0a0a0a" />
+                ) : (
+                  <ThemedText style={styles.verifyButtonText}>Verify Phone</ThemedText>
+                )}
+              </Pressable>
+            </View>
+          )}
 
           <View style={styles.section}>
             <ThemedText style={styles.label}>Email Address *</ThemedText>
@@ -159,47 +323,57 @@ export default function AddAddressScreen() {
 
           <View style={styles.row}>
             <View style={[styles.section, styles.halfWidth]}>
-              <ThemedText style={styles.label}>City *</ThemedText>
+              <ThemedText style={styles.label}>Pincode *</ThemedText>
+              <View style={{ justifyContent: 'center' }}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Pincode"
+                  placeholderTextColor="#666"
+                  value={postalCode}
+                  onChangeText={handlePincodeChange}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                />
+                {fetchingPincode && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#9df0a2"
+                    style={{ position: 'absolute', right: 12 }}
+                  />
+                )}
+              </View>
+            </View>
+            <View style={[styles.section, styles.halfWidth]}>
+              <ThemedText style={styles.label}>City</ThemedText>
               <TextInput
-                style={styles.input}
+                style={[styles.input, styles.disabledInput]}
                 placeholder="City"
                 placeholderTextColor="#666"
                 value={city}
-                onChangeText={setCity}
-              />
-            </View>
-            <View style={[styles.section, styles.halfWidth]}>
-              <ThemedText style={styles.label}>State</ThemedText>
-              <TextInput
-                style={styles.input}
-                placeholder="State"
-                placeholderTextColor="#666"
-                value={state}
-                onChangeText={setState}
+                editable={false}
               />
             </View>
           </View>
 
           <View style={styles.row}>
             <View style={[styles.section, styles.halfWidth]}>
-              <ThemedText style={styles.label}>Postal Code *</ThemedText>
+              <ThemedText style={styles.label}>State</ThemedText>
               <TextInput
-                style={styles.input}
-                placeholder="Postal code"
+                style={[styles.input, styles.disabledInput]}
+                placeholder="State"
                 placeholderTextColor="#666"
-                value={postalCode}
-                onChangeText={setPostalCode}
-                keyboardType="number-pad"
+                value={state}
+                editable={false}
               />
             </View>
             <View style={[styles.section, styles.halfWidth]}>
               <ThemedText style={styles.label}>Country</ThemedText>
               <TextInput
-                style={styles.input}
+                style={[styles.input, styles.disabledInput]}
                 placeholder="Country"
                 placeholderTextColor="#666"
                 value={country}
-                onChangeText={setCountry}
+                editable={false}
               />
             </View>
           </View>
@@ -218,8 +392,8 @@ export default function AddAddressScreen() {
           <Pressable style={styles.cancelButton} onPress={() => router.back()}>
             <ThemedText style={styles.cancelText}>Cancel</ThemedText>
           </Pressable>
-          <Pressable style={styles.saveButton} onPress={handleSave} disabled={loading}>
-            {loading ? (
+          <Pressable style={styles.saveButton} onPress={handleSave} disabled={loading || otpSending}>
+            {loading || otpSending ? (
               <ActivityIndicator size="small" color="#0a0a0a" />
             ) : (
               <ThemedText style={styles.saveText}>Add Address</ThemedText>
@@ -316,6 +490,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'System',
   },
+  disabledInput: {
+    backgroundColor: '#111111',
+    borderColor: '#444444',
+    color: '#888888',
+  },
   bioInput: {
     paddingTop: 10,
     paddingBottom: 40,
@@ -379,5 +558,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#0a0a0a',
+  },
+  inputContainer: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  inlineButton: {
+    position: 'absolute',
+    right: 8,
+    bottom: 6,
+    backgroundColor: 'rgba(157, 240, 162, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(157, 240, 162, 0.3)',
+  },
+  inlineButtonText: {
+    color: '#9df0a2',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  verifiedText: {
+    color: '#9df0a2',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  otpContainer: {
+    marginVertical: 8,
+  },
+  otpInput: {
+    borderColor: '#9df0a2',
+    backgroundColor: '#16222f',
+  },
+  verifyButton: {
+    backgroundColor: '#9df0a2',
+    paddingVertical: 10,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  verifyButtonText: {
+    color: '#0a0a0a',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

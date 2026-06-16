@@ -110,7 +110,7 @@ async function sendWhatsAppOtp(phoneNumber, otp) {
             language: {
               code: metaTemplateLang
             },
-            components: [
+            components: metaTemplateName === 'hello_world' ? [] : [
               {
                 type: 'body',
                 parameters: [

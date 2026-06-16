@@ -11,6 +11,7 @@ const Product = require('../models/Product');
 const Order = require('../models/Order');
 const Review = require('../models/Review');
 const { getPayoutPolicy, maskBankDetails } = require('../services/payouts');
+const Otp = require('../models/Otp');
 const {
   mapAddressToSellerPickup,
   sanitizeSellerPickupAddress,
@@ -977,10 +978,37 @@ router.get('/me/addresses', auth, async (req, res) => {
 // POST /api/users/me/addresses - Add new address
 router.post('/me/addresses', auth, async (req, res) => {
   try {
-    const { label, fullName, phoneNumber, email, street, city, state, postalCode, country, isDefault } = req.body;
+    const { label, fullName, phoneNumber, email, street, city, state, postalCode, country, isDefault, otp } = req.body;
 
     if (!fullName || !phoneNumber || !email || !street || !city || !postalCode) {
       return res.status(400).json({ message: 'Missing required address fields' });
+    }
+
+    if (!otp) {
+      return res.status(400).json({ message: 'WhatsApp verification code (OTP) is required' });
+    }
+
+    // Normalize phone number to match the identifier in the OTP collection
+    let formattedPhone = phoneNumber.trim().replace(/\s+/g, '');
+    if (!formattedPhone.startsWith('+')) {
+      if (formattedPhone.length === 10) {
+        formattedPhone = `+91${formattedPhone}`;
+      } else {
+        formattedPhone = `+${formattedPhone}`;
+      }
+    }
+
+    // Allow backdoor code '123456' for easier local development/testing
+    const isDev = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
+    const isBackdoor = isDev && String(otp).trim() === '123456';
+
+    if (!isBackdoor) {
+      const dbOtp = await Otp.findOne({ identifier: formattedPhone });
+      if (!dbOtp || dbOtp.otp !== String(otp).trim() || dbOtp.expiresAt < new Date()) {
+        return res.status(400).json({ message: 'Invalid or expired verification code' });
+      }
+      // Clear/delete OTP entry since it is now verified
+      await Otp.deleteOne({ identifier: formattedPhone });
     }
 
     const newAddress = {
@@ -996,7 +1024,7 @@ router.post('/me/addresses', auth, async (req, res) => {
       isDefault: isDefault === true,
     };
 
-      const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     if (isDefault) {

@@ -2130,6 +2130,7 @@ export interface AddAddressPayload {
   postalCode: string;
   country?: string;
   isDefault?: boolean;
+  otp?: string;
 }
 
 export async function addUserAddress(payload: AddAddressPayload): Promise<{ message: string; addresses: UserAddress[] }> {

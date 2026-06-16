@@ -24,6 +24,38 @@ export default function EditAddressScreen() {
   const [postalCode, setPostalCode] = useState('');
   const [country, setCountry] = useState('India');
   const [isDefault, setIsDefault] = useState(false);
+  const [fetchingPincode, setFetchingPincode] = useState(false);
+
+  const handlePincodeChange = async (text: string) => {
+    const sanitized = text.replace(/[^0-9]/g, '');
+    setPostalCode(sanitized);
+
+    if (sanitized.length === 6) {
+      setFetchingPincode(true);
+      try {
+        const response = await fetch(`https://api.postalpincode.in/pincode/${sanitized}`);
+        const data = await response.json();
+        if (data && data[0] && data[0].Status === 'Success' && data[0].PostOffice && data[0].PostOffice.length > 0) {
+          const postOffice = data[0].PostOffice[0];
+          setCity(postOffice.District || '');
+          setState(postOffice.State || '');
+        } else {
+          Alert.alert('Error', 'Invalid Pincode. Please enter a valid Indian pincode.');
+          setCity('');
+          setState('');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'Failed to fetch city and state for this Pincode. Please check your internet connection.');
+        setCity('');
+        setState('');
+      } finally {
+        setFetchingPincode(false);
+      }
+    } else {
+      setCity('');
+      setState('');
+    }
+  };
 
   useEffect(() => {
     const loadAddress = async () => {
@@ -202,47 +234,57 @@ export default function EditAddressScreen() {
 
         <View style={styles.row}>
           <View style={[styles.section, styles.halfWidth]}>
-            <ThemedText style={styles.label}>City *</ThemedText>
+            <ThemedText style={styles.label}>Pincode *</ThemedText>
+            <View style={{ justifyContent: 'center' }}>
+              <TextInput
+                style={styles.input}
+                placeholder="Pincode"
+                placeholderTextColor="#666"
+                value={postalCode}
+                onChangeText={handlePincodeChange}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+              {fetchingPincode && (
+                <ActivityIndicator
+                  size="small"
+                  color="#9df0a2"
+                  style={{ position: 'absolute', right: 12 }}
+                />
+              )}
+            </View>
+          </View>
+          <View style={[styles.section, styles.halfWidth]}>
+            <ThemedText style={styles.label}>City</ThemedText>
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.disabledInput]}
               placeholder="City"
               placeholderTextColor="#666"
               value={city}
-              onChangeText={setCity}
-            />
-          </View>
-          <View style={[styles.section, styles.halfWidth]}>
-            <ThemedText style={styles.label}>State</ThemedText>
-            <TextInput
-              style={styles.input}
-              placeholder="State"
-              placeholderTextColor="#666"
-              value={state}
-              onChangeText={setState}
+              editable={false}
             />
           </View>
         </View>
 
         <View style={styles.row}>
           <View style={[styles.section, styles.halfWidth]}>
-            <ThemedText style={styles.label}>Postal Code *</ThemedText>
+            <ThemedText style={styles.label}>State</ThemedText>
             <TextInput
-              style={styles.input}
-              placeholder="Postal code"
+              style={[styles.input, styles.disabledInput]}
+              placeholder="State"
               placeholderTextColor="#666"
-              value={postalCode}
-              onChangeText={setPostalCode}
-              keyboardType="number-pad"
+              value={state}
+              editable={false}
             />
           </View>
           <View style={[styles.section, styles.halfWidth]}>
             <ThemedText style={styles.label}>Country</ThemedText>
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.disabledInput]}
               placeholder="Country"
               placeholderTextColor="#666"
               value={country}
-              onChangeText={setCountry}
+              editable={false}
             />
           </View>
         </View>
@@ -362,6 +404,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontFamily: 'System',
+  },
+  disabledInput: {
+    backgroundColor: '#0c0f15',
+    borderColor: '#1e2430',
+    color: '#8e9bb2',
   },
   bioInput: {
     paddingTop: 10,
