@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -17,294 +18,239 @@ import { useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
-  requestSellerPayout,
   getSellerPayoutDashboard,
+  requestSellerPayout,
+  updateSellerPayoutProfile,
   SellerPayoutDashboardResponse,
   SellerPayoutEntry,
   SellerPayoutStatus,
-  updateSellerPayoutProfile,
 } from '@/utils/api';
+
+const SUPPORT_PHONE = '7619189174';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatCurrency(amount: number) {
-  return `₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+function fmt(amount: number) {
+  return '₹' + Number(amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function formatDate(value: string | null) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+function fmtDate(v: string | null | undefined) {
+  if (!v) return '—';
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function holdCountdown(holdUntil: string | null): string {
+function holdCountdown(holdUntil: string | null | undefined) {
   if (!holdUntil) return '';
   const diff = new Date(holdUntil).getTime() - Date.now();
-  if (diff <= 0) return 'Unlocking soon…';
-  const hrs = Math.floor(diff / 3600000);
-  const mins = Math.floor((diff % 3600000) / 60000);
-  if (hrs >= 48) return `${Math.floor(hrs / 24)}d left`;
-  if (hrs > 0) return `${hrs}h ${mins}m left`;
-  return `${mins}m left`;
+  if (diff <= 0) return 'Releasing…';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (h >= 48) return `${Math.floor(h / 24)}d left`;
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
 }
 
-function statusMeta(status: SellerPayoutStatus) {
-  switch (status) {
-    case 'paid':          return { label: 'PAID',             bg: '#112a1c', border: '#2f7c53', text: '#7ef5a0', icon: 'checkmark-circle' };
-    case 'on_hold':       return { label: 'IN HOLD',          bg: '#231c06', border: '#6f5f20', text: '#f5d16e', icon: 'time' };
-    case 'ready_for_payout': return { label: 'READY',         bg: '#0d1f35', border: '#2d5a8e', text: '#78c8ff', icon: 'flash' };
-    case 'processing':    return { label: 'PROCESSING (~2h)', bg: '#1a1035', border: '#5a3fa0', text: '#c4b0ff', icon: 'sync' };
-    case 'awaiting_delivery': return { label: 'INCOMING',     bg: '#17202a', border: '#3a4f62', text: '#9ab8d4', icon: 'hourglass' };
-    case 'failed':        return { label: 'FAILED',           bg: '#2a0e12', border: '#7a3f4d', text: '#ff8fa0', icon: 'warning' };
-    case 'cancelled':     return { label: 'CANCELLED',        bg: '#1a1c20', border: '#4a5060', text: '#8a96a8', icon: 'close-circle' };
-    default:              return { label: status.toUpperCase(), bg: '#161a20', border: '#3a4050', text: '#9aa8bc', icon: 'ellipse' };
-  }
+function statusStyle(status: SellerPayoutStatus) {
+  const s: Record<string, { bg: string; border: string; text: string; icon: string; label: string }> = {
+    paid:             { bg: '#0e2218', border: '#2a6a3f', text: '#7ef5a0', icon: 'checkmark-circle',   label: 'PAID' },
+    on_hold:          { bg: '#1a1500', border: '#5c4e00', text: '#f5d16e', icon: 'time',               label: 'ON HOLD' },
+    ready_for_payout: { bg: '#0a1a2e', border: '#2a5580', text: '#78c8ff', icon: 'flash',              label: 'READY TO CLAIM' },
+    processing:       { bg: '#100c2a', border: '#483a90', text: '#c4b0ff', icon: 'sync',               label: 'PROCESSING (~2h)' },
+    awaiting_delivery:{ bg: '#111820', border: '#2e4460', text: '#9ab8d4', icon: 'hourglass',          label: 'INCOMING' },
+    failed:           { bg: '#200a10', border: '#6a2838', text: '#ff8fa0', icon: 'warning',            label: 'FAILED' },
+    cancelled:        { bg: '#1a1c20', border: '#4a5060', text: '#8a96a8', icon: 'close-circle',       label: 'CANCELLED' },
+    reversed:         { bg: '#1a1c20', border: '#4a5060', text: '#8a96a8', icon: 'refresh-circle',     label: 'REVERSED' },
+  };
+  return s[status] ?? { bg: '#161a20', border: '#3a4050', text: '#9aa8bc', icon: 'ellipse', label: status.toUpperCase() };
 }
 
-// ─── Animated Balance Counter ─────────────────────────────────────────────────
+// ─── Animated Counter ─────────────────────────────────────────────────────────
 
-function BalanceCounter({ to }: { to: number }) {
-  const val = useRef(new Animated.Value(0)).current;
-  const [txt, setTxt] = useState('0.00');
+function AnimatedBalance({ to }: { to: number }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const [display, setDisplay] = useState('0.00');
   useEffect(() => {
-    val.setValue(0);
-    const anim = Animated.timing(val, { toValue: to, duration: 900, useNativeDriver: false });
-    const id = val.addListener(({ value: v }) =>
-      setTxt(v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    anim.setValue(0);
+    const listener = anim.addListener(({ value: v }) =>
+      setDisplay(v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
     );
-    anim.start();
-    return () => { anim.stop(); val.removeListener(id); };
-  }, [to, val]);
-  return (
-    <ThemedText style={styles.heroAmount}>₹{txt}</ThemedText>
-  );
+    const run = Animated.timing(anim, { toValue: to, duration: 1000, useNativeDriver: false });
+    run.start();
+    return () => { run.stop(); anim.removeListener(listener); };
+  }, [to, anim]);
+  return <ThemedText style={styles.heroAmount}>₹{display}</ThemedText>;
 }
 
-// ─── Mini Bar Sparkline ───────────────────────────────────────────────────────
-
-function EarningsSparkline({ payouts }: { payouts: SellerPayoutEntry[] }) {
-  const bars = useMemo(() => {
-    const paid = payouts
-      .filter(p => p.status === 'paid' || p.status === 'processing')
-      .slice(0, 7)
-      .reverse();
-    if (paid.length === 0) return [];
-    const max = Math.max(...paid.map(p => p.split.netPayoutAmount), 1);
-    return paid.map(p => ({ h: Math.max(4, (p.split.netPayoutAmount / max) * 48), amt: p.split.netPayoutAmount }));
-  }, [payouts]);
-
-  if (bars.length === 0) return null;
-
-  return (
-    <View style={styles.sparkWrap}>
-      <ThemedText style={styles.sparkLabel}>Recent earnings</ThemedText>
-      <View style={styles.sparkBars}>
-        {bars.map((b, i) => (
-          <View key={i} style={styles.sparkBarWrap}>
-            <View style={[styles.sparkBar, { height: b.h }]} />
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-// ─── Payout Row Card ──────────────────────────────────────────────────────────
+// ─── Payout Card ──────────────────────────────────────────────────────────────
 
 function PayoutCard({ entry, isLast }: { entry: SellerPayoutEntry; isLast: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const meta = statusMeta(entry.status);
+  const [open, setOpen] = useState(false);
+  const st = statusStyle(entry.status);
   const countdown = holdCountdown(entry.holdUntil);
 
   return (
-    <Pressable
-      onPress={() => setExpanded(e => !e)}
-      style={[styles.payoutCard, isLast && styles.payoutCardLast]}
-    >
-      {/* Header row */}
-      <View style={styles.payoutHead}>
-        <View style={styles.payoutOrderWrap}>
-          <ThemedText style={styles.payoutOrderId}>
-            #{entry.orderId.slice(-8).toUpperCase()}
-          </ThemedText>
-          {entry.status === 'on_hold' && countdown ? (
-            <View style={styles.countdownChip}>
-              <Ionicons name="time-outline" size={10} color="#f5d16e" />
-              <ThemedText style={styles.countdownText}>{countdown}</ThemedText>
-            </View>
-          ) : null}
-          {entry.status === 'processing' ? (
-            <View style={styles.processingChip}>
-              <Ionicons name="sync-outline" size={10} color="#c4b0ff" />
-              <ThemedText style={styles.processingChipText}>~2 hrs</ThemedText>
-            </View>
-          ) : null}
+    <Pressable onPress={() => setOpen(p => !p)} style={[styles.payoutCard, isLast && { borderBottomWidth: 0 }]}>
+      <View style={styles.payoutRow}>
+        <View style={{ flex: 1, gap: 3 }}>
+          <ThemedText style={styles.payoutOrderId}>#{entry.orderId.slice(-8).toUpperCase()}</ThemedText>
+          <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+            {entry.status === 'on_hold' && countdown ? (
+              <View style={styles.chip}>
+                <Ionicons name="time-outline" size={9} color="#f5d16e" />
+                <ThemedText style={[styles.chipText, { color: '#f5d16e' }]}>{countdown}</ThemedText>
+              </View>
+            ) : null}
+            {entry.status === 'processing' ? (
+              <View style={[styles.chip, { backgroundColor: '#12083a' }]}>
+                <Ionicons name="sync-outline" size={9} color="#c4b0ff" />
+                <ThemedText style={[styles.chipText, { color: '#c4b0ff' }]}>~2 hrs</ThemedText>
+              </View>
+            ) : null}
+          </View>
         </View>
-        <View style={styles.payoutRight}>
-          <ThemedText style={styles.payoutNet}>{formatCurrency(entry.split.netPayoutAmount)}</ThemedText>
-          <View style={[styles.statusPill, { backgroundColor: meta.bg, borderColor: meta.border }]}>
-            <ThemedText style={[styles.statusPillText, { color: meta.text }]}>{meta.label}</ThemedText>
+        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+          <ThemedText style={styles.payoutNet}>{fmt(entry.split.netPayoutAmount)}</ThemedText>
+          <View style={[styles.statusPill, { backgroundColor: st.bg, borderColor: st.border }]}>
+            <ThemedText style={[styles.statusPillText, { color: st.text }]}>{st.label}</ThemedText>
           </View>
         </View>
       </View>
+      <ThemedText style={styles.expandHint}>{open ? 'Hide breakdown ▲' : 'Show breakdown ▼'}</ThemedText>
 
-      {/* Expand toggle hint */}
-      <View style={styles.expandHint}>
-        <ThemedText style={styles.expandHintText}>
-          {expanded ? 'Hide breakdown ▲' : 'Show breakdown ▼'}
-        </ThemedText>
-      </View>
-
-      {/* Expanded breakdown */}
-      {expanded ? (
-        <View style={styles.breakdownBox}>
-          <BreakdownRow label="Sale amount (your price)" value={formatCurrency(entry.split.itemSubtotal)} />
-          <BreakdownRow label="Shipping cost share" value={`−${formatCurrency(entry.split.shippingDeduction)}`} negative />
-          <BreakdownRow
+      {open ? (
+        <View style={styles.breakdown}>
+          <BdRow label="Your sale price" value={fmt(entry.split.itemSubtotal)} />
+          <BdRow label="Shipping deducted" value={`−${fmt(entry.split.shippingDeduction)}`} neg />
+          <BdRow
             label={`Platform fee (₹${(entry.split.platformFeeFlat ?? entry.split.platformFeeAmount ?? 8).toFixed(0)} incl. ₹${(entry.split.csrAmount ?? 1).toFixed(0)} CSR)`}
-            value={`−${formatCurrency(entry.split.platformFeeAmount)}`}
-            negative
+            value={`−${fmt(entry.split.platformFeeAmount)}`}
+            neg
           />
-          <View style={styles.breakdownDivider} />
-          <BreakdownRow label="Your net payout" value={formatCurrency(entry.split.netPayoutAmount)} highlight />
-          {entry.payout.referenceId ? (
-            <ThemedText style={styles.refText}>Ref: {entry.payout.referenceId}</ThemedText>
-          ) : null}
-          {entry.payout.paidAt ? (
-            <ThemedText style={styles.refText}>Settled on {formatDate(entry.payout.paidAt)}</ThemedText>
-          ) : null}
-          {entry.payout.failureReason ? (
-            <ThemedText style={styles.failureText}>{entry.payout.failureReason}</ThemedText>
-          ) : null}
+          <View style={styles.bdDivider} />
+          <BdRow label="Your net payout" value={fmt(entry.split.netPayoutAmount)} bold />
+          {entry.payout.referenceId ? <ThemedText style={styles.refText}>Ref: {entry.payout.referenceId}</ThemedText> : null}
+          {entry.payout.paidAt ? <ThemedText style={styles.refText}>Paid: {fmtDate(entry.payout.paidAt)}</ThemedText> : null}
+          {entry.payout.failureReason ? <ThemedText style={styles.failText}>{entry.payout.failureReason}</ThemedText> : null}
         </View>
       ) : null}
     </Pressable>
   );
 }
 
-function BreakdownRow({ label, value, negative, highlight }: {
-  label: string; value: string; negative?: boolean; highlight?: boolean;
-}) {
+function BdRow({ label, value, neg, bold }: { label: string; value: string; neg?: boolean; bold?: boolean }) {
   return (
-    <View style={styles.breakdownRow}>
-      <ThemedText style={[styles.breakdownLabel, highlight && styles.breakdownLabelBold]}>{label}</ThemedText>
-      <ThemedText style={[
-        styles.breakdownValue,
-        negative && styles.breakdownNeg,
-        highlight && styles.breakdownHighlight,
-      ]}>{value}</ThemedText>
+    <View style={styles.bdRow}>
+      <ThemedText style={[styles.bdLabel, bold && styles.bdLabelBold]}>{label}</ThemedText>
+      <ThemedText style={[styles.bdValue, neg && styles.bdNeg, bold && styles.bdHighlight]}>{value}</ThemedText>
     </View>
   );
 }
 
-// ─── Main Screen ─────────────────────────────────────────────────────────────
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function SellerPayoutsScreen() {
   const router = useRouter();
-
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [requesting, setRequesting] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [savingBank, setSavingBank] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<SellerPayoutDashboardResponse | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Bank / UPI settings form
-  const [accountType, setAccountType] = useState<'bank' | 'upi'>('bank');
-  const [accountHolderName, setAccountHolderName] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
+  // Bank form state
+  const [acType, setAcType] = useState<'bank' | 'upi'>('bank');
+  const [holderName, setHolderName] = useState('');
+  const [acNumber, setAcNumber] = useState('');
   const [ifsc, setIfsc] = useState('');
   const [bankName, setBankName] = useState('');
   const [branch, setBranch] = useState('');
   const [upiId, setUpiId] = useState('');
-  const [linkedAccountId, setLinkedAccountId] = useState('');
-  const [minimumPayoutAmount, setMinimumPayoutAmount] = useState('0');
+  const [linkedId, setLinkedId] = useState('');
+  const [minPayout, setMinPayout] = useState('0');
 
-  const hydrateForm = useCallback((payload: SellerPayoutDashboardResponse | null) => {
-    if (!payload) return;
-    const bank = payload.seller.payoutProfile.bankDetails;
-    setAccountType((bank.accountType || 'bank') as 'bank' | 'upi');
-    setAccountHolderName(bank.accountHolderName || '');
-    setAccountNumber('');
-    setIfsc(bank.ifsc || '');
-    setBankName(bank.bankName || '');
-    setBranch(bank.branch || '');
-    setUpiId(bank.upiId || '');
-    setLinkedAccountId(bank.razorpayLinkedAccountId || '');
-    setMinimumPayoutAmount(String(payload.seller.payoutSettings.minimumPayoutAmount ?? 0));
-  }, []);
+  const hydrateForm = (data: SellerPayoutDashboardResponse) => {
+    const b = data.seller.payoutProfile.bankDetails;
+    setAcType((b.accountType || 'bank') as 'bank' | 'upi');
+    setHolderName(b.accountHolderName || '');
+    setAcNumber('');
+    setIfsc(b.ifsc || '');
+    setBankName(b.bankName || '');
+    setBranch(b.branch || '');
+    setUpiId(b.upiId || '');
+    setLinkedId(b.razorpayLinkedAccountId || '');
+    setMinPayout(String(data.seller.payoutSettings.minimumPayoutAmount ?? 0));
+  };
 
-  const loadDashboard = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  const load = useCallback(async (isRefresh = false) => {
+    isRefresh ? setRefreshing(true) : setLoading(true);
     try {
       setError(null);
-      const payload = await getSellerPayoutDashboard({ page: 1, limit: 50 });
-      setDashboard(payload);
-      hydrateForm(payload);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load wallet');
+      const data = await getSellerPayoutDashboard({ page: 1, limit: 50 });
+      setDashboard(data);
+      hydrateForm(data);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load wallet');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hydrateForm]);
+  }, []);
 
-  useEffect(() => { loadDashboard(); }, [loadDashboard]);
+  useEffect(() => { load(); }, [load]);
 
-  const payoutRows = useMemo(() => (dashboard?.payouts || []).slice(0, 20), [dashboard?.payouts]);
+  const rows = useMemo(() => (dashboard?.payouts || []).slice(0, 30), [dashboard]);
 
-  // ── Request Payout ──────────────────────────────────────────────────────────
-  const handleRequestPayout = useCallback(async () => {
-    const kycStatus = dashboard?.seller?.payoutProfile?.kycStatus || 'pending';
+  // ── Claim payout ────────────────────────────────────────────────────────────
+  const handleClaim = useCallback(async () => {
+    const kycOk = dashboard?.seller?.payoutProfile?.kycStatus === 'verified';
     const bank = dashboard?.seller?.payoutProfile?.bankDetails;
-    const hasBank = accountType === 'upi'
+    const hasBank = acType === 'upi'
       ? Boolean(bank?.upiId)
       : Boolean(bank?.accountNumberMasked && bank?.ifsc);
+    const claimable = Number(dashboard?.summary?.claimableAmount ?? 0);
 
-    if (kycStatus !== 'verified') {
+    if (!kycOk) {
       Alert.alert(
-        'KYC Required',
-        'Your KYC is not verified yet. Please complete KYC before requesting a payout.\n\nOpen "Edit Settlement Settings" to add your bank details.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    if (!hasBank) {
-      Alert.alert(
-        'Bank Details Missing',
-        'Add your bank account or UPI ID in "Settlement Settings" before requesting a payout.',
+        'KYC Not Verified',
+        'Please complete your KYC first. Add your bank or UPI details in "Bank/UPI Settings" below.',
         [{ text: 'OK' }, { text: 'Open Settings', onPress: () => setShowSettings(true) }]
       );
       return;
     }
-
-    const claimable = Number(dashboard?.summary?.claimableAmount || 0);
+    if (!hasBank) {
+      Alert.alert(
+        'Bank Details Missing',
+        'Add your bank account or UPI ID in "Bank/UPI Settings" before claiming.',
+        [{ text: 'OK' }, { text: 'Open Settings', onPress: () => setShowSettings(true) }]
+      );
+      return;
+    }
     if (claimable <= 0) {
-      Alert.alert('Nothing to withdraw', 'You have no balance available to withdraw right now.');
+      Alert.alert('No Balance', 'You have no balance ready to claim right now.');
       return;
     }
 
     Alert.alert(
-      'Request Payout?',
-      `Request ${formatCurrency(claimable)} to your ${accountType === 'upi' ? 'UPI' : 'bank account'}?\n\nPayment will be processed within 2 hours.`,
+      'Claim Payout?',
+      `Claim ${fmt(claimable)} to your ${acType === 'upi' ? 'UPI ID' : 'bank account'}?\n\nYou will receive the payment within 2 hours. If not, call ${SUPPORT_PHONE}.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Yes, Request',
+          text: 'Yes, Claim Now',
           onPress: async () => {
             try {
               setRequesting(true);
               const result = await requestSellerPayout({ requestAll: true });
               setDashboard(result.dashboard);
-              setSuccessMsg(`₹${result.requestedAmount.toLocaleString('en-IN')} payout requested! You'll receive it within 2 hours.`);
-              setTimeout(() => setSuccessMsg(null), 6000);
-            } catch (err: any) {
-              Alert.alert('Request failed', err?.message || 'Unable to request payout');
+              setSuccessMsg(
+                `✅ ${fmt(result.requestedAmount)} claim submitted!\nYou'll receive it within 2 hours.\nIf not, call ${SUPPORT_PHONE}.`
+              );
+              setTimeout(() => setSuccessMsg(null), 10000);
+            } catch (e: any) {
+              Alert.alert('Claim Failed', e?.message || 'Unable to submit claim. Try again.');
             } finally {
               setRequesting(false);
             }
@@ -312,91 +258,84 @@ export default function SellerPayoutsScreen() {
         },
       ]
     );
-  }, [dashboard, accountType]);
+  }, [dashboard, acType]);
 
   // ── Save bank settings ──────────────────────────────────────────────────────
-  const handleSaveSettings = useCallback(async () => {
-    const minimum = Number(minimumPayoutAmount);
-    if (!Number.isFinite(minimum) || minimum < 0) {
-      Alert.alert('Invalid minimum', 'Minimum payout amount must be zero or more.');
-      return;
-    }
-
-    const bankPayload: Record<string, any> = {
-      accountType,
-      accountHolderName: accountHolderName.trim(),
-      ifsc: ifsc.trim().toUpperCase(),
-      bankName: bankName.trim(),
-      branch: branch.trim(),
-      upiId: upiId.trim(),
-      razorpayLinkedAccountId: linkedAccountId.trim(),
-    };
-    if (accountNumber.trim()) bankPayload.accountNumber = accountNumber.trim();
-
+  const handleSaveBank = useCallback(async () => {
     try {
-      setSavingSettings(true);
+      setSavingBank(true);
+      const bankPayload: Record<string, string> = {
+        accountType: acType,
+        accountHolderName: holderName.trim(),
+        ifsc: ifsc.trim().toUpperCase(),
+        bankName: bankName.trim(),
+        branch: branch.trim(),
+        upiId: upiId.trim(),
+        razorpayLinkedAccountId: linkedId.trim(),
+      };
+      if (acNumber.trim()) bankPayload.accountNumber = acNumber.trim();
+
       await updateSellerPayoutProfile({
         bankDetails: bankPayload,
-        payoutSettings: { minimumPayoutAmount: minimum },
+        payoutSettings: { minimumPayoutAmount: Math.max(0, Number(minPayout) || 0) },
       });
-      await loadDashboard(true);
-      Alert.alert('Saved', 'Settlement settings updated.');
-    } catch (err: any) {
-      Alert.alert('Save failed', err?.message || 'Unable to save settings');
+      await load(true);
+      Alert.alert('Saved', 'Your bank/UPI details have been updated.');
+    } catch (e: any) {
+      Alert.alert('Save Failed', e?.message || 'Could not save settings.');
     } finally {
-      setSavingSettings(false);
+      setSavingBank(false);
     }
-  }, [accountHolderName, accountNumber, accountType, bankName, branch, ifsc, linkedAccountId, loadDashboard, minimumPayoutAmount, upiId]);
+  }, [acType, holderName, acNumber, ifsc, bankName, branch, upiId, linkedId, minPayout, load]);
 
-  const summary = dashboard?.summary;
+  // ── Derived values ──────────────────────────────────────────────────────────
+  const s = dashboard?.summary;
   const seller = dashboard?.seller;
-  const claimable = Number(summary?.claimableAmount ?? 0);
-  const onHold = Number(summary?.onHoldAmount ?? 0);
-  const processing = Number((summary as any)?.processingAmount ?? 0);
-  const totalPaid = Number(summary?.paidAmount ?? 0);
-  const incoming = Number(summary?.incomingAmount ?? 0);
-  const nextRelease = summary?.nextReleaseAt || null;
+  const claimable = Number(s?.claimableAmount ?? 0);
+  const onHold = Number(s?.onHoldAmount ?? 0);
+  const processing = Number(s?.processingAmount ?? 0);
+  const incoming = Number(s?.incomingAmount ?? 0);
+  const paid = Number(s?.paidAmount ?? 0);
+  const nextRelease = s?.nextReleaseAt ?? null;
   const holdDays = Number(seller?.policy?.holdDaysAfterDelivery ?? 2);
-  const platformFeeFlat = Number(seller?.policy?.platformFeeFlat ?? 8);
-  const csrAmount = Number(seller?.policy?.csrAmount ?? 1);
+  const feeFlat = Number(seller?.policy?.platformFeeFlat ?? 8);
+  const csr = Number(seller?.policy?.csrAmount ?? 1);
   const kycVerified = seller?.payoutProfile?.kycStatus === 'verified';
+  const bankDetails = seller?.payoutProfile?.bankDetails;
 
-  // ── Loading state ───────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={styles.screen}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.headerIconBtn}>
+          <Pressable onPress={() => router.back()} style={styles.iconBtn}>
             <Ionicons name="chevron-back" size={22} color="#f0f6ff" />
           </Pressable>
           <ThemedText style={styles.headerTitle}>My Wallet</ThemedText>
-          <View style={styles.headerIconBtn} />
+          <View style={styles.iconBtn} />
         </View>
-        <View style={styles.loaderWrap}>
+        <View style={styles.center}>
           <ActivityIndicator size="large" color="#7ef5a0" />
-          <ThemedText style={styles.loaderText}>Loading wallet…</ThemedText>
+          <ThemedText style={styles.loadingText}>Loading your wallet…</ThemedText>
         </View>
       </ThemedView>
     );
   }
 
   return (
-    <ThemedView style={styles.container}>
-      {/* Header */}
+    <ThemedView style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.headerIconBtn}>
+        <Pressable onPress={() => router.back()} style={styles.iconBtn}>
           <Ionicons name="chevron-back" size={22} color="#f0f6ff" />
         </Pressable>
         <ThemedText style={styles.headerTitle}>My Wallet</ThemedText>
-        <Pressable onPress={() => loadDashboard(true)} style={styles.headerIconBtn}>
+        <Pressable onPress={() => load(true)} style={styles.iconBtn}>
           <Ionicons name="refresh" size={18} color="#7ef5a0" />
         </Pressable>
       </View>
 
       <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentInner}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadDashboard(true)} tintColor="#7ef5a0" />}
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#7ef5a0" />}
       >
         {/* Error */}
         {error ? (
@@ -410,203 +349,215 @@ export default function SellerPayoutsScreen() {
         {successMsg ? (
           <LinearGradient colors={['#0d2b1a', '#0f3320']} style={styles.successBanner}>
             <Ionicons name="checkmark-circle" size={16} color="#7ef5a0" />
-            <ThemedText style={styles.successText}>{successMsg}</ThemedText>
+            <View style={{ flex: 1 }}>
+              {successMsg.split('\n').map((line, i) => (
+                <ThemedText key={i} style={styles.successText}>{line}</ThemedText>
+              ))}
+              <Pressable onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`)}>
+                <ThemedText style={styles.callLink}>📞 Tap to call {SUPPORT_PHONE}</ThemedText>
+              </Pressable>
+            </View>
           </LinearGradient>
         ) : null}
 
-        {/* ── Hero wallet card ──────────────────────────────────────────── */}
-        <LinearGradient
-          colors={['#0a1a0e', '#0d2215', '#091810']}
-          style={styles.heroCard}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
+        {/* ── Hero card ──────────────────────────────────────────────── */}
+        <LinearGradient colors={['#0a1a0e', '#0d2215', '#091810']} style={styles.heroCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           <View style={styles.heroGlow} />
-          <ThemedText style={styles.heroLabel}>Available to Withdraw</ThemedText>
-          <BalanceCounter to={claimable} />
+          <ThemedText style={styles.heroLabel}>AVAILABLE TO CLAIM</ThemedText>
+          <AnimatedBalance to={claimable} />
+
           {processing > 0 ? (
-            <View style={styles.processingBadge}>
-              <Ionicons name="sync-outline" size={11} color="#c4b0ff" />
-              <ThemedText style={styles.processingBadgeText}>
-                {formatCurrency(processing)} processing · arrives in ~2 hrs
-              </ThemedText>
-            </View>
+            <LinearGradient colors={['#1c1240', '#14103a']} style={styles.processingBanner}>
+              <Ionicons name="sync-outline" size={12} color="#c4b0ff" />
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.processingText}>{fmt(processing)} is being processed — arrives ~2 hrs</ThemedText>
+                <Pressable onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`)}>
+                  <ThemedText style={styles.processingCallText}>Issues? Call {SUPPORT_PHONE}</ThemedText>
+                </Pressable>
+              </View>
+            </LinearGradient>
           ) : null}
 
-          {/* 3 stat pills */}
-          <View style={styles.statRow}>
-            <View style={styles.statPill}>
-              <ThemedText style={styles.statValue}>{formatCurrency(onHold)}</ThemedText>
-              <ThemedText style={styles.statLabel}>On Hold</ThemedText>
-            </View>
-            <View style={[styles.statPill, styles.statPillMid]}>
-              <ThemedText style={styles.statValue}>{formatCurrency(incoming)}</ThemedText>
-              <ThemedText style={styles.statLabel}>Incoming</ThemedText>
-            </View>
-            <View style={styles.statPill}>
-              <ThemedText style={styles.statValue}>{formatCurrency(totalPaid)}</ThemedText>
-              <ThemedText style={styles.statLabel}>Total Paid</ThemedText>
-            </View>
+          {/* Stats row */}
+          <View style={styles.statsRow}>
+            <StatPill label="On Hold" value={fmt(onHold)} color="#f5d16e" />
+            <StatPill label="Incoming" value={fmt(incoming)} color="#9ab8d4" />
+            <StatPill label="Total Paid" value={fmt(paid)} color="#7ef5a0" />
           </View>
-
-          {/* Sparkline */}
-          <EarningsSparkline payouts={payoutRows} />
         </LinearGradient>
 
-        {/* ── KYC Banner ───────────────────────────────────────────────── */}
+        {/* ── Policy info ────────────────────────────────────────────── */}
+        <View style={styles.policyBar}>
+          <Ionicons name="information-circle-outline" size={12} color="#5a7a9a" />
+          <ThemedText style={styles.policyText}>
+            {holdDays}-day hold after delivery · ₹{feeFlat} platform fee (₹{csr} CSR) per order
+            {nextRelease ? ` · Next release: ${fmtDate(nextRelease)}` : ''}
+          </ThemedText>
+        </View>
+
+        {/* ── KYC Banner ─────────────────────────────────────────────── */}
         {!kycVerified ? (
           <View style={styles.kycBanner}>
             <Ionicons name="shield-outline" size={16} color="#f5d16e" />
-            <View style={styles.kycTextWrap}>
+            <View style={{ flex: 1 }}>
               <ThemedText style={styles.kycTitle}>Complete KYC to Withdraw</ThemedText>
-              <ThemedText style={styles.kycSub}>
-                Add your bank or UPI details and get verified to start receiving payouts.
-              </ThemedText>
+              <ThemedText style={styles.kycSub}>Add bank/UPI details to start receiving payouts.</ThemedText>
             </View>
             <Pressable onPress={() => setShowSettings(true)} style={styles.kycBtn}>
-              <ThemedText style={styles.kycBtnText}>Setup</ThemedText>
+              <ThemedText style={styles.kycBtnText}>Setup →</ThemedText>
             </Pressable>
           </View>
         ) : null}
 
-        {/* ── Wallet Status ─────────────────────────────────────────────── */}
-        <View style={styles.infoCard}>
-          <Ionicons name="information-circle-outline" size={14} color="#9ab8d4" />
-          <ThemedText style={styles.infoText}>
-            Funds are held for {holdDays} day{holdDays !== 1 ? 's' : ''} after delivery. Platform fee is ₹{platformFeeFlat}/order (includes ₹{csrAmount} CSR).
-            {nextRelease ? `  Next release: ${formatDate(nextRelease)}.` : ''}
-          </ThemedText>
-        </View>
-
-        {/* ── Request Payout Button ─────────────────────────────────────── */}
+        {/* ── CLAIM BUTTON ───────────────────────────────────────────── */}
         <Pressable
-          style={({ pressed }) => [styles.withdrawBtn, (pressed || requesting) && styles.withdrawBtnPressed]}
-          onPress={handleRequestPayout}
+          onPress={handleClaim}
           disabled={requesting}
+          style={({ pressed }) => [styles.claimBtn, (pressed || requesting) && { opacity: 0.8 }]}
         >
           <LinearGradient
-            colors={claimable > 0 ? ['#1a4d2e', '#1f6e3a'] : ['#1a1a1a', '#222222']}
-            style={styles.withdrawBtnInner}
+            colors={claimable > 0 ? ['#1a4d2e', '#1f6e3a'] : ['#181818', '#1e1e1e']}
+            style={styles.claimBtnInner}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
           >
             {requesting
               ? <ActivityIndicator color="#7ef5a0" size="small" />
-              : <Ionicons name="arrow-up-circle" size={18} color={claimable > 0 ? '#7ef5a0' : '#4a5566'} />
+              : <Ionicons name="arrow-up-circle" size={20} color={claimable > 0 ? '#7ef5a0' : '#3a4a56'} />
             }
-            <ThemedText style={[styles.withdrawBtnText, claimable <= 0 && styles.withdrawBtnTextDim]}>
-              {requesting ? 'Requesting…' : claimable > 0 ? `Request ${formatCurrency(claimable)} Payout` : 'No balance to withdraw'}
+            <ThemedText style={[styles.claimBtnText, claimable <= 0 && { color: '#3a4a56' }]}>
+              {requesting ? 'Submitting Claim…' : claimable > 0 ? `Claim ${fmt(claimable)}` : 'No Balance to Claim'}
             </ThemedText>
           </LinearGradient>
         </Pressable>
 
-        {/* ── Settlement Settings ───────────────────────────────────────── */}
-        <Pressable
-          style={styles.settingsToggle}
-          onPress={() => setShowSettings(prev => !prev)}
-        >
-          <Ionicons name={showSettings ? 'chevron-up' : 'settings-outline'} size={14} color="#8ab4d8" />
-          <ThemedText style={styles.settingsToggleText}>
-            {showSettings ? 'Hide Settlement Settings' : 'Edit Settlement Settings'}
+        {claimable > 0 ? (
+          <ThemedText style={styles.claimHint}>
+            Payment within 2 hrs · Need help? Call {SUPPORT_PHONE}
           </ThemedText>
-        </Pressable>
+        ) : null}
 
-        {/* Settlement Account Summary (always visible) */}
-        <View style={styles.sectionCard}>
-          <ThemedText style={styles.sectionTitle}>Settlement Account</ThemedText>
+        {/* ── Settlement Account Summary ─────────────────────────────── */}
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <ThemedText style={styles.cardTitle}>Settlement Account</ThemedText>
+            <Pressable onPress={() => setShowSettings(p => !p)} style={styles.editBtn}>
+              <Ionicons name={showSettings ? 'chevron-up' : 'pencil'} size={12} color="#7ef5a0" />
+              <ThemedText style={styles.editBtnText}>{showSettings ? 'Close' : 'Edit'}</ThemedText>
+            </Pressable>
+          </View>
+
           <DetailRow label="KYC Status" value={String(seller?.payoutProfile?.kycStatus || 'pending').toUpperCase()} />
-          <DetailRow label="Account type" value={String(seller?.payoutProfile?.bankDetails?.accountType || 'bank').toUpperCase()} />
           <DetailRow
-            label={seller?.payoutProfile?.bankDetails?.accountType === 'upi' ? 'UPI ID' : 'Account'}
+            label="Account Type"
+            value={String(bankDetails?.accountType || 'bank').toUpperCase()}
+          />
+          <DetailRow
+            label={bankDetails?.accountType === 'upi' ? 'UPI ID' : 'Account'}
             value={
-              seller?.payoutProfile?.bankDetails?.accountType === 'upi'
-                ? seller?.payoutProfile?.bankDetails?.upiId || 'Not set'
-                : seller?.payoutProfile?.bankDetails?.accountNumberMasked || 'Not set'
+              bankDetails?.accountType === 'upi'
+                ? bankDetails?.upiId || 'Not set'
+                : bankDetails?.accountNumberMasked || 'Not set'
             }
           />
-          <DetailRow label="Account holder" value={seller?.payoutProfile?.bankDetails?.accountHolderName || 'Not set'} isLast />
+          <DetailRow label="Name" value={bankDetails?.accountHolderName || 'Not set'} isLast />
         </View>
 
-        {/* Edit Settings Form */}
+        {/* Bank Settings Form */}
         {showSettings ? (
-          <View style={styles.sectionCard}>
-            <ThemedText style={styles.sectionTitle}>Edit Settlement Settings</ThemedText>
+          <View style={styles.card}>
+            <ThemedText style={styles.cardTitle}>Edit Bank / UPI Settings</ThemedText>
 
             <ThemedText style={styles.fieldLabel}>Account type</ThemedText>
-            <View style={styles.segmentRow}>
-              <Pressable style={[styles.segBtn, accountType === 'bank' && styles.segBtnActive]} onPress={() => setAccountType('bank')}>
-                <ThemedText style={[styles.segText, accountType === 'bank' && styles.segTextActive]}>Bank</ThemedText>
+            <View style={styles.segRow}>
+              <Pressable style={[styles.seg, acType === 'bank' && styles.segActive]} onPress={() => setAcType('bank')}>
+                <ThemedText style={[styles.segText, acType === 'bank' && styles.segTextActive]}>Bank Account</ThemedText>
               </Pressable>
-              <Pressable style={[styles.segBtn, accountType === 'upi' && styles.segBtnActive]} onPress={() => setAccountType('upi')}>
-                <ThemedText style={[styles.segText, accountType === 'upi' && styles.segTextActive]}>UPI</ThemedText>
+              <Pressable style={[styles.seg, acType === 'upi' && styles.segActive]} onPress={() => setAcType('upi')}>
+                <ThemedText style={[styles.segText, acType === 'upi' && styles.segTextActive]}>UPI</ThemedText>
               </Pressable>
             </View>
 
             <ThemedText style={styles.fieldLabel}>Account holder name</ThemedText>
-            <TextInput value={accountHolderName} onChangeText={setAccountHolderName} style={styles.input} placeholder="Full name" placeholderTextColor="#5a6a80" />
+            <TextInput style={styles.input} value={holderName} onChangeText={setHolderName} placeholder="Full legal name" placeholderTextColor="#4a5a70" />
 
-            {accountType === 'bank' ? (
+            {acType === 'bank' ? (
               <>
-                <ThemedText style={styles.fieldLabel}>Account number</ThemedText>
-                <TextInput value={accountNumber} onChangeText={setAccountNumber} style={styles.input} keyboardType="number-pad" placeholder="Leave blank to keep existing" placeholderTextColor="#5a6a80" />
+                <ThemedText style={styles.fieldLabel}>Account number (leave blank to keep existing)</ThemedText>
+                <TextInput style={styles.input} value={acNumber} onChangeText={setAcNumber} keyboardType="number-pad" placeholder="Bank account number" placeholderTextColor="#4a5a70" />
                 <ThemedText style={styles.fieldLabel}>IFSC code</ThemedText>
-                <TextInput value={ifsc} onChangeText={setIfsc} style={styles.input} autoCapitalize="characters" placeholder="e.g. HDFC0001234" placeholderTextColor="#5a6a80" />
+                <TextInput style={styles.input} value={ifsc} onChangeText={setIfsc} autoCapitalize="characters" placeholder="e.g. HDFC0001234" placeholderTextColor="#4a5a70" />
                 <ThemedText style={styles.fieldLabel}>Bank name</ThemedText>
-                <TextInput value={bankName} onChangeText={setBankName} style={styles.input} placeholder="e.g. HDFC Bank" placeholderTextColor="#5a6a80" />
+                <TextInput style={styles.input} value={bankName} onChangeText={setBankName} placeholder="e.g. HDFC Bank" placeholderTextColor="#4a5a70" />
                 <ThemedText style={styles.fieldLabel}>Branch</ThemedText>
-                <TextInput value={branch} onChangeText={setBranch} style={styles.input} placeholder="Branch name" placeholderTextColor="#5a6a80" />
+                <TextInput style={styles.input} value={branch} onChangeText={setBranch} placeholder="Branch name" placeholderTextColor="#4a5a70" />
               </>
             ) : (
               <>
                 <ThemedText style={styles.fieldLabel}>UPI ID</ThemedText>
-                <TextInput value={upiId} onChangeText={setUpiId} style={styles.input} placeholder="yourname@bank" placeholderTextColor="#5a6a80" />
+                <TextInput style={styles.input} value={upiId} onChangeText={setUpiId} placeholder="yourname@upi" placeholderTextColor="#4a5a70" />
               </>
             )}
 
             <ThemedText style={styles.fieldLabel}>Razorpay linked account ID (optional)</ThemedText>
-            <TextInput value={linkedAccountId} onChangeText={setLinkedAccountId} style={styles.input} placeholder="acc_xxxxx" placeholderTextColor="#5a6a80" />
+            <TextInput style={styles.input} value={linkedId} onChangeText={setLinkedId} placeholder="acc_xxxxxx" placeholderTextColor="#4a5a70" />
 
             <ThemedText style={styles.fieldLabel}>Minimum payout amount (₹)</ThemedText>
-            <TextInput value={minimumPayoutAmount} onChangeText={setMinimumPayoutAmount} style={styles.input} keyboardType="decimal-pad" placeholder="0" placeholderTextColor="#5a6a80" />
+            <TextInput style={styles.input} value={minPayout} onChangeText={setMinPayout} keyboardType="decimal-pad" placeholder="0" placeholderTextColor="#4a5a70" />
 
             <Pressable
-              style={({ pressed }) => [styles.saveBtn, (pressed || savingSettings) && styles.saveBtnPressed]}
-              onPress={handleSaveSettings}
-              disabled={savingSettings}
+              onPress={handleSaveBank}
+              disabled={savingBank}
+              style={({ pressed }) => [styles.saveBtn, (pressed || savingBank) && { opacity: 0.8 }]}
             >
-              {savingSettings ? <ActivityIndicator color="#0f1a12" /> : null}
-              <ThemedText style={styles.saveBtnText}>{savingSettings ? 'Saving…' : 'Save Settings'}</ThemedText>
+              {savingBank ? <ActivityIndicator color="#0a1e12" /> : null}
+              <ThemedText style={styles.saveBtnText}>{savingBank ? 'Saving…' : 'Save Settings'}</ThemedText>
             </Pressable>
           </View>
         ) : null}
 
-        {/* ── Payout History ────────────────────────────────────────────── */}
-        <View style={styles.sectionCard}>
-          <ThemedText style={styles.sectionTitle}>Payout History</ThemedText>
-          <ThemedText style={styles.sectionSub}>Tap any order to see the full earnings breakdown.</ThemedText>
+        {/* ── Payout History ─────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <ThemedText style={styles.cardTitle}>Payout History</ThemedText>
+          <ThemedText style={styles.cardSub}>Tap any order to see full breakdown</ThemedText>
 
-          {payoutRows.length === 0 ? (
-            <View style={styles.emptyWrap}>
-              <Ionicons name="wallet-outline" size={32} color="#2a3a4a" />
+          {rows.length === 0 ? (
+            <View style={styles.empty}>
+              <Ionicons name="wallet-outline" size={36} color="#1a2e40" />
               <ThemedText style={styles.emptyTitle}>No payouts yet</ThemedText>
-              <ThemedText style={styles.emptySub}>Make your first sale to see earnings here.</ThemedText>
+              <ThemedText style={styles.emptySub}>Make a sale and deliver it to see earnings here.</ThemedText>
             </View>
           ) : (
-            payoutRows.map((entry, idx) => (
-              <PayoutCard key={entry.id} entry={entry} isLast={idx === payoutRows.length - 1} />
+            rows.map((entry, i) => (
+              <PayoutCard key={entry.id} entry={entry} isLast={i === rows.length - 1} />
             ))
           )}
         </View>
+
+        {/* Support footer */}
+        <Pressable onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`)} style={styles.supportFooter}>
+          <Ionicons name="call-outline" size={14} color="#4a7a9a" />
+          <ThemedText style={styles.supportText}>Payout issues? Call {SUPPORT_PHONE}</ThemedText>
+        </Pressable>
       </ScrollView>
     </ThemedView>
   );
 }
 
-// ─── Reusable detail row ──────────────────────────────────────────────────────
+// ─── Small components ─────────────────────────────────────────────────────────
+
+function StatPill({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <View style={styles.statPill}>
+      <ThemedText style={[styles.statValue, { color }]}>{value}</ThemedText>
+      <ThemedText style={styles.statLabel}>{label}</ThemedText>
+    </View>
+  );
+}
 
 function DetailRow({ label, value, isLast }: { label: string; value: string; isLast?: boolean }) {
   return (
-    <View style={[styles.detailRow, isLast && styles.detailRowLast]}>
+    <View style={[styles.detailRow, isLast && { borderBottomWidth: 0 }]}>
       <ThemedText style={styles.detailLabel}>{label}</ThemedText>
       <ThemedText style={styles.detailValue}>{value}</ThemedText>
     </View>
@@ -616,207 +567,95 @@ function DetailRow({ label, value, isLast }: { label: string; value: string; isL
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#050a0d' },
-  header: {
-    paddingTop: 62, paddingHorizontal: 14, paddingBottom: 12,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
+  screen: { flex: 1, backgroundColor: '#050a0d' },
+  header: { paddingTop: 62, paddingHorizontal: 14, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { color: '#f0f8ff', fontSize: 20, fontWeight: '800' },
-  headerIconBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: '#0d1520', borderWidth: 1, borderColor: '#1e3048',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  loaderWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loaderText: { color: '#5a7a94', fontSize: 13 },
-  content: { flex: 1 },
-  contentInner: { paddingHorizontal: 14, paddingBottom: 32, gap: 10 },
+  iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#0d1520', borderWidth: 1, borderColor: '#1e3048', alignItems: 'center', justifyContent: 'center' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { color: '#4a6a88', fontSize: 13 },
+  scroll: { paddingHorizontal: 14, paddingBottom: 40, gap: 10 },
 
-  errorCard: {
-    flexDirection: 'row', gap: 8, alignItems: 'center',
-    borderRadius: 10, borderWidth: 1, borderColor: '#5a2030',
-    backgroundColor: '#1a0810', paddingHorizontal: 12, paddingVertical: 10,
-  },
+  errorCard: { flexDirection: 'row', gap: 8, alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#5a2030', backgroundColor: '#1a0810', paddingHorizontal: 12, paddingVertical: 10 },
   errorText: { color: '#ff8fa0', fontSize: 12, fontWeight: '700', flex: 1 },
 
-  successBanner: {
-    flexDirection: 'row', gap: 8, alignItems: 'center',
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
-    borderWidth: 1, borderColor: '#1e5c32',
-  },
-  successText: { color: '#7ef5a0', fontSize: 12, fontWeight: '700', flex: 1 },
+  successBanner: { borderRadius: 14, padding: 14, gap: 8, flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: '#1e5c32' },
+  successText: { color: '#7ef5a0', fontSize: 12, fontWeight: '700' },
+  callLink: { color: '#5ab87a', fontSize: 11, marginTop: 4 },
 
-  // Hero card
-  heroCard: {
-    borderRadius: 20, padding: 20, overflow: 'hidden',
-    borderWidth: 1, borderColor: '#1a3d28',
-  },
-  heroGlow: {
-    position: 'absolute', top: -40, right: -40,
-    width: 140, height: 140, borderRadius: 70,
-    backgroundColor: '#7ef5a020',
-  },
-  heroLabel: { color: '#5a9470', fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
-  heroAmount: { color: '#7ef5a0', fontSize: 36, fontWeight: '900', marginTop: 4, marginBottom: 8 },
+  heroCard: { borderRadius: 20, padding: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#1a3d28' },
+  heroGlow: { position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: 70, backgroundColor: '#7ef5a020' },
+  heroLabel: { color: '#4a7a5a', fontSize: 10, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 },
+  heroAmount: { color: '#7ef5a0', fontSize: 38, fontWeight: '900', marginBottom: 8 },
 
-  processingBadge: {
-    flexDirection: 'row', gap: 5, alignItems: 'center',
-    backgroundColor: '#1c1240', borderRadius: 999,
-    paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginBottom: 12,
-  },
-  processingBadgeText: { color: '#c4b0ff', fontSize: 10, fontWeight: '700' },
+  processingBanner: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12, borderWidth: 1, borderColor: '#3a2a70' },
+  processingText: { color: '#c4b0ff', fontSize: 10, fontWeight: '700' },
+  processingCallText: { color: '#7a6aaa', fontSize: 9, marginTop: 2 },
 
-  statRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  statPill: {
-    flex: 1, borderRadius: 10,
-    backgroundColor: '#0a1e12', borderWidth: 1, borderColor: '#183424',
-    paddingHorizontal: 8, paddingVertical: 8, alignItems: 'center',
-  },
-  statPillMid: { borderColor: '#1e3424' },
-  statValue: { color: '#d0f0dc', fontSize: 12, fontWeight: '800' },
-  statLabel: { color: '#4a7a5c', fontSize: 9, fontWeight: '700', marginTop: 2 },
+  statsRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  statPill: { flex: 1, borderRadius: 10, backgroundColor: '#0a1e12', borderWidth: 1, borderColor: '#183424', paddingHorizontal: 8, paddingVertical: 8, alignItems: 'center' },
+  statValue: { fontSize: 11, fontWeight: '800' },
+  statLabel: { color: '#3a5a4a', fontSize: 9, fontWeight: '700', marginTop: 2 },
 
-  // Sparkline
-  sparkWrap: { marginTop: 14 },
-  sparkLabel: { color: '#3a6a4e', fontSize: 9, fontWeight: '700', letterSpacing: 0.5, marginBottom: 6 },
-  sparkBars: { flexDirection: 'row', alignItems: 'flex-end', height: 52, gap: 4 },
-  sparkBarWrap: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
-  sparkBar: { width: '70%', borderRadius: 4, backgroundColor: '#2a6c42' },
+  policyBar: { flexDirection: 'row', gap: 6, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#1a2a3a', backgroundColor: '#090f18', paddingHorizontal: 10, paddingVertical: 7 },
+  policyText: { color: '#4a6a8a', fontSize: 10, flex: 1 },
 
-  // KYC Banner
-  kycBanner: {
-    flexDirection: 'row', gap: 10, alignItems: 'center',
-    borderRadius: 12, padding: 12,
-    backgroundColor: '#1a1500', borderWidth: 1, borderColor: '#4a3d00',
-  },
-  kycTextWrap: { flex: 1 },
+  kycBanner: { flexDirection: 'row', gap: 10, alignItems: 'center', borderRadius: 12, padding: 12, backgroundColor: '#1a1500', borderWidth: 1, borderColor: '#4a3d00' },
   kycTitle: { color: '#f5d16e', fontSize: 12, fontWeight: '800' },
-  kycSub: { color: '#a08a3a', fontSize: 10, marginTop: 2 },
-  kycBtn: {
-    backgroundColor: '#2a2000', borderRadius: 8,
-    borderWidth: 1, borderColor: '#6a5000',
-    paddingHorizontal: 10, paddingVertical: 6,
-  },
+  kycSub: { color: '#806a30', fontSize: 10, marginTop: 2 },
+  kycBtn: { backgroundColor: '#2a2000', borderRadius: 8, borderWidth: 1, borderColor: '#6a5000', paddingHorizontal: 10, paddingVertical: 6 },
   kycBtnText: { color: '#f5d16e', fontSize: 10, fontWeight: '800' },
 
-  // Info bar
-  infoCard: {
-    flexDirection: 'row', gap: 6, alignItems: 'flex-start',
-    borderRadius: 10, backgroundColor: '#0a1520',
-    borderWidth: 1, borderColor: '#1a2e42',
-    paddingHorizontal: 10, paddingVertical: 8,
-  },
-  infoText: { color: '#6a8aaa', fontSize: 10, flex: 1, lineHeight: 15 },
+  claimBtn: { borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#2a5c3a' },
+  claimBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15 },
+  claimBtnText: { color: '#7ef5a0', fontSize: 15, fontWeight: '800' },
+  claimHint: { textAlign: 'center', color: '#3a5a4a', fontSize: 10, marginTop: -4 },
 
-  // Withdraw button
-  withdrawBtn: { borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#2a5c3a' },
-  withdrawBtnPressed: { opacity: 0.85 },
-  withdrawBtnInner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 14,
-  },
-  withdrawBtnText: { color: '#7ef5a0', fontSize: 14, fontWeight: '800' },
-  withdrawBtnTextDim: { color: '#3a4a56' },
+  card: { borderRadius: 14, borderWidth: 1, borderColor: '#1a2a3a', backgroundColor: '#090f18', paddingHorizontal: 14, paddingVertical: 12 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  cardTitle: { color: '#d0e8ff', fontSize: 12, fontWeight: '800' },
+  cardSub: { color: '#3a5a78', fontSize: 10, marginTop: -8, marginBottom: 10 },
+  editBtn: { flexDirection: 'row', gap: 4, alignItems: 'center', backgroundColor: '#0d2a1c', borderRadius: 999, borderWidth: 1, borderColor: '#2a5c3a', paddingHorizontal: 8, paddingVertical: 4 },
+  editBtnText: { color: '#7ef5a0', fontSize: 10, fontWeight: '700' },
 
-  // Settings toggle
-  settingsToggle: {
-    flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 10, borderWidth: 1, borderColor: '#1a2e42',
-    backgroundColor: '#0a1520', paddingVertical: 10,
-  },
-  settingsToggleText: { color: '#8ab4d8', fontSize: 11, fontWeight: '700' },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#111e2c' },
+  detailLabel: { color: '#4a6a8a', fontSize: 11 },
+  detailValue: { color: '#c0d8f0', fontSize: 11, fontWeight: '700', textAlign: 'right', flex: 1, paddingLeft: 8 },
 
-  // Section cards
-  sectionCard: {
-    borderRadius: 14, borderWidth: 1, borderColor: '#1a2a3a',
-    backgroundColor: '#090f18', paddingHorizontal: 14, paddingVertical: 12,
-  },
-  sectionTitle: { color: '#d0e8ff', fontSize: 12, fontWeight: '800', marginBottom: 10 },
-  sectionSub: { color: '#4a6880', fontSize: 10, marginBottom: 10, marginTop: -6 },
-
-  detailRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#121e2c',
-  },
-  detailRowLast: { borderBottomWidth: 0 },
-  detailLabel: { color: '#5a7a9a', fontSize: 11 },
-  detailValue: { color: '#c0d8f0', fontSize: 11, fontWeight: '700', textAlign: 'right', flexShrink: 1 },
-
-  // Settings form
-  fieldLabel: { color: '#6a8aaa', fontSize: 10, fontWeight: '700', marginTop: 8, marginBottom: 4 },
-  input: {
-    borderRadius: 10, borderWidth: 1, borderColor: '#1e3048',
-    backgroundColor: '#0a1520', color: '#c0d8f0', fontSize: 12,
-    paddingHorizontal: 12, paddingVertical: 10,
-  },
-  segmentRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
-  segBtn: {
-    flex: 1, borderRadius: 10, borderWidth: 1, borderColor: '#1e3048',
-    backgroundColor: '#0a1520', alignItems: 'center', justifyContent: 'center', paddingVertical: 9,
-  },
-  segBtnActive: { borderColor: '#7ef5a0', backgroundColor: '#102a1c' },
-  segText: { color: '#6a8aaa', fontSize: 11, fontWeight: '700' },
+  fieldLabel: { color: '#5a7a9a', fontSize: 10, fontWeight: '700', marginTop: 10, marginBottom: 3 },
+  input: { borderRadius: 10, borderWidth: 1, borderColor: '#1e3048', backgroundColor: '#0a1520', color: '#c0d8f0', fontSize: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  segRow: { flexDirection: 'row', gap: 8 },
+  seg: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: '#1e3048', backgroundColor: '#0a1520', alignItems: 'center', paddingVertical: 9 },
+  segActive: { borderColor: '#7ef5a0', backgroundColor: '#102a1c' },
+  segText: { color: '#4a6a8a', fontSize: 11, fontWeight: '700' },
   segTextActive: { color: '#7ef5a0' },
-
-  saveBtn: {
-    marginTop: 14, borderRadius: 12, backgroundColor: '#7ef5a0',
-    paddingVertical: 12, alignItems: 'center', justifyContent: 'center',
-    flexDirection: 'row', gap: 6,
-  },
-  saveBtnPressed: { opacity: 0.85 },
+  saveBtn: { marginTop: 14, borderRadius: 12, backgroundColor: '#7ef5a0', paddingVertical: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 },
   saveBtnText: { color: '#0a1e12', fontSize: 13, fontWeight: '800' },
 
-  // Payout cards
-  payoutCard: {
-    borderBottomWidth: 1, borderBottomColor: '#121e2c', paddingVertical: 12, gap: 4,
-  },
-  payoutCardLast: { borderBottomWidth: 0 },
-  payoutHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  payoutOrderWrap: { flex: 1, gap: 4 },
+  payoutCard: { borderBottomWidth: 1, borderBottomColor: '#111e2c', paddingVertical: 12, gap: 4 },
+  payoutRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   payoutOrderId: { color: '#c0d8f0', fontSize: 12, fontWeight: '800' },
-  payoutRight: { alignItems: 'flex-end', gap: 4 },
   payoutNet: { color: '#7ef5a0', fontSize: 14, fontWeight: '900' },
-
-  statusPill: {
-    borderRadius: 999, borderWidth: 1,
-    paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start',
-  },
+  chip: { flexDirection: 'row', gap: 3, alignItems: 'center', backgroundColor: '#1a1400', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2 },
+  chipText: { fontSize: 9, fontWeight: '700' },
+  statusPill: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2 },
   statusPillText: { fontSize: 8, fontWeight: '800' },
+  expandHint: { color: '#2a4a6a', fontSize: 9, fontWeight: '600' },
 
-  countdownChip: {
-    flexDirection: 'row', gap: 3, alignItems: 'center',
-    backgroundColor: '#1a1400', borderRadius: 999,
-    paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start',
-  },
-  countdownText: { color: '#f5d16e', fontSize: 9, fontWeight: '700' },
+  breakdown: { marginTop: 8, backgroundColor: '#060d15', borderRadius: 10, padding: 10, gap: 3 },
+  bdRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  bdLabel: { color: '#4a6a8a', fontSize: 9, flex: 1 },
+  bdLabelBold: { color: '#c0d8f0', fontWeight: '800' },
+  bdValue: { color: '#8aaaca', fontSize: 9, fontWeight: '700' },
+  bdNeg: { color: '#e07070' },
+  bdHighlight: { color: '#7ef5a0', fontSize: 11, fontWeight: '900' },
+  bdDivider: { height: 1, backgroundColor: '#1a2c3c', marginVertical: 3 },
+  refText: { color: '#2a4a6a', fontSize: 9, marginTop: 2 },
+  failText: { color: '#e07070', fontSize: 9, fontWeight: '700', marginTop: 4 },
 
-  processingChip: {
-    flexDirection: 'row', gap: 3, alignItems: 'center',
-    backgroundColor: '#12083a', borderRadius: 999,
-    paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start',
-  },
-  processingChipText: { color: '#c4b0ff', fontSize: 9, fontWeight: '700' },
+  empty: { alignItems: 'center', paddingVertical: 24, gap: 6 },
+  emptyTitle: { color: '#2a4a62', fontSize: 14, fontWeight: '800' },
+  emptySub: { color: '#1a3050', fontSize: 11, textAlign: 'center' },
 
-  expandHint: { marginTop: 2 },
-  expandHintText: { color: '#2a4a6a', fontSize: 9, fontWeight: '600' },
-
-  // Breakdown
-  breakdownBox: {
-    marginTop: 8, backgroundColor: '#060d15',
-    borderRadius: 10, padding: 10, gap: 4,
-  },
-  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  breakdownLabel: { color: '#5a7a9a', fontSize: 10, flex: 1 },
-  breakdownLabelBold: { color: '#c0d8f0', fontWeight: '800' },
-  breakdownValue: { color: '#8aaaca', fontSize: 10, fontWeight: '700' },
-  breakdownNeg: { color: '#e07070' },
-  breakdownHighlight: { color: '#7ef5a0', fontSize: 12, fontWeight: '900' },
-  breakdownDivider: { height: 1, backgroundColor: '#1a2c3c', marginVertical: 4 },
-  refText: { color: '#3a5a7a', fontSize: 9, marginTop: 2 },
-  failureText: { color: '#e07070', fontSize: 9, fontWeight: '700', marginTop: 4 },
-
-  // Empty state
-  emptyWrap: { alignItems: 'center', paddingVertical: 20, gap: 6 },
-  emptyTitle: { color: '#3a5a7a', fontSize: 14, fontWeight: '800' },
-  emptySub: { color: '#2a3a4a', fontSize: 11, textAlign: 'center' },
+  supportFooter: { flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
+  supportText: { color: '#3a5a70', fontSize: 11 },
 });

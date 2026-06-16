@@ -851,6 +851,8 @@ async function getSellerPayoutDashboard(sellerId, { page = 1, limit = 20, status
         shippingShare: Number(entry?.split?.shippingShare || 0),
         shippingDeduction: Number(entry?.split?.shippingDeduction || 0),
         grossAmount: Number(entry?.split?.grossAmount || 0),
+        platformFeeFlat: Number(entry?.split?.platformFeeFlat || entry?.split?.platformFeeAmount || 0),
+        csrAmount: Number(entry?.split?.csrAmount || 0),
         platformFeePercent: Number(entry?.split?.platformFeePercent || 0),
         platformFeeAmount: Number(entry?.split?.platformFeeAmount || 0),
         deductionsTotal: Number(entry?.split?.deductionsTotal || 0),
@@ -988,6 +990,18 @@ async function getAdminPayoutDashboard({ page = 1, limit = 20, status, sellerId 
         name: String(seller?.name || ''),
         email: String(seller?.email || ''),
         kycStatus: String(seller?.sellerPayoutProfile?.kycStatus || 'pending'),
+        bankDetails: seller?.sellerPayoutProfile?.bankDetails
+          ? {
+            accountType: String(seller.sellerPayoutProfile.bankDetails.accountType || 'bank'),
+            accountHolderName: String(seller.sellerPayoutProfile.bankDetails.accountHolderName || ''),
+            accountNumberMasked: String(seller.sellerPayoutProfile.bankDetails.accountNumberMasked || ''),
+            ifsc: String(seller.sellerPayoutProfile.bankDetails.ifsc || ''),
+            bankName: String(seller.sellerPayoutProfile.bankDetails.bankName || ''),
+            branch: String(seller.sellerPayoutProfile.bankDetails.branch || ''),
+            upiId: String(seller.sellerPayoutProfile.bankDetails.upiId || ''),
+            razorpayLinkedAccountId: String(seller.sellerPayoutProfile.bankDetails.razorpayLinkedAccountId || ''),
+          }
+          : null,
       },
       status: String(entry.status || ''),
       holdUntil: entry.holdUntil || null,
@@ -996,6 +1010,8 @@ async function getAdminPayoutDashboard({ page = 1, limit = 20, status, sellerId 
         itemSubtotal: Number(entry?.split?.itemSubtotal || 0),
         shippingDeduction: Number(entry?.split?.shippingDeduction || entry?.split?.shippingShare || 0),
         grossAmount: Number(entry?.split?.grossAmount || 0),
+        platformFeeFlat: Number(entry?.split?.platformFeeFlat || entry?.split?.platformFeeAmount || 0),
+        csrAmount: Number(entry?.split?.csrAmount || 0),
         platformFeeAmount: Number(entry?.split?.platformFeeAmount || 0),
         deductionsTotal: Number(entry?.split?.deductionsTotal || 0),
         basePayoutAmount: Number(entry?.split?.basePayoutAmount || 0),
@@ -1004,6 +1020,7 @@ async function getAdminPayoutDashboard({ page = 1, limit = 20, status, sellerId 
       },
       payout: {
         referenceId: String(entry?.payout?.referenceId || ''),
+        initiatedAt: entry?.payout?.initiatedAt || null,
         paidAt: entry?.payout?.paidAt || null,
         failureReason: String(entry?.payout?.failureReason || ''),
       },
@@ -1100,16 +1117,17 @@ async function requestSellerPayout(sellerId, { payoutIds = [], requestAll = fals
     const net = Number(payout?.split?.netPayoutAmount || 0);
 
     payout.status = 'processing';
-    payout.payout = Object.assign({}, payout.payout || {}, {
-      mode: 'manual',
-      provider: 'internal',
-      failureReason: '',
-      initiatedAt: new Date(),
-    });
+    // Use direct field assignment + markModified so Mongoose tracks subdoc changes
+    if (!payout.payout) payout.payout = {};
+    payout.payout.mode = 'manual';
+    payout.payout.provider = 'internal';
+    payout.payout.failureReason = '';
+    payout.payout.initiatedAt = new Date();
+    payout.markModified('payout');
 
     appendPayoutTimeline(payout, {
       status: 'processing',
-      note: 'Seller requested payout. Awaiting admin settlement (est. 2 hours).',
+      note: 'Seller requested payout. Awaiting admin settlement (est. 2 hours). If not received, call 7619189174.',
       source: 'seller',
     });
 
@@ -1173,13 +1191,14 @@ async function adminMarkPayoutsPaid({ payoutIds = [], sellerId, markAll = false 
     const referenceId = createInternalPayoutReference();
 
     payout.status = 'paid';
-    payout.payout = Object.assign({}, payout.payout || {}, {
-      mode: 'manual',
-      provider: 'internal',
-      referenceId,
-      paidAt: now,
-      failureReason: '',
-    });
+    // Direct field assignment + markModified to ensure Mongoose persists subdoc changes
+    if (!payout.payout) payout.payout = {};
+    payout.payout.mode = 'manual';
+    payout.payout.provider = 'internal';
+    payout.payout.referenceId = referenceId;
+    payout.payout.paidAt = now;
+    payout.payout.failureReason = '';
+    payout.markModified('payout');
 
     appendPayoutTimeline(payout, {
       status: 'paid',

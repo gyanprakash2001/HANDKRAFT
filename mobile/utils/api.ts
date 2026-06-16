@@ -2687,7 +2687,8 @@ export interface SellerPayoutDashboardResponse {
     };
     policy: {
       holdDaysAfterDelivery: number;
-      defaultPlatformFeePercent: number;
+      platformFeeFlat: number;
+      csrAmount: number;
       claimMode: string;
     };
   };
@@ -2811,7 +2812,22 @@ export async function requestSellerPayout(
 export interface AdminPayoutEntry {
   id: string;
   orderId: string;
-  seller: { id: string; name: string; email: string; kycStatus: string };
+  seller: {
+    id: string;
+    name: string;
+    email: string;
+    kycStatus: string;
+    bankDetails: {
+      accountType: string;
+      accountHolderName: string;
+      accountNumberMasked: string;
+      ifsc: string;
+      bankName: string;
+      branch: string;
+      upiId: string;
+      razorpayLinkedAccountId: string;
+    } | null;
+  };
   status: SellerPayoutStatus;
   holdUntil: string | null;
   deliveredAt: string | null;
