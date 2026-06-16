@@ -144,9 +144,15 @@ const env = {
     schedulerEnabled: parseBoolean(process.env.PAYOUTS_SCHEDULER_ENABLED, true),
     schedulerIntervalMs: parsePositiveNumber(process.env.PAYOUTS_SCHEDULER_INTERVAL_MS, 60000),
     schedulerBatchLimit: parsePositiveNumber(process.env.PAYOUTS_SCHEDULER_BATCH_LIMIT, 50),
-    holdDaysAfterDelivery: parseNonNegativeNumber(process.env.PAYOUTS_HOLD_DAYS_AFTER_DELIVERY, 0),
-    platformFeePercent: parseNonNegativeNumber(process.env.PAYOUTS_PLATFORM_FEE_PERCENT, 0),
-    defaultReservePercent: parseNonNegativeNumber(process.env.PAYOUTS_DEFAULT_RESERVE_PERCENT, 10),
+    // 2-day hold after delivery before seller can request payout.
+    holdDaysAfterDelivery: parseNonNegativeNumber(process.env.PAYOUTS_HOLD_DAYS_AFTER_DELIVERY, 2),
+    // Flat platform fee per order in INR (e.g. 8 = ₹8). Includes CSR.
+    platformFeeFlat: parseNonNegativeNumber(process.env.PAYOUTS_PLATFORM_FEE_FLAT, 8),
+    // CSR portion of the platform fee in INR (e.g. 1 = ₹1 goes to CSR).
+    csrAmount: parseNonNegativeNumber(process.env.PAYOUTS_CSR_AMOUNT, 1),
+    // Percent-based fee is deprecated — always 0.
+    platformFeePercent: 0,
+    defaultReservePercent: 0,
     defaultMinimumPayoutAmount: parseNonNegativeNumber(process.env.PAYOUTS_DEFAULT_MIN_PAYOUT_AMOUNT, 0),
   },
   admin: {

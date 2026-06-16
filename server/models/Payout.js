@@ -4,7 +4,7 @@ const payoutTimelineSchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ['awaiting_delivery', 'on_hold', 'ready_for_payout', 'paid', 'failed', 'reversed', 'cancelled'],
+      enum: ['awaiting_delivery', 'on_hold', 'ready_for_payout', 'processing', 'paid', 'failed', 'reversed', 'cancelled'],
       required: true,
     },
     note: { type: String, default: '' },
@@ -24,10 +24,16 @@ const payoutSplitSchema = new mongoose.Schema(
     shippingShare: { type: Number, default: 0, min: 0 },
     shippingDeduction: { type: Number, default: 0, min: 0 },
     grossAmount: { type: Number, required: true, min: 0 },
+    // platformFeeFlat: fixed per-order platform fee (e.g. ₹8)
+    platformFeeFlat: { type: Number, default: 0, min: 0 },
+    // csrAmount: portion of platformFeeFlat allocated to CSR (e.g. ₹1)
+    csrAmount: { type: Number, default: 0, min: 0 },
+    // platformFeePercent kept for legacy compatibility only (now always 0)
     platformFeePercent: { type: Number, default: 0, min: 0, max: 100 },
     platformFeeAmount: { type: Number, default: 0, min: 0 },
     deductionsTotal: { type: Number, default: 0, min: 0 },
     basePayoutAmount: { type: Number, default: 0, min: 0 },
+    // reservePercent and reserveAmount are deprecated (always 0 now)
     reservePercent: { type: Number, default: 0, min: 0, max: 100 },
     reserveAmount: { type: Number, default: 0, min: 0 },
     netPayoutAmount: { type: Number, required: true, min: 0 },
@@ -66,7 +72,7 @@ const payoutSchema = new mongoose.Schema({
   currency: { type: String, default: 'INR' },
   status: {
     type: String,
-    enum: ['awaiting_delivery', 'on_hold', 'ready_for_payout', 'paid', 'failed', 'reversed', 'cancelled'],
+    enum: ['awaiting_delivery', 'on_hold', 'ready_for_payout', 'processing', 'paid', 'failed', 'reversed', 'cancelled'],
     default: 'awaiting_delivery',
   },
   split: { type: payoutSplitSchema, required: true },

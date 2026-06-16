@@ -2566,3 +2566,347 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
     }
   }
 }
+
+// ─── Seller Wallet / Payout Types ────────────────────────────────────────────
+
+export type SellerPayoutStatus =
+  | 'awaiting_delivery'
+  | 'on_hold'
+  | 'ready_for_payout'
+  | 'processing'
+  | 'paid'
+  | 'failed'
+  | 'reversed'
+  | 'cancelled';
+
+export interface SellerPayoutSplit {
+  itemSubtotal: number;
+  shippingShare: number;
+  shippingDeduction: number;
+  grossAmount: number;
+  platformFeeFlat: number;
+  csrAmount: number;
+  platformFeePercent: number;
+  platformFeeAmount: number;
+  deductionsTotal: number;
+  basePayoutAmount: number;
+  reservePercent: number;
+  reserveAmount: number;
+  netPayoutAmount: number;
+  refundedAmount: number;
+}
+
+export interface SellerPayoutTimelineEntry {
+  status: SellerPayoutStatus;
+  note: string;
+  source: string;
+  at: string | null;
+}
+
+export interface SellerPayoutEntry {
+  id: string;
+  orderId: string;
+  sellerShipmentRef: string;
+  status: SellerPayoutStatus;
+  currency: string;
+  split: SellerPayoutSplit;
+  deliveredAt: string | null;
+  holdStartedAt: string | null;
+  holdUntil: string | null;
+  payout: {
+    mode: string;
+    provider: string;
+    referenceId: string;
+    initiatedAt: string | null;
+    paidAt: string | null;
+    failureReason: string;
+  };
+  order: {
+    subtotal: number;
+    shippingCost: number;
+    totalAmount: number;
+    paymentStatus: string;
+    createdAt: string | null;
+  };
+  timeline: SellerPayoutTimelineEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SellerWalletSummary {
+  totalPayouts: number;
+  incomingAmount: number;
+  onHoldAmount: number;
+  readyAmount: number;
+  processingAmount: number;
+  paidAmount: number;
+  claimableAmount: number;
+  nextReleaseAt: string | null;
+  awaitingDeliveryAmount: number;
+  reserveHeldAmount: number;
+}
+
+export interface SellerPayoutDashboardResponse {
+  summary: SellerWalletSummary;
+  payouts: SellerPayoutEntry[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  seller: {
+    id: string;
+    name: string;
+    deliveredOrderCount: number;
+    payoutProfile: {
+      kycStatus: string;
+      kycVerifiedAt: string | null;
+      bankDetails: {
+        accountHolderName: string;
+        accountNumberMasked: string;
+        ifsc: string;
+        bankName: string;
+        branch: string;
+        upiId: string;
+        accountType: string;
+        razorpayLinkedAccountId: string;
+        isVerified: boolean;
+        verifiedAt: string | null;
+      };
+    };
+    payoutSettings: {
+      minimumPayoutAmount: number;
+    };
+    wallet: {
+      availableToWithdraw: number;
+      onHold: number;
+      incoming: number;
+      totalPaid: number;
+      nextReleaseAt: string | null;
+    };
+    policy: {
+      holdDaysAfterDelivery: number;
+      defaultPlatformFeePercent: number;
+      claimMode: string;
+    };
+  };
+}
+
+export interface ClaimSellerWalletResult {
+  message: string;
+  releaseResult: {
+    scanned: number;
+    releasedCount: number;
+    failedCount: number;
+  };
+  claimResult: {
+    scanned: number;
+    claimedCount: number;
+    claimedAmount: number;
+    blockedCount: number;
+    blocked: { payoutId: string; orderId: string; reason: string }[];
+  };
+  dashboard: SellerPayoutDashboardResponse;
+}
+
+export async function getSellerPayoutDashboard(
+  params: { page?: number; limit?: number; status?: string } = {}
+): Promise<SellerPayoutDashboardResponse> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.status) query.set('status', params.status);
+
+  const qs = query.toString();
+  const res = await fetchWithAuth(`/payouts/seller/me${qs ? `?${qs}` : ''}`);
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch seller wallet');
+  }
+
+  return res.json();
+}
+
+export async function claimSellerWallet(
+  params: { payoutIds?: string[]; limit?: number; claimAll?: boolean } = {}
+): Promise<ClaimSellerWalletResult> {
+  const res = await fetchWithAuth('/payouts/seller/me/claim', {
+    method: 'POST',
+    body: JSON.stringify({
+      payoutIds: params.payoutIds || [],
+      limit: params.limit || 100,
+      claimAll: params.claimAll !== false,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to claim wallet balance');
+  }
+
+  return res.json();
+}
+
+export async function updateSellerPayoutProfile(payload: {
+  bankDetails?: {
+    accountType?: string;
+    accountHolderName?: string;
+    accountNumber?: string;
+    ifsc?: string;
+    bankName?: string;
+    branch?: string;
+    upiId?: string;
+    razorpayLinkedAccountId?: string;
+  };
+  payoutSettings?: {
+    reservePercent?: number;
+    minimumPayoutAmount?: number;
+  };
+}): Promise<{ message: string }> {
+  const res = await fetchWithAuth('/users/me/seller-payout-profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update payout profile');
+  }
+
+  return res.json();
+}
+
+// ─── Seller: Request Payout ───────────────────────────────────────────────────
+
+export interface RequestSellerPayoutResult {
+  message: string;
+  requested: number;
+  requestedAmount: number;
+  blockedCount: number;
+  blocked: { payoutId: string; orderId: string; reason: string }[];
+  dashboard: SellerPayoutDashboardResponse;
+}
+
+export async function requestSellerPayout(
+  params: { payoutIds?: string[]; requestAll?: boolean } = {}
+): Promise<RequestSellerPayoutResult> {
+  const res = await fetchWithAuth('/payouts/seller/me/request-payout', {
+    method: 'POST',
+    body: JSON.stringify({
+      payoutIds: params.payoutIds || [],
+      requestAll: params.requestAll !== false,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to request payout');
+  }
+  return res.json();
+}
+
+// ─── Admin Payout Types & Functions ──────────────────────────────────────────
+
+export interface AdminPayoutEntry {
+  id: string;
+  orderId: string;
+  seller: { id: string; name: string; email: string; kycStatus: string };
+  status: SellerPayoutStatus;
+  holdUntil: string | null;
+  deliveredAt: string | null;
+  split: {
+    itemSubtotal: number;
+    shippingDeduction: number;
+    grossAmount: number;
+    platformFeeFlat: number;
+    csrAmount: number;
+    platformFeeAmount: number;
+    deductionsTotal: number;
+    basePayoutAmount: number;
+    reserveAmount: number;
+    netPayoutAmount: number;
+  };
+  payout: { referenceId: string; paidAt: string | null; failureReason: string; initiatedAt: string | null };
+  order: { paymentStatus: string; createdAt: string | null; totalAmount: number };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminPayoutDashboardResponse {
+  summary: SellerWalletSummary;
+  payouts: AdminPayoutEntry[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+  policy: { holdDaysAfterDelivery: number; platformFeeFlat: number; csrAmount: number; claimMode: string };
+}
+
+export async function getAdminPayoutDashboard(
+  params: { page?: number; limit?: number; status?: string; sellerId?: string } = {}
+): Promise<AdminPayoutDashboardResponse> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.status) query.set('status', params.status);
+  if (params.sellerId) query.set('sellerId', params.sellerId);
+  const qs = query.toString();
+  const res = await fetchWithAuth('/payouts/admin/dashboard' + (qs ? '?' + qs : ''));
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to fetch admin payout dashboard');
+  }
+  return res.json();
+}
+
+export async function releaseAdminDuePayouts(limit = 100): Promise<{ message: string; result: any }> {
+  const res = await fetchWithAuth('/payouts/admin/process-due', {
+    method: 'POST',
+    body: JSON.stringify({ limit }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to release due payouts');
+  }
+  return res.json();
+}
+
+export async function claimAdminReadyPayouts(params: {
+  sellerId?: string;
+  payoutIds?: string[];
+  limit?: number;
+  claimAll?: boolean;
+} = {}): Promise<{ message: string; claimResult: any; dashboard: AdminPayoutDashboardResponse }> {
+  const res = await fetchWithAuth('/payouts/admin/claim', {
+    method: 'POST',
+    body: JSON.stringify({
+      sellerId: params.sellerId || undefined,
+      payoutIds: params.payoutIds || [],
+      limit: params.limit || 100,
+      claimAll: params.claimAll === true,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to process admin claim');
+  }
+  return res.json();
+}
+
+export async function adminMarkPayoutsPaid(params: {
+  payoutIds?: string[];
+  sellerId?: string;
+  markAll?: boolean;
+} = {}): Promise<{ message: string; settled: number; settledAmount: number; dashboard: AdminPayoutDashboardResponse }> {
+  const res = await fetchWithAuth('/payouts/admin/mark-paid', {
+    method: 'POST',
+    body: JSON.stringify({
+      payoutIds: params.payoutIds || [],
+      sellerId: params.sellerId || undefined,
+      markAll: params.markAll === true,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to mark payouts as paid');
+  }
+  return res.json();
+}

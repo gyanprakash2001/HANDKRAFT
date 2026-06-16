@@ -14,25 +14,48 @@ function roundCurrency(value) {
   return Number(parsed.toFixed(2));
 }
 
-function getPayoutPolicy() {
-  const fallback = {
-    holdDaysAfterDelivery: 0,
-    defaultPlatformFeePercent: 0,
-    defaultReservePercent: 10,
-    defaultMinimumPayoutAmount: 0,
-  };
+function isBankDetailsComplete(seller) {
+  const bank = seller?.sellerPayoutProfile?.bankDetails;
+  if (!bank) return false;
+  const type = String(bank.accountType || 'bank').toLowerCase();
+  if (type === 'upi') {
+    return Boolean(String(bank.upiId || '').trim());
+  }
+  // Bank account: need at minimum an account number (or masked) + IFSC.
+  const hasAccount = Boolean(String(bank.accountNumber || bank.accountNumberMasked || '').trim());
+  const hasIfsc = Boolean(String(bank.ifsc || '').trim());
+  return hasAccount && hasIfsc;
+}
 
+function createInternalPayoutReference() {
+  const now = new Date();
+  const datePart = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('');
+  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `HKT-${datePart}-${rand}`;
+}
+
+function getPayoutPolicy() {
   const configured = env?.payouts || {};
-  const holdDaysAfterDelivery = Math.max(0, Math.floor(Number(configured.holdDaysAfterDelivery ?? fallback.holdDaysAfterDelivery)));
-  const defaultPlatformFeePercent = Math.max(0, Number(configured.platformFeePercent ?? fallback.defaultPlatformFeePercent));
+  // 2-day hold after delivery before payout can be requested.
+  const holdDaysAfterDelivery = Math.max(0, Math.floor(Number(configured.holdDaysAfterDelivery ?? 2)));
+  // Flat platform fee per order in INR (default ₹8, includes CSR).
+  const platformFeeFlat = Math.max(0, Number(configured.platformFeeFlat ?? 8));
+  // CSR portion of the platform fee (default ₹1).
+  const csrAmount = Math.min(platformFeeFlat, Math.max(0, Number(configured.csrAmount ?? 1)));
 
   return {
     holdDaysAfterDelivery,
     claimMode: 'manual',
-    defaultPlatformFeePercent,
-    defaultReservePercent: Number(configured.defaultReservePercent || fallback.defaultReservePercent),
-    defaultMinimumPayoutAmount: Number(configured.defaultMinimumPayoutAmount || fallback.defaultMinimumPayoutAmount),
-    // Legacy compatibility values for older clients still reading trusted policy fields.
+    platformFeeFlat,
+    csrAmount,
+    // Legacy fields — always 0 now.
+    defaultPlatformFeePercent: 0,
+    defaultReservePercent: 0,
+    defaultMinimumPayoutAmount: Number(configured.defaultMinimumPayoutAmount || 0),
     trustedOrderThreshold: 1,
     defaultCoolingDays: holdDaysAfterDelivery,
     trustedCoolingDays: holdDaysAfterDelivery,
@@ -114,8 +137,15 @@ function getSellerShipmentRef(order, sellerId) {
 
 function computeSellerSplit(order, sellerId, policy = {}) {
   const sellerItems = getSellerItems(order, sellerId);
+  // Use discountedPrice if available — this is the price the seller actually posted.
+  // Fall back to price if discountedPrice is not set.
   const itemSubtotal = roundCurrency(
-    sellerItems.reduce((sum, item) => sum + ((Number(item?.price) || 0) * (Number(item?.quantity) || 0)), 0)
+    sellerItems.reduce((sum, item) => {
+      const unitPrice = Number(item?.discountedPrice) > 0
+        ? Number(item.discountedPrice)
+        : Number(item?.price) || 0;
+      return sum + (unitPrice * (Number(item?.quantity) || 0));
+    }, 0)
   );
 
   const orderSubtotal = Number(order?.subtotal || 0);
@@ -124,13 +154,15 @@ function computeSellerSplit(order, sellerId, policy = {}) {
     ? roundCurrency(orderShippingCost * (itemSubtotal / orderSubtotal))
     : 0;
 
-  const platformFeePercent = Math.max(0, Number(policy?.defaultPlatformFeePercent || 0));
-  const platformFeeAmount = roundCurrency(itemSubtotal * (platformFeePercent / 100));
+  // Platform fee is a flat ₹8 per order (not percentage). Includes ₹1 CSR.
+  const platformFeeFlat = Math.max(0, Number(policy?.platformFeeFlat ?? 8));
+  const csrAmount = Math.min(platformFeeFlat, Math.max(0, Number(policy?.csrAmount ?? 1)));
+  // platformFeeAmount is the same as platformFeeFlat (kept for legacy field compat).
+  const platformFeeAmount = platformFeeFlat;
 
-  // Seller payout base is item revenue minus logistics + platform deductions.
   const grossAmount = roundCurrency(itemSubtotal);
   const shippingDeduction = shippingShare;
-  const deductionsTotal = roundCurrency(shippingDeduction + platformFeeAmount);
+  const deductionsTotal = roundCurrency(shippingDeduction + platformFeeFlat);
   const basePayoutAmount = roundCurrency(Math.max(0, grossAmount - deductionsTotal));
 
   return {
@@ -138,7 +170,9 @@ function computeSellerSplit(order, sellerId, policy = {}) {
     shippingShare,
     shippingDeduction,
     grossAmount,
-    platformFeePercent,
+    platformFeeFlat,
+    csrAmount,
+    platformFeePercent: 0,
     platformFeeAmount,
     deductionsTotal,
     basePayoutAmount,
@@ -232,9 +266,10 @@ async function upsertOrderSellerPayout(order, sellerId) {
     return null;
   }
 
-  const reservePercent = resolveSellerReservePercent(seller, policy);
-  const reserveAmount = roundCurrency(splitResult.basePayoutAmount * (reservePercent / 100));
-  const netPayoutAmount = roundCurrency(Math.max(0, splitResult.basePayoutAmount - reserveAmount));
+  // Reserve is removed from the new formula — seller receives full base payout amount.
+  const reservePercent = 0;
+  const reserveAmount = 0;
+  const netPayoutAmount = roundCurrency(Math.max(0, splitResult.basePayoutAmount));
 
   const coolingDays = resolveCoolingDays(policy);
 
@@ -245,12 +280,14 @@ async function upsertOrderSellerPayout(order, sellerId) {
     shippingShare: splitResult.shippingShare,
     shippingDeduction: splitResult.shippingDeduction,
     grossAmount: splitResult.grossAmount,
-    platformFeePercent: splitResult.platformFeePercent,
+    platformFeeFlat: splitResult.platformFeeFlat,
+    csrAmount: splitResult.csrAmount,
+    platformFeePercent: 0,
     platformFeeAmount: splitResult.platformFeeAmount,
     deductionsTotal: splitResult.deductionsTotal,
     basePayoutAmount: splitResult.basePayoutAmount,
-    reservePercent,
-    reserveAmount,
+    reservePercent: 0,
+    reserveAmount: 0,
     netPayoutAmount,
     refundedAmount: Number(payout?.split?.refundedAmount || 0),
   };
@@ -673,28 +710,31 @@ async function claimReadyPayoutsInternal({ sellerId = null, payoutIds = [], limi
 function buildSummaryFromRows(rows = []) {
   const summary = {
     totalPayouts: 0,
-    awaitingDeliveryAmount: 0,
+    // incomingAmount: orders placed but not yet delivered
+    incomingAmount: 0,
+    // onHoldAmount: delivered, inside 2-day hold window
     onHoldAmount: 0,
+    // readyAmount: hold expired, seller can request payout
     readyAmount: 0,
+    // processingAmount: seller requested payout, awaiting admin settlement
+    processingAmount: 0,
+    // paidAmount: admin has settled the payout
     paidAmount: 0,
-    reserveHeldAmount: 0,
-    claimableAmount: 0,
+    // nextReleaseAt: earliest date any on-hold payout will unlock
     nextReleaseAt: null,
   };
 
   rows.forEach((entry) => {
     const net = Number(entry?.split?.netPayoutAmount || 0);
-    const reserve = Number(entry?.split?.reserveAmount || 0);
     summary.totalPayouts += 1;
 
     if (entry.status === 'awaiting_delivery') {
-      summary.awaitingDeliveryAmount += net;
+      summary.incomingAmount += net;
       return;
     }
 
     if (entry.status === 'on_hold') {
       summary.onHoldAmount += net;
-      summary.reserveHeldAmount += reserve;
       const holdUntil = entry?.holdUntil ? new Date(entry.holdUntil) : null;
       if (holdUntil && !Number.isNaN(holdUntil.getTime())) {
         if (!summary.nextReleaseAt || holdUntil.getTime() < new Date(summary.nextReleaseAt).getTime()) {
@@ -709,17 +749,26 @@ function buildSummaryFromRows(rows = []) {
       return;
     }
 
+    if (entry.status === 'processing') {
+      summary.processingAmount += net;
+      return;
+    }
+
     if (entry.status === 'paid') {
       summary.paidAmount += net;
     }
   });
 
-  summary.awaitingDeliveryAmount = roundCurrency(summary.awaitingDeliveryAmount);
+  summary.incomingAmount = roundCurrency(summary.incomingAmount);
   summary.onHoldAmount = roundCurrency(summary.onHoldAmount);
   summary.readyAmount = roundCurrency(summary.readyAmount);
+  summary.processingAmount = roundCurrency(summary.processingAmount);
   summary.paidAmount = roundCurrency(summary.paidAmount);
-  summary.reserveHeldAmount = roundCurrency(summary.reserveHeldAmount);
+  // claimableAmount = ready_for_payout (can request withdrawal)
   summary.claimableAmount = summary.readyAmount;
+  // Legacy fields for backward compatibility
+  summary.awaitingDeliveryAmount = summary.incomingAmount;
+  summary.reserveHeldAmount = 0;
 
   return summary;
 }
@@ -855,27 +904,22 @@ async function getSellerPayoutDashboard(sellerId, { page = 1, limit = 20, status
     seller: {
       id: String(seller?._id || sellerId),
       name: String(seller?.name || ''),
-      trust: {
-        deliveredOrderCount: Number(seller?.sellerTrust?.deliveredOrderCount || 0),
-        isTrusted: false,
-        trustedSince: null,
-      },
+      deliveredOrderCount: Number(seller?.sellerTrust?.deliveredOrderCount || 0),
       payoutProfile: {
         kycStatus: String(seller?.sellerPayoutProfile?.kycStatus || 'pending'),
         kycVerifiedAt: seller?.sellerPayoutProfile?.kycVerifiedAt || null,
         bankDetails: maskBankDetails(seller?.sellerPayoutProfile?.bankDetails || {}),
       },
       payoutSettings: {
-        autoPayoutEnabled: false,
         minimumPayoutAmount: Number(seller?.sellerPayoutSettings?.minimumPayoutAmount || 0),
-        reservePercent: Number(seller?.sellerPayoutSettings?.reservePercent || 0),
-        overrideCoolingDays: null,
       },
+      // Simplified wallet summary — the three numbers that matter to a seller:
       wallet: {
-        availableToClaim: summary.claimableAmount,
-        pendingOnHold: summary.onHoldAmount,
+        availableToWithdraw: summary.claimableAmount,
+        onHold: summary.onHoldAmount,
+        incoming: summary.incomingAmount,
         totalPaid: summary.paidAmount,
-        reserveHeld: summary.reserveHeldAmount,
+        nextReleaseAt: summary.nextReleaseAt,
       },
       policy: getPayoutPolicy(),
     },
@@ -1007,10 +1051,174 @@ async function claimAdminReadyPayouts({ sellerId, payoutIds = [], limit = 100, c
   };
 }
 
+
+// ─── requestSellerPayout ────────────────────────────────────────────────────
+// Seller taps "Request Payout". Moves ready_for_payout → processing.
+// Bank/KYC validation is required before this is accepted.
+async function requestSellerPayout(sellerId, { payoutIds = [], requestAll = false } = {}) {
+  const sellerObjectId = toObjectId(sellerId);
+  if (!sellerObjectId) {
+    throw new Error('Invalid seller id');
+  }
+
+  // First release any holds that have expired.
+  await processDuePayouts({ limit: 100 });
+
+  const query = { seller: sellerObjectId, status: 'ready_for_payout' };
+  if (!requestAll && Array.isArray(payoutIds) && payoutIds.length > 0) {
+    const normalizedIds = payoutIds
+      .map((id) => String(id || '').trim())
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    if (normalizedIds.length > 0) {
+      query._id = { $in: normalizedIds };
+    }
+  }
+
+  const payouts = await Payout.find(query).sort({ createdAt: 1 }).limit(100);
+  if (payouts.length === 0) {
+    return { requested: 0, requestedAmount: 0, blocked: [] };
+  }
+
+  const seller = await User.findById(sellerObjectId)
+    .select('name email sellerPayoutProfile sellerPayoutSettings')
+    .lean();
+
+  if (!seller) {
+    throw new Error('Seller account not found');
+  }
+
+  if (!isBankDetailsComplete(seller)) {
+    throw new Error('Complete KYC and add your bank/UPI details before requesting a payout.');
+  }
+
+  const blocked = [];
+  let requested = 0;
+  let requestedAmount = 0;
+
+  for (const payout of payouts) {
+    const net = Number(payout?.split?.netPayoutAmount || 0);
+
+    payout.status = 'processing';
+    payout.payout = Object.assign({}, payout.payout || {}, {
+      mode: 'manual',
+      provider: 'internal',
+      failureReason: '',
+      initiatedAt: new Date(),
+    });
+
+    appendPayoutTimeline(payout, {
+      status: 'processing',
+      note: 'Seller requested payout. Awaiting admin settlement (est. 2 hours).',
+      source: 'seller',
+    });
+
+    await payout.save();
+    requested += 1;
+    requestedAmount += net;
+
+    logSellerAction({
+      sellerId: sellerObjectId,
+      action: 'payout_requested',
+      after: { payoutId: String(payout._id), amount: net },
+      note: `Seller requested payout of ₹${net}. Pending admin settlement.`,
+      source: 'seller',
+    });
+  }
+
+  const dashboard = await getSellerPayoutDashboard(sellerObjectId, { page: 1, limit: 50 });
+
+  return {
+    requested,
+    requestedAmount: roundCurrency(requestedAmount),
+    blockedCount: blocked.length,
+    blocked,
+    dashboard,
+  };
+}
+
+// ─── adminMarkPayoutsPaid ────────────────────────────────────────────────────
+// Admin taps "Mark as Paid" after manually transferring funds.
+// Moves processing → paid and generates an internal reference.
+async function adminMarkPayoutsPaid({ payoutIds = [], sellerId, markAll = false } = {}) {
+  const query = { status: 'processing' };
+
+  if (sellerId) {
+    const sellerObjectId = toObjectId(sellerId);
+    if (!sellerObjectId) throw new Error('Invalid seller id');
+    query.seller = sellerObjectId;
+  }
+
+  if (!markAll && Array.isArray(payoutIds) && payoutIds.length > 0) {
+    const normalizedIds = payoutIds
+      .map((id) => String(id || '').trim())
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    if (normalizedIds.length > 0) {
+      query._id = { $in: normalizedIds };
+    }
+  }
+
+  const payouts = await Payout.find(query).sort({ createdAt: 1 }).limit(200);
+  if (payouts.length === 0) {
+    return { settled: 0, settledAmount: 0 };
+  }
+
+  const now = new Date();
+  let settled = 0;
+  let settledAmount = 0;
+
+  for (const payout of payouts) {
+    const net = Number(payout?.split?.netPayoutAmount || 0);
+    const referenceId = createInternalPayoutReference();
+
+    payout.status = 'paid';
+    payout.payout = Object.assign({}, payout.payout || {}, {
+      mode: 'manual',
+      provider: 'internal',
+      referenceId,
+      paidAt: now,
+      failureReason: '',
+    });
+
+    appendPayoutTimeline(payout, {
+      status: 'paid',
+      note: `Admin settled payout. Reference: ${referenceId}. Amount: ₹${net}.`,
+      source: 'admin',
+    });
+
+    await payout.save();
+    settled += 1;
+    settledAmount += net;
+
+    logPaymentReconciliation({
+      orderId: payout.order,
+      sellerId: payout.seller,
+      event: 'payout_settled_by_admin',
+      payoutId: payout._id,
+      payoutStatus: 'paid',
+      amount: net,
+      note: `Admin manually settled payout of ₹${net}. Ref: ${referenceId}.`,
+      source: 'admin',
+    });
+  }
+
+  const dashboard = await getAdminPayoutDashboard({ page: 1, limit: 100 });
+
+  return {
+    settled,
+    settledAmount: roundCurrency(settledAmount),
+    dashboard,
+  };
+}
+
 module.exports = {
+
   ensureOrderPayoutRecords,
   syncSellerPayoutAfterFulfillment,
   processDuePayouts,
+  requestSellerPayout,
+  adminMarkPayoutsPaid,
   claimSellerWallet,
   getSellerPayoutDashboard,
   getAdminPayoutDashboard,

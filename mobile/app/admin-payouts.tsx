@@ -9,12 +9,15 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
   AdminPayoutDashboardResponse,
+  AdminPayoutEntry,
+  adminMarkPayoutsPaid,
   claimAdminReadyPayouts,
   getAdminPayoutDashboard,
   getProfile,
@@ -22,40 +25,186 @@ import {
   SellerPayoutStatus,
 } from '@/utils/api';
 
-type AdminFilter = 'all' | SellerPayoutStatus;
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-const FILTERS: { key: AdminFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'awaiting_delivery', label: 'Awaiting' },
-  { key: 'on_hold', label: 'On Hold' },
-  { key: 'ready_for_payout', label: 'Claimable' },
-  { key: 'paid', label: 'Paid' },
-  { key: 'failed', label: 'Failed' },
+type AdminFilter = 'all' | 'processing' | SellerPayoutStatus;
+
+const FILTERS: { key: AdminFilter; label: string; color: string }[] = [
+  { key: 'all', label: 'All', color: '#8ab4d8' },
+  { key: 'processing', label: '⚡ Pay Requests', color: '#c4b0ff' },
+  { key: 'ready_for_payout', label: 'Ready', color: '#78c8ff' },
+  { key: 'on_hold', label: 'On Hold', color: '#f5d16e' },
+  { key: 'awaiting_delivery', label: 'Incoming', color: '#9ab8d4' },
+  { key: 'paid', label: 'Paid', color: '#7ef5a0' },
+  { key: 'failed', label: 'Failed', color: '#ff8fa0' },
 ];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function formatCurrency(amount: number) {
-  return `Rs ${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+  return `₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return '-';
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '-';
-  }
-  return parsed.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function statusMeta(status: SellerPayoutStatus | string) {
-  if (status === 'paid') return { bg: '#1b4731', border: '#2f7c53', text: '#cbf6dc', label: 'PAID' };
-  if (status === 'on_hold') return { bg: '#3a3215', border: '#6f5f20', text: '#faefc7', label: 'ON HOLD' };
-  if (status === 'ready_for_payout') return { bg: '#1f2f44', border: '#3f5f88', text: '#d8ebff', label: 'CLAIMABLE' };
-  if (status === 'awaiting_delivery') return { bg: '#28303e', border: '#4f6179', text: '#dce6f5', label: 'AWAITING' };
-  if (status === 'failed') return { bg: '#49252d', border: '#7a3f4d', text: '#ffd4dc', label: 'FAILED' };
-  return { bg: '#2a3040', border: '#4e5a73', text: '#d9e2f2', label: String(status || 'UNKNOWN').toUpperCase() };
+function statusMeta(status: string) {
+  switch (status) {
+    case 'paid':             return { bg: '#0e2218', border: '#2a6a3f', text: '#7ef5a0', label: 'PAID' };
+    case 'on_hold':          return { bg: '#1a1500', border: '#5c4e00', text: '#f5d16e', label: 'ON HOLD' };
+    case 'ready_for_payout': return { bg: '#0a1a2e', border: '#2a5580', text: '#78c8ff', label: 'READY' };
+    case 'processing':       return { bg: '#100c2a', border: '#483a90', text: '#c4b0ff', label: 'PAYOUT REQUESTED' };
+    case 'awaiting_delivery':return { bg: '#111820', border: '#2e4460', text: '#9ab8d4', label: 'AWAITING' };
+    case 'failed':           return { bg: '#200a10', border: '#6a2838', text: '#ff8fa0', label: 'FAILED' };
+    default:                 return { bg: '#111620', border: '#303a50', text: '#8a96a8', label: String(status).toUpperCase() };
+  }
 }
+
+// ─── Processing payout row (prominent, with "Mark as Paid" CTA) ───────────────
+
+function ProcessingPayoutRow({
+  entry,
+  onMarkPaid,
+  paying,
+}: {
+  entry: AdminPayoutEntry;
+  onMarkPaid: (id: string) => void;
+  paying: boolean;
+}) {
+  const bank = (entry.seller as any).bankDetails;
+  return (
+    <LinearGradient
+      colors={['#100c2a', '#14102e']}
+      style={styles.processingRow}
+    >
+      {/* Header */}
+      <View style={styles.processingRowHead}>
+        <View style={styles.processingOrderWrap}>
+          <Ionicons name="flash" size={12} color="#c4b0ff" />
+          <ThemedText style={styles.processingOrderId}>
+            #{entry.orderId.slice(-8).toUpperCase()}
+          </ThemedText>
+        </View>
+        <ThemedText style={styles.processingNet}>
+          {formatCurrency(entry.split.netPayoutAmount)}
+        </ThemedText>
+      </View>
+
+      {/* Seller info */}
+      <View style={styles.processingSellerBlock}>
+        <ThemedText style={styles.processingSellerName}>{entry.seller.name || 'Unknown seller'}</ThemedText>
+        <ThemedText style={styles.processingSellerEmail}>{entry.seller.email || '—'}</ThemedText>
+        <ThemedText style={styles.processingKyc}>
+          KYC: {String(entry.seller.kycStatus || 'pending').toUpperCase()}
+        </ThemedText>
+      </View>
+
+      {/* Bank/UPI details for admin */}
+      {bank ? (
+        <View style={styles.bankBox}>
+          <ThemedText style={styles.bankBoxTitle}>💳 Payment Details</ThemedText>
+          {bank.upiId ? (
+            <ThemedText style={styles.bankLine}>UPI: {bank.upiId}</ThemedText>
+          ) : null}
+          {bank.accountNumberMasked ? (
+            <ThemedText style={styles.bankLine}>A/C: {bank.accountNumberMasked}  IFSC: {bank.ifsc || '—'}</ThemedText>
+          ) : null}
+          {bank.bankName ? (
+            <ThemedText style={styles.bankLine}>{bank.bankName}{bank.branch ? ` · ${bank.branch}` : ''}</ThemedText>
+          ) : null}
+          {bank.accountHolderName ? (
+            <ThemedText style={styles.bankLine}>Name: {bank.accountHolderName}</ThemedText>
+          ) : null}
+          {bank.razorpayLinkedAccountId ? (
+            <ThemedText style={styles.bankLine}>Razorpay: {bank.razorpayLinkedAccountId}</ThemedText>
+          ) : null}
+        </View>
+      ) : (
+        <View style={styles.bankBoxMissing}>
+          <Ionicons name="warning-outline" size={12} color="#f5d16e" />
+          <ThemedText style={styles.bankMissingText}>Seller has no bank/UPI on file — contact them before paying.</ThemedText>
+        </View>
+      )}
+
+      {/* Breakdown */}
+      <View style={styles.processingBreakdown}>
+        <ThemedText style={styles.bdLabel}>Sale amount:</ThemedText>
+        <ThemedText style={styles.bdValue}>{formatCurrency(entry.split.itemSubtotal)}</ThemedText>
+        <ThemedText style={styles.bdLabel}>Shipping deducted:</ThemedText>
+        <ThemedText style={[styles.bdValue, styles.bdNeg]}>−{formatCurrency(entry.split.shippingDeduction)}</ThemedText>
+        <ThemedText style={styles.bdLabel}>
+          Platform fee (₹{entry.split.platformFeeFlat ?? entry.split.platformFeeAmount} incl. ₹{entry.split.csrAmount ?? 1} CSR):
+        </ThemedText>
+        <ThemedText style={[styles.bdValue, styles.bdNeg]}>−{formatCurrency(entry.split.platformFeeAmount)}</ThemedText>
+        <View style={styles.bdDivider} />
+        <ThemedText style={[styles.bdLabel, styles.bdLabelBold]}>Pay this to seller:</ThemedText>
+        <ThemedText style={[styles.bdValue, styles.bdHighlight]}>{formatCurrency(entry.split.netPayoutAmount)}</ThemedText>
+      </View>
+
+      {/* Requested at */}
+      {entry.payout.initiatedAt ? (
+        <ThemedText style={styles.requestedAt}>
+          Requested: {formatDate(entry.payout.initiatedAt)}
+        </ThemedText>
+      ) : null}
+
+      {/* Mark as Paid CTA */}
+      <Pressable
+        style={({ pressed }) => [styles.markPaidBtn, (pressed || paying) && { opacity: 0.8 }]}
+        onPress={() => onMarkPaid(entry.id)}
+        disabled={paying}
+      >
+        {paying
+          ? <ActivityIndicator color="#0a1e12" size="small" />
+          : <Ionicons name="checkmark-circle" size={16} color="#0a1e12" />
+        }
+        <ThemedText style={styles.markPaidText}>{paying ? 'Settling…' : 'Mark as Paid'}</ThemedText>
+      </Pressable>
+    </LinearGradient>
+  );
+}
+
+// ─── Standard payout row ──────────────────────────────────────────────────────
+
+function PayoutRow({ entry, isLast }: { entry: AdminPayoutEntry; isLast: boolean }) {
+  const meta = statusMeta(entry.status);
+  return (
+    <View style={[styles.row, isLast && styles.rowLast]}>
+      <View style={styles.rowHead}>
+        <ThemedText style={styles.orderId}>#{entry.orderId.slice(-8).toUpperCase()}</ThemedText>
+        <View style={[styles.statusPill, { backgroundColor: meta.bg, borderColor: meta.border }]}>
+          <ThemedText style={[styles.statusText, { color: meta.text }]}>{meta.label}</ThemedText>
+        </View>
+      </View>
+      <ThemedText style={styles.sellerName}>{entry.seller.name || 'Unknown seller'}</ThemedText>
+      <ThemedText style={styles.sellerEmail}>{entry.seller.email || '—'}</ThemedText>
+      <View style={styles.rowMetaLine}>
+        <ThemedText style={styles.metaLabel}>Net payout</ThemedText>
+        <ThemedText style={styles.metaValue}>{formatCurrency(entry.split.netPayoutAmount)}</ThemedText>
+      </View>
+      <View style={styles.rowMetaLine}>
+        <ThemedText style={styles.metaLabel}>Hold release</ThemedText>
+        <ThemedText style={styles.metaValue}>{formatDate(entry.holdUntil)}</ThemedText>
+      </View>
+      <View style={styles.rowMetaLine}>
+        <ThemedText style={styles.metaLabel}>KYC</ThemedText>
+        <ThemedText style={styles.metaValue}>{String(entry.seller.kycStatus || 'pending').toUpperCase()}</ThemedText>
+      </View>
+      {entry.payout.failureReason ? (
+        <ThemedText style={styles.failureReason}>{entry.payout.failureReason}</ThemedText>
+      ) : null}
+      {entry.payout.paidAt ? (
+        <ThemedText style={styles.paidAt}>Paid: {formatDate(entry.payout.paidAt)}</ThemedText>
+      ) : null}
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function AdminPayoutsScreen() {
   const router = useRouter();
@@ -63,30 +212,21 @@ export default function AdminPayoutsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [releasing, setReleasing] = useState(false);
-  const [claiming, setClaiming] = useState(false);
+  const [payingId, setPayingId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<AdminPayoutDashboardResponse | null>(null);
-  const [activeFilter, setActiveFilter] = useState<AdminFilter>('all');
+  const [activeFilter, setActiveFilter] = useState<AdminFilter>('processing');
 
   const loadDashboard = useCallback(async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
     try {
       setError(null);
       const me = await getProfile();
       const adminFlag = Boolean(me?.isAdmin);
       setIsAdmin(adminFlag);
-
-      if (!adminFlag) {
-        setDashboard(null);
-        return;
-      }
-
+      if (!adminFlag) { setDashboard(null); return; }
       const payload = await getAdminPayoutDashboard({ page: 1, limit: 120 });
       setDashboard(payload);
     } catch (err: any) {
@@ -97,47 +237,68 @@ export default function AdminPayoutsScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+  useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
   const filteredRows = useMemo(() => {
     const rows = dashboard?.payouts || [];
-    if (activeFilter === 'all') {
-      return rows;
-    }
-    return rows.filter((entry) => entry.status === activeFilter);
+    if (activeFilter === 'all') return rows;
+    return rows.filter(e => e.status === activeFilter);
   }, [activeFilter, dashboard?.payouts]);
 
+  const processingRows = useMemo(
+    () => (dashboard?.payouts || []).filter(e => e.status === 'processing'),
+    [dashboard?.payouts]
+  );
+
+  // Release due payouts from hold
   const handleRelease = useCallback(async () => {
     try {
       setReleasing(true);
       const result = await releaseAdminDuePayouts(200);
       const released = Number(result?.result?.releasedCount || result?.result?.pendingActionCount || 0);
       await loadDashboard(true);
-      Alert.alert('Admin release complete', `Released ${released} payout(s) to claimable state.`);
+      Alert.alert('Released', `Released ${released} payout(s) from hold.`);
     } catch (err: any) {
-      Alert.alert('Release failed', err?.message || 'Unable to run admin release.');
+      Alert.alert('Release failed', err?.message || 'Unable to run release.');
     } finally {
       setReleasing(false);
     }
   }, [loadDashboard]);
 
-  const handleClaim = useCallback(async () => {
-    try {
-      setClaiming(true);
-      const result = await claimAdminReadyPayouts({ claimAll: true, limit: 200 });
-      setDashboard(result.dashboard);
-      Alert.alert(
-        'Admin claim complete',
-        `Claimed ${result.claimResult.claimedCount} payout(s) for ${formatCurrency(result.claimResult.claimedAmount)}.`
-      );
-    } catch (err: any) {
-      Alert.alert('Claim failed', err?.message || 'Unable to process admin claim.');
-    } finally {
-      setClaiming(false);
-    }
-  }, []);
+  // Admin marks a single processing payout as paid
+  const handleMarkPaid = useCallback((payoutId: string) => {
+    const entry = (dashboard?.payouts || []).find(e => e.id === payoutId);
+    if (!entry) return;
+
+    Alert.alert(
+      'Confirm Payment',
+      `Mark ${formatCurrency(entry.split.netPayoutAmount)} payout for ${entry.seller.name || 'seller'} as PAID?\n\nThis confirms you've manually transferred the funds to them.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Mark as Paid',
+          onPress: async () => {
+            try {
+              setPayingId(payoutId);
+              const result = await adminMarkPayoutsPaid({ payoutIds: [payoutId] });
+              setDashboard(result.dashboard);
+              Alert.alert(
+                '✅ Payment Settled',
+                `${formatCurrency(result.settledAmount)} marked as paid successfully.`
+              );
+            } catch (err: any) {
+              Alert.alert('Failed', err?.message || 'Unable to mark as paid.');
+            } finally {
+              setPayingId(null);
+            }
+          },
+        },
+      ]
+    );
+  }, [dashboard?.payouts]);
+
+  const summary = dashboard?.summary;
+  const policy = (dashboard as any)?.policy;
 
   if (loading) {
     return (
@@ -150,7 +311,7 @@ export default function AdminPayoutsScreen() {
           <View style={styles.headerIconBtn} />
         </View>
         <View style={styles.loaderWrap}>
-          <ActivityIndicator size="large" color="#9df0a2" />
+          <ActivityIndicator size="large" color="#7ef5a0" />
         </View>
       </ThemedView>
     );
@@ -164,14 +325,15 @@ export default function AdminPayoutsScreen() {
         </Pressable>
         <ThemedText style={styles.headerTitle}>Admin Wallet Ops</ThemedText>
         <Pressable onPress={() => loadDashboard(true)} style={styles.headerIconBtn}>
-          <Ionicons name="refresh" size={18} color="#9df0a2" />
+          <Ionicons name="refresh" size={18} color="#7ef5a0" />
         </Pressable>
       </View>
 
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentInner}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadDashboard(true)} tintColor="#9df0a2" />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadDashboard(true)} tintColor="#7ef5a0" />}
+      >
         {error ? (
           <View style={styles.errorCard}>
             <ThemedText style={styles.errorText}>{error}</ThemedText>
@@ -180,92 +342,116 @@ export default function AdminPayoutsScreen() {
 
         {!isAdmin ? (
           <View style={styles.guardCard}>
-            <Ionicons name="lock-closed-outline" size={22} color="#ffb8b8" />
+            <Ionicons name="lock-closed-outline" size={22} color="#ff8fa0" />
             <ThemedText style={styles.guardTitle}>Admin Access Required</ThemedText>
-            <ThemedText style={styles.guardText}>This screen is available only for admin users.</ThemedText>
+            <ThemedText style={styles.guardText}>This screen is for admin users only.</ThemedText>
           </View>
         ) : (
           <>
+            {/* ── Policy banner ─────────────────────────────────── */}
+            {policy ? (
+              <View style={styles.policyBar}>
+                <Ionicons name="information-circle-outline" size={12} color="#5a7a9a" />
+                <ThemedText style={styles.policyText}>
+                  Hold: {policy.holdDaysAfterDelivery}d · Platform fee: ₹{policy.platformFeeFlat} (incl. ₹{policy.csrAmount} CSR)
+                </ThemedText>
+              </View>
+            ) : null}
+
+            {/* ── Payout request alert (if any) ────────────────── */}
+            {processingRows.length > 0 ? (
+              <LinearGradient colors={['#100c2a', '#140e30']} style={styles.alertBanner}>
+                <Ionicons name="flash" size={14} color="#c4b0ff" />
+                <ThemedText style={styles.alertBannerText}>
+                  {processingRows.length} seller{processingRows.length !== 1 ? 's' : ''} requesting payout — action needed
+                </ThemedText>
+              </LinearGradient>
+            ) : null}
+
+            {/* ── Summary grid ──────────────────────────────────── */}
             <View style={styles.summaryGrid}>
               <View style={styles.summaryCard}>
-                <ThemedText style={styles.summaryValue}>{formatCurrency(dashboard?.summary?.claimableAmount || 0)}</ThemedText>
-                <ThemedText style={styles.summaryLabel}>Claimable</ThemedText>
+                <ThemedText style={[styles.summaryValue, { color: '#c4b0ff' }]}>{formatCurrency((summary as any)?.processingAmount || 0)}</ThemedText>
+                <ThemedText style={styles.summaryLabel}>Pay Requests</ThemedText>
               </View>
               <View style={styles.summaryCard}>
-                <ThemedText style={styles.summaryValue}>{formatCurrency(dashboard?.summary?.onHoldAmount || 0)}</ThemedText>
+                <ThemedText style={styles.summaryValue}>{formatCurrency(summary?.claimableAmount || 0)}</ThemedText>
+                <ThemedText style={styles.summaryLabel}>Ready (unrequested)</ThemedText>
+              </View>
+              <View style={styles.summaryCard}>
+                <ThemedText style={[styles.summaryValue, { color: '#f5d16e' }]}>{formatCurrency(summary?.onHoldAmount || 0)}</ThemedText>
                 <ThemedText style={styles.summaryLabel}>On Hold</ThemedText>
               </View>
               <View style={styles.summaryCard}>
-                <ThemedText style={styles.summaryValue}>{formatCurrency(dashboard?.summary?.paidAmount || 0)}</ThemedText>
-                <ThemedText style={styles.summaryLabel}>Paid</ThemedText>
-              </View>
-              <View style={styles.summaryCard}>
-                <ThemedText style={styles.summaryValue}>{formatCurrency(dashboard?.summary?.awaitingDeliveryAmount || 0)}</ThemedText>
-                <ThemedText style={styles.summaryLabel}>Awaiting Delivery</ThemedText>
+                <ThemedText style={[styles.summaryValue, { color: '#7ef5a0' }]}>{formatCurrency(summary?.paidAmount || 0)}</ThemedText>
+                <ThemedText style={styles.summaryLabel}>Total Paid Out</ThemedText>
               </View>
             </View>
 
+            {/* ── Action buttons ────────────────────────────────── */}
             <View style={styles.actionRow}>
               <Pressable style={styles.actionBtn} onPress={handleRelease} disabled={releasing}>
-                {releasing ? <ActivityIndicator color="#0f1a12" /> : <Ionicons name="time-outline" size={15} color="#0f1a12" />}
-                <ThemedText style={styles.actionBtnText}>Release Due</ThemedText>
-              </Pressable>
-              <Pressable style={styles.claimBtn} onPress={handleClaim} disabled={claiming}>
-                {claiming ? <ActivityIndicator color="#dbffe2" /> : <Ionicons name="wallet-outline" size={15} color="#dbffe2" />}
-                <ThemedText style={styles.claimBtnText}>Claim All Ready</ThemedText>
+                {releasing ? <ActivityIndicator color="#0f1a12" size="small" /> : <Ionicons name="time-outline" size={14} color="#0f1a12" />}
+                <ThemedText style={styles.actionBtnText}>Release Held Funds</ThemedText>
               </Pressable>
             </View>
 
+            {/* ── Filter tabs ───────────────────────────────────── */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {FILTERS.map((filter) => {
-                const active = activeFilter === filter.key;
+              {FILTERS.map(f => {
+                const active = activeFilter === f.key;
+                const count = f.key === 'all'
+                  ? (dashboard?.payouts || []).length
+                  : (dashboard?.payouts || []).filter(e => e.status === f.key).length;
                 return (
                   <Pressable
-                    key={filter.key}
-                    style={[styles.filterChip, active && styles.filterChipActive]}
-                    onPress={() => setActiveFilter(filter.key)}>
-                    <ThemedText style={[styles.filterText, active && styles.filterTextActive]}>{filter.label}</ThemedText>
+                    key={f.key}
+                    style={[styles.filterChip, active && { borderColor: f.color, backgroundColor: f.color + '18' }]}
+                    onPress={() => setActiveFilter(f.key)}
+                  >
+                    <ThemedText style={[styles.filterText, active && { color: f.color }]}>
+                      {f.label} {count > 0 ? `(${count})` : ''}
+                    </ThemedText>
                   </Pressable>
                 );
               })}
             </ScrollView>
 
-            <View style={styles.listCard}>
-              <ThemedText style={styles.listTitle}>Payout Operations Queue</ThemedText>
-              {filteredRows.length === 0 ? (
-                <ThemedText style={styles.emptyText}>No payouts for selected filter.</ThemedText>
-              ) : (
-                filteredRows.map((entry, idx) => (
-                  <View key={entry.id} style={[styles.row, idx === filteredRows.length - 1 && styles.rowLast]}>
-                    <View style={styles.rowHead}>
-                      <ThemedText style={styles.orderId}>Order #{entry.orderId.slice(-8).toUpperCase()}</ThemedText>
-                      <View style={[styles.statusPill, { backgroundColor: statusMeta(entry.status).bg, borderColor: statusMeta(entry.status).border }]}>
-                        <ThemedText style={[styles.statusText, { color: statusMeta(entry.status).text }]}>{statusMeta(entry.status).label}</ThemedText>
-                      </View>
-                    </View>
+            {/* ── Processing payouts: full-detail cards ─────────── */}
+            {activeFilter === 'processing' || activeFilter === 'all' ? (
+              filteredRows.filter(e => e.status === 'processing').length > 0 ? (
+                <View style={styles.processingSection}>
+                  <ThemedText style={styles.processingSectionTitle}>⚡ Pending Payout Requests</ThemedText>
+                  {filteredRows
+                    .filter(e => e.status === 'processing')
+                    .map(entry => (
+                      <ProcessingPayoutRow
+                        key={entry.id}
+                        entry={entry}
+                        onMarkPaid={handleMarkPaid}
+                        paying={payingId === entry.id}
+                      />
+                    ))}
+                </View>
+              ) : activeFilter === 'processing' ? (
+                <View style={styles.emptyWrap}>
+                  <Ionicons name="checkmark-done-circle-outline" size={28} color="#2a4a2e" />
+                  <ThemedText style={styles.emptyText}>No pending payout requests 🎉</ThemedText>
+                </View>
+              ) : null
+            ) : null}
 
-                    <ThemedText style={styles.sellerName}>{entry.seller.name || 'Unknown seller'}</ThemedText>
-                    <ThemedText style={styles.sellerEmail}>{entry.seller.email || '-'}</ThemedText>
-
-                    <View style={styles.rowMetaLine}>
-                      <ThemedText style={styles.metaLabel}>Net</ThemedText>
-                      <ThemedText style={styles.metaValue}>{formatCurrency(entry.split.netPayoutAmount)}</ThemedText>
-                    </View>
-                    <View style={styles.rowMetaLine}>
-                      <ThemedText style={styles.metaLabel}>Hold release</ThemedText>
-                      <ThemedText style={styles.metaValue}>{formatDate(entry.holdUntil)}</ThemedText>
-                    </View>
-                    <View style={styles.rowMetaLine}>
-                      <ThemedText style={styles.metaLabel}>KYC</ThemedText>
-                      <ThemedText style={styles.metaValue}>{String(entry.seller.kycStatus || 'pending').toUpperCase()}</ThemedText>
-                    </View>
-                    {entry.payout.failureReason ? (
-                      <ThemedText style={styles.failureReason}>{entry.payout.failureReason}</ThemedText>
-                    ) : null}
-                  </View>
-                ))
-              )}
-            </View>
+            {/* ── Other rows ────────────────────────────────────── */}
+            {filteredRows.filter(e => activeFilter !== 'processing' || e.status !== 'processing').length > 0 ? (
+              <View style={styles.listCard}>
+                <ThemedText style={styles.listTitle}>All Operations ({filteredRows.filter(e => activeFilter !== 'processing' || e.status !== 'processing').length})</ThemedText>
+                {filteredRows
+                  .filter(e => activeFilter !== 'processing' || e.status !== 'processing')
+                  .map((entry, idx, arr) => (
+                    <PayoutRow key={entry.id} entry={entry} isLast={idx === arr.length - 1} />
+                  ))}
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -273,245 +459,162 @@ export default function AdminPayoutsScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
+  container: { flex: 1, backgroundColor: '#050a0e' },
   header: {
-    paddingTop: 62,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingTop: 62, paddingHorizontal: 14, paddingBottom: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '800',
-  },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
   headerIconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#1a1f28',
-    borderWidth: 1,
-    borderColor: '#2e3847',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#0e1520', borderWidth: 1, borderColor: '#1e3048',
+    alignItems: 'center', justifyContent: 'center',
   },
-  loaderWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  content: {
-    flex: 1,
-  },
-  contentInner: {
-    paddingHorizontal: 14,
-    paddingBottom: 26,
-    gap: 10,
-  },
+  loaderWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content: { flex: 1 },
+  contentInner: { paddingHorizontal: 14, paddingBottom: 30, gap: 10 },
+
   errorCard: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#6d2d36',
-    backgroundColor: '#32171e',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 10, borderWidth: 1, borderColor: '#5a2030',
+    backgroundColor: '#1a0810', paddingHorizontal: 12, paddingVertical: 10,
   },
-  errorText: {
-    color: '#ffadb9',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  errorText: { color: '#ff8fa0', fontSize: 12, fontWeight: '700' },
+
   guardCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#593236',
-    backgroundColor: '#2c171a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 18,
-    paddingHorizontal: 14,
+    borderRadius: 12, borderWidth: 1, borderColor: '#3a2230',
+    backgroundColor: '#160e12', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 18, paddingHorizontal: 14,
   },
-  guardTitle: {
-    color: '#ffdadf',
-    fontSize: 14,
-    fontWeight: '800',
+  guardTitle: { color: '#ffdadf', fontSize: 14, fontWeight: '800' },
+  guardText: { color: '#c0a0a8', fontSize: 12, textAlign: 'center' },
+
+  // Policy bar
+  policyBar: {
+    flexDirection: 'row', gap: 6, alignItems: 'center',
+    borderRadius: 8, borderWidth: 1, borderColor: '#1a2a3a',
+    backgroundColor: '#090f18', paddingHorizontal: 10, paddingVertical: 7,
   },
-  guardText: {
-    color: '#ffc0c8',
-    fontSize: 12,
-    textAlign: 'center',
+  policyText: { color: '#4a6a8a', fontSize: 10 },
+
+  // Alert banner
+  alertBanner: {
+    flexDirection: 'row', gap: 8, alignItems: 'center',
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    borderWidth: 1, borderColor: '#3a2a70',
   },
-  summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  alertBannerText: { color: '#c4b0ff', fontSize: 12, fontWeight: '800' },
+
+  // Summary grid
+  summaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   summaryCard: {
-    width: '48.5%',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2f445f',
-    backgroundColor: '#132131',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    width: '48%', borderRadius: 12, borderWidth: 1, borderColor: '#1a2a3a',
+    backgroundColor: '#090f18', paddingHorizontal: 12, paddingVertical: 10,
   },
-  summaryValue: {
-    color: '#9df0a2',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  summaryLabel: {
-    marginTop: 4,
-    color: '#a5bbd7',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
+  summaryValue: { color: '#7ef5a0', fontSize: 15, fontWeight: '800' },
+  summaryLabel: { marginTop: 3, color: '#3a5a7a', fontSize: 10, fontWeight: '700' },
+
+  // Action row
+  actionRow: { flexDirection: 'row', gap: 8 },
   actionBtn: {
-    flex: 1,
-    borderRadius: 12,
-    backgroundColor: '#9df0a2',
-    borderWidth: 1,
-    borderColor: '#9df0a2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
+    flex: 1, borderRadius: 12, backgroundColor: '#7ef5a0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 11,
   },
-  actionBtnText: {
-    color: '#0f1a12',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  claimBtn: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#4e7099',
-    backgroundColor: '#1a2a3f',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-  },
-  claimBtnText: {
-    color: '#dbffe2',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  filterRow: {
-    gap: 8,
-  },
+  actionBtnText: { color: '#0f1a12', fontSize: 11, fontWeight: '800' },
+
+  // Filter chips
+  filterRow: { gap: 8 },
   filterChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#2f4056',
-    backgroundColor: '#162334',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 999, borderWidth: 1, borderColor: '#1e3048',
+    backgroundColor: '#0a1520', paddingHorizontal: 12, paddingVertical: 8,
   },
-  filterChipActive: {
-    borderColor: '#9df0a2',
-    backgroundColor: '#224129',
+  filterText: { color: '#5a7a9a', fontSize: 10, fontWeight: '700' },
+
+  // Processing section
+  processingSection: { gap: 8 },
+  processingSectionTitle: { color: '#c4b0ff', fontSize: 12, fontWeight: '800' },
+
+  processingRow: {
+    borderRadius: 14, borderWidth: 1, borderColor: '#3a2a70',
+    padding: 14, gap: 8,
   },
-  filterText: {
-    color: '#bdd0e6',
-    fontSize: 11,
-    fontWeight: '700',
+  processingRowHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  filterTextActive: {
-    color: '#d9ffe0',
+  processingOrderWrap: { flexDirection: 'row', gap: 5, alignItems: 'center' },
+  processingOrderId: { color: '#e0d8ff', fontSize: 13, fontWeight: '800' },
+  processingNet: { color: '#c4b0ff', fontSize: 16, fontWeight: '900' },
+
+  processingSellerBlock: { gap: 2 },
+  processingSellerName: { color: '#d0c8ff', fontSize: 12, fontWeight: '700' },
+  processingSellerEmail: { color: '#7a6aaa', fontSize: 10 },
+  processingKyc: { color: '#6a5a9a', fontSize: 9 },
+
+  bankBox: {
+    borderRadius: 10, borderWidth: 1, borderColor: '#2a1e5a',
+    backgroundColor: '#0c0820', padding: 10, gap: 3,
   },
+  bankBoxTitle: { color: '#a0a0ff', fontSize: 10, fontWeight: '800', marginBottom: 4 },
+  bankLine: { color: '#8080c0', fontSize: 10 },
+
+  bankBoxMissing: {
+    flexDirection: 'row', gap: 6, alignItems: 'center',
+    borderRadius: 8, borderWidth: 1, borderColor: '#4a3500',
+    backgroundColor: '#1a1000', padding: 8,
+  },
+  bankMissingText: { color: '#b09030', fontSize: 10, flex: 1 },
+
+  processingBreakdown: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 2,
+    borderRadius: 8, borderWidth: 1, borderColor: '#2a1e50',
+    backgroundColor: '#080616', padding: 8,
+  },
+  bdLabel: { color: '#5a4a8a', fontSize: 9, width: '60%' },
+  bdLabelBold: { color: '#c0b0e8', fontWeight: '800' },
+  bdValue: { color: '#9080c8', fontSize: 9, fontWeight: '700', width: '40%', textAlign: 'right' },
+  bdNeg: { color: '#e07070' },
+  bdHighlight: { color: '#c4b0ff', fontSize: 11, fontWeight: '900' },
+  bdDivider: { width: '100%', height: 1, backgroundColor: '#2a1e50', marginVertical: 2 },
+
+  requestedAt: { color: '#4a3a7a', fontSize: 9 },
+
+  markPaidBtn: {
+    borderRadius: 12, backgroundColor: '#7ef5a0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 12, marginTop: 4,
+  },
+  markPaidText: { color: '#0a1e12', fontSize: 13, fontWeight: '800' },
+
+  // Standard list
   listCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2a3950',
-    backgroundColor: '#131f2f',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 12, borderWidth: 1, borderColor: '#1a2a3a',
+    backgroundColor: '#090f18', paddingHorizontal: 12, paddingVertical: 10,
   },
-  listTitle: {
-    color: '#f0f6ff',
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  emptyText: {
-    color: '#9ab1cb',
-    fontSize: 11,
-    fontWeight: '600',
-    paddingVertical: 4,
-  },
+  listTitle: { color: '#d0e8ff', fontSize: 11, fontWeight: '800', marginBottom: 8 },
+
+  emptyWrap: { alignItems: 'center', paddingVertical: 20, gap: 6 },
+  emptyText: { color: '#3a5a3e', fontSize: 13, fontWeight: '700' },
+
+  // Standard row
   row: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#203249',
-    paddingVertical: 10,
-    gap: 3,
+    borderBottomWidth: 1, borderBottomColor: '#121e2c',
+    paddingVertical: 10, gap: 3,
   },
-  rowLast: {
-    borderBottomWidth: 0,
-  },
-  rowHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  orderId: {
-    color: '#ecf5ff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  sellerName: {
-    color: '#dce9fb',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  sellerEmail: {
-    color: '#93abc6',
-    fontSize: 10,
-    marginBottom: 4,
-  },
+  rowLast: { borderBottomWidth: 0 },
+  rowHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  orderId: { color: '#c0d8f0', fontSize: 12, fontWeight: '800' },
+  sellerName: { color: '#a0c0e0', fontSize: 12, fontWeight: '700' },
+  sellerEmail: { color: '#5a7a9a', fontSize: 10, marginBottom: 2 },
   statusPill: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 999, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3,
   },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  rowMetaLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  metaLabel: {
-    color: '#93abc6',
-    fontSize: 10,
-  },
-  metaValue: {
-    color: '#dce9fb',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  failureReason: {
-    color: '#ffbcc8',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 4,
-  },
+  statusText: { fontSize: 8, fontWeight: '800' },
+  rowMetaLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  metaLabel: { color: '#4a6a8a', fontSize: 10 },
+  metaValue: { color: '#c0d8f0', fontSize: 10, fontWeight: '700' },
+  failureReason: { color: '#ff8fa0', fontSize: 10, fontWeight: '700', marginTop: 2 },
+  paidAt: { color: '#3a6a4e', fontSize: 9, marginTop: 2 },
 });

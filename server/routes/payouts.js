@@ -5,6 +5,8 @@ const {
   getSellerPayoutDashboard,
   processDuePayouts,
   claimSellerWallet,
+  requestSellerPayout,
+  adminMarkPayoutsPaid,
   getAdminPayoutDashboard,
   claimAdminReadyPayouts,
   getPayoutPolicy,
@@ -161,6 +163,55 @@ router.post('/admin/claim', auth, admin, async (req, res) => {
   } catch (err) {
     const message = err?.message || 'Failed to claim payouts as admin';
     console.error('[PAYOUT][ADMIN_CLAIM] Error:', message, err);
+    return res.status(500).json({ message });
+  }
+});
+
+// POST /api/payouts/seller/me/request-payout
+// Seller requests withdrawal of ready_for_payout balance → moves to 'processing'.
+// Requires KYC verified and bank details filled.
+router.post('/seller/me/request-payout', auth, async (req, res) => {
+  try {
+    const payoutIds = toIdList(req.body?.payoutIds);
+    const requestAll = req.body?.requestAll !== false;
+
+    const result = await requestSellerPayout(req.user?._id, {
+      payoutIds,
+      requestAll,
+    });
+
+    return res.json({
+      message: 'Payout request submitted. Payment will be settled within 2 hours.',
+      ...result,
+    });
+  } catch (err) {
+    const message = err?.message || 'Failed to request payout';
+    console.error('[PAYOUT][SELLER_REQUEST] Error:', message, err);
+    return res.status(400).json({ message });
+  }
+});
+
+// POST /api/payouts/admin/mark-paid
+// Admin manually marks 'processing' payouts as 'paid' after bank transfer.
+router.post('/admin/mark-paid', auth, admin, async (req, res) => {
+  try {
+    const payoutIds = toIdList(req.body?.payoutIds);
+    const sellerId = typeof req.body?.sellerId === 'string' ? req.body.sellerId.trim() : '';
+    const markAll = req.body?.markAll === true;
+
+    const result = await adminMarkPayoutsPaid({
+      payoutIds,
+      sellerId: sellerId || undefined,
+      markAll,
+    });
+
+    return res.json({
+      message: `Marked ${result.settled} payout(s) as paid. Total: ₹${result.settledAmount}.`,
+      ...result,
+    });
+  } catch (err) {
+    const message = err?.message || 'Failed to mark payouts as paid';
+    console.error('[PAYOUT][ADMIN_MARK_PAID] Error:', message, err);
     return res.status(500).json({ message });
   }
 });
