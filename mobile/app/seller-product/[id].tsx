@@ -155,9 +155,15 @@ export default function SellerProductInsightsScreen() {
             <Ionicons name="chevron-back" size={22} color="#fff" />
           </Pressable>
           <ThemedText style={styles.headerTitle}>Listing Insights</ThemedText>
-          <Pressable style={styles.iconBtn} onPress={() => id && router.push({ pathname: '/product/[id]', params: { id } })}>
-            <Ionicons name="eye-outline" size={20} color="#fff" />
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Pressable style={styles.iconBtn} onPress={() => id && router.push({ pathname: '/edit-product', params: { id } })}>
+              <Ionicons name="pencil-outline" size={18} color="#fff" />
+            </Pressable>
+            <View style={{ width: 8 }} />
+            <Pressable style={styles.iconBtn} onPress={() => id && router.push({ pathname: '/product/[id]', params: { id } })}>
+              <Ionicons name="eye-outline" size={20} color="#fff" />
+            </Pressable>
+          </View>
         </View>
 
         {item ? (

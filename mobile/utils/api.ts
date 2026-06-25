@@ -1057,6 +1057,30 @@ export async function createProduct(payload: CreateProductPayload): Promise<Prod
   return normalizeProductItem(data.item);
 }
 
+export async function updateProduct(productId: string, payload: Partial<CreateProductPayload>): Promise<ProductItem> {
+  const res = await fetchWithAuth(`/products/${productId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const raw = await res.text();
+    let message = 'Failed to update item';
+    try {
+      const parsed = JSON.parse(raw);
+      message = parsed.message || message;
+    } catch {
+      if (raw) {
+        message = raw;
+      }
+    }
+    throw new Error(message);
+  }
+
+  const data = await res.json();
+  return normalizeProductItem(data.item);
+}
+
 export async function uploadProductMedia(media: ProductMediaItem[]): Promise<{ media: ProductMediaItem[]; images: string[] }> {
   if (!Array.isArray(media) || media.length === 0) {
     return { media: [], images: [] };
@@ -1267,6 +1291,10 @@ export interface SellerOrderItem {
   lineTotal: number;
   fulfillmentStatus: SellerFulfillmentStatus;
   trackingEvents: SellerOrderTrackingEvent[];
+  packageWeightGrams?: number;
+  packageLengthCm?: number;
+  packageBreadthCm?: number;
+  packageHeightCm?: number;
 }
 
 export interface SellerOrder {

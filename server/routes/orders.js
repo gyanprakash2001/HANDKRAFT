@@ -1045,6 +1045,10 @@ function toSellerOrderView(order, sellerId) {
       quantity: item.quantity,
       unitPrice: item.price,
       lineTotal: Number(((Number(item.price) || 0) * (Number(item.quantity) || 0)).toFixed(2)),
+      packageWeightGrams: item.product?.packageWeightGrams || 0,
+      packageLengthCm: item.product?.packageLengthCm || 0,
+      packageBreadthCm: item.product?.packageBreadthCm || 0,
+      packageHeightCm: item.product?.packageHeightCm || 0,
       fulfillmentStatus: item.fulfillmentStatus || 'new',
       trackingEvents: (item.trackingEvents || []).map((event) => ({
         status: event.status,
@@ -2319,7 +2323,7 @@ router.get('/seller/me', auth, async (req, res) => {
       const productIds = Array.from(productIdSet);
 
       const users = userIds.length > 0 ? await User.find({ _id: { $in: userIds } }).lean().select('_id name email') : [];
-      const products = productIds.length > 0 ? await Product.find({ _id: { $in: productIds } }).lean().select('_id title') : [];
+      const products = productIds.length > 0 ? await Product.find({ _id: { $in: productIds } }).lean().select('_id title packageWeightGrams packageLengthCm packageBreadthCm packageHeightCm') : [];
 
       const userMap = new Map((users || []).map((u) => [String(u._id), u]));
       const productMap = new Map((products || []).map((p) => [String(p._id), p]));

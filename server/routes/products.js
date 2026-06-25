@@ -16,6 +16,7 @@ const Review = require('../models/Review');
 const User = require('../models/User');
 const Order = require('../models/Order');
 const auth = require('../middleware/auth');
+const { logInventoryTransaction } = require('../services/audit');
 
 const PRODUCT_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'products');
 // Accept broader image data-URI formats (allow additional params like charset)
@@ -1505,12 +1506,450 @@ router.post('/', auth, async (req, res) => {
     });
 
     await product.save();
+      customizationEnabled,
+      pickupAddressId,
+      pickupAddress,
+    } = req.body;
+
+    const customizable = rawCustomizable ?? isCustomizable ?? customizationEnabled ?? false;
+
+    if (!title || !category || (price === undefined || price === null) && (realPrice === undefined || realPrice === null)) {
+      return res.status(400).json({ message: 'Title, category and price are required' });
+    }
+
+    const resolvedRealPrice = realPrice !== undefined && realPrice !== null ? realPrice : price;
+    const parsedPrice = Number(resolvedRealPrice);
+    const parsedDiscountedPrice = discountedPrice === undefined || discountedPrice === null || String(discountedPrice).trim() === ''
+      ? null
+      : Number(discountedPrice);
+    const parsedStock = Number(stock || 0);
+    const parsedPackageWeightGrams = Number(packageWeightGrams || 0);
+    const parsedPackageLengthCm = Number(packageLengthCm || 0);
+    const parsedPackageBreadthCm = Number(packageBreadthCm || 0);
+    const parsedPackageHeightCm = Number(packageHeightCm || 0);
+    const parsedAspectRatio = Number(imageAspectRatio || 1);
+    const normalizedCategoryInput = String(category || '').trim().toLowerCase();
+    const normalizedCategory = ALLOWED_PRODUCT_CATEGORY_MAP.get(normalizedCategoryInput);
+    const normalizedCustomCategory = String(customCategory || '').trim();
+    if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
+      return res.status(400).json({ message: 'Price must be a valid non-negative number' });
+    }
+    if (parsedDiscountedPrice !== null) {
+      if (Number.isNaN(parsedDiscountedPrice) || parsedDiscountedPrice < 0) {
+        return res.status(400).json({ message: 'Discounted price must be a valid non-negative number' });
+      }
+      if (parsedDiscountedPrice > parsedPrice) {
+        return res.status(400).json({ message: 'Discounted price cannot be greater than real price' });
+      }
+    }
+    if (Number.isNaN(parsedStock) || parsedStock < 0) {
+      return res.status(400).json({ message: 'Stock must be a valid non-negative number' });
+    }
+    if (Number.isNaN(parsedPackageWeightGrams) || parsedPackageWeightGrams < 0) {
+      return res.status(400).json({ message: 'Package weight must be a valid non-negative number' });
+    }
+    if (Number.isNaN(parsedPackageLengthCm) || parsedPackageLengthCm < 0
+      || Number.isNaN(parsedPackageBreadthCm) || parsedPackageBreadthCm < 0
+      || Number.isNaN(parsedPackageHeightCm) || parsedPackageHeightCm < 0) {
+      return res.status(400).json({ message: 'Package dimensions must be valid non-negative numbers' });
+    }
+    if (Number.isNaN(parsedAspectRatio) || parsedAspectRatio < 0.5 || parsedAspectRatio > 2) {
+      return res.status(400).json({ message: 'Image aspect ratio must be between 0.5 and 2' });
+    }
+    if (!normalizedCategory) {
+      return res.status(400).json({
+        message: `Category must be one of: ${ALLOWED_PRODUCT_CATEGORIES.join(', ')}`,
+      });
+    }
+    if (normalizedCategory === 'Others' && !normalizedCustomCategory) {
+      return res.status(400).json({
+        message: 'Please specify custom category when selecting Others',
+      });
+    }
+
+    const seller = await User.findById(req.user._id).select('name sellerDisplayName addresses sellerPickupAddress');
+    if (!seller) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const normalizedPickupAddressId = typeof pickupAddressId === 'string'
+      ? pickupAddressId.trim()
+      : '';
+    let selectedPickupAddress = null;
+
+    if (normalizedPickupAddressId) {
+      if (!mongoose.Types.ObjectId.isValid(normalizedPickupAddressId)) {
+        return res.status(400).json({ message: 'Invalid pickupAddressId value' });
+      }
+
+      const resolvedAddress = (seller.addresses || []).find(
+        (entry) => String(entry?._id || '') === normalizedPickupAddressId
+      );
+
+      if (!resolvedAddress) {
+        return res.status(400).json({ message: 'Selected pickup address was not found in your saved addresses.' });
+      }
+
+      if (!String(resolvedAddress?.state || '').trim()) {
+        return res.status(400).json({ message: 'Selected pickup address is missing state. Please edit the address and add state.' });
+      }
+
+      selectedPickupAddress = mapAddressToSellerPickup(resolvedAddress, {
+        addressId: normalizedPickupAddressId,
+      });
+    }
+
+    if (!selectedPickupAddress && pickupAddress) {
+      selectedPickupAddress = sanitizeSellerPickupAddress(pickupAddress);
+      if (!selectedPickupAddress) {
+        return res.status(400).json({ message: 'Invalid pickupAddress payload. Missing required fields.' });
+      }
+    }
+
+    if (selectedPickupAddress) {
+      seller.sellerPickupAddress = {
+        ...selectedPickupAddress,
+        updatedAt: new Date(),
+      };
+      await seller.save();
+    }
+
+    const sanitizedImages = Array.isArray(images)
+      ? images.filter(img => typeof img === 'string' && img.trim().length > 0)
+      : [];
+
+    const sanitizedMedia = Array.isArray(media)
+      ? media
+          .map((item) => {
+            const type = item?.type === 'video' ? 'video' : 'image';
+            const url = typeof item?.url === 'string' ? item.url.trim() : '';
+            const thumbnailUrl = typeof item?.thumbnailUrl === 'string' ? item.thumbnailUrl.trim() : '';
+            const thumbnailDataUri = sanitizeThumbnailDataUri(item?.thumbnailDataUri);
+            const ratio = Number(item?.aspectRatio || parsedAspectRatio || 1);
+            if (!url) return null;
+            return {
+              type,
+              url,
+              thumbnailUrl,
+              thumbnailDataUri,
+              aspectRatio: Number.isNaN(ratio) ? parsedAspectRatio : Math.max(0.5, Math.min(2, ratio)),
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    const normalizedImages = sanitizedImages
+      .map((url) => normalizePublicUrl(req, url))
+      .filter(Boolean);
+
+    const normalizedMedia = sanitizedMedia
+      .map((item) => {
+        const url = normalizePublicUrl(req, item.url);
+        if (!url) return null;
+        const thumbnailUrl = normalizePublicUrl(req, item.thumbnailUrl || (item.type === 'image' ? url : ''));
+        const thumbnailDataUri = sanitizeThumbnailDataUri(item.thumbnailDataUri);
+        return {
+          ...item,
+          url,
+          thumbnailUrl: thumbnailUrl || (item.type === 'image' ? url : ''),
+          thumbnailDataUri,
+        };
+      })
+      .filter(Boolean);
+
+    const hadIncomingMedia = sanitizedMedia.length > 0 || sanitizedImages.length > 0;
+
+    const finalMedia = normalizedMedia.length > 0
+      ? normalizedMedia
+      : normalizedImages.map((url) => ({ type: 'image', url, thumbnailUrl: url, aspectRatio: parsedAspectRatio }));
+
+    const finalImages = finalMedia
+      .filter((item) => item.type === 'image')
+      .map((item) => item.url);
+
+    if (hadIncomingMedia && finalImages.length === 0) {
+      return res.status(400).json({ message: 'Uploaded media must be a public URL or valid image data URI.' });
+    }
+
+    const hasDiscount = parsedDiscountedPrice !== null && parsedDiscountedPrice < parsedPrice;
+    const computedDiscountPercentage = hasDiscount
+      ? Number((((parsedPrice - parsedDiscountedPrice) / parsedPrice) * 100).toFixed(1))
+      : 0;
+
+    const product = new Product({
+      title: String(title).trim(),
+      description: String(description || '').trim(),
+      price: parsedPrice,
+      realPrice: parsedPrice,
+      discountedPrice: hasDiscount ? parsedDiscountedPrice : null,
+      discountPercentage: hasDiscount ? computedDiscountPercentage : 0,
+      category: normalizedCategory,
+      customCategory: normalizedCategory === 'Others' ? normalizedCustomCategory : '',
+      material: String(material || '').trim(),
+      stock: parsedStock,
+      packageWeightGrams: parsedPackageWeightGrams,
+      packageLengthCm: parsedPackageLengthCm,
+      packageBreadthCm: parsedPackageBreadthCm,
+      packageHeightCm: parsedPackageHeightCm,
+      imageAspectRatio: parsedAspectRatio,
+      media: finalMedia,
+      customizable: Boolean(customizable),
+      images: finalImages,
+      seller: seller._id,
+      sellerName: String(seller.sellerDisplayName || seller.name || 'Handmade Artisan'),
+      isActive: true,
+    });
+
+    await product.save();
     res.status(201).json({ message: 'Item posted successfully', item: normalizeProductMediaForResponse(req, product) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });
   }
 });
+
+async function updateProductHandler(req, res) {
+  try {
+    const {
+      title,
+      description = '',
+      price,
+      realPrice,
+      discountedPrice,
+      category,
+      customCategory = '',
+      material = '',
+      stock,
+      packageWeightGrams,
+      packageLengthCm,
+      packageBreadthCm,
+      packageHeightCm,
+      images,
+      media,
+      imageAspectRatio,
+      customizable,
+    } = req.body;
+
+    const product = await Product.findById(req.params.id);
+    if (!product || !product.isActive) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    const isSellerOwnerById = product.seller && String(product.seller) === String(req.user._id);
+    let isLegacyOwnerByName = false;
+    if (!isSellerOwnerById && product.sellerName) {
+      const currentUser = await User.findById(req.user._id).select('name');
+      if (currentUser && String(currentUser.name || '').trim() === String(product.sellerName || '').trim()) {
+        isLegacyOwnerByName = true;
+      }
+    }
+
+    if (!isSellerOwnerById && !isLegacyOwnerByName) {
+      return res.status(403).json({ message: 'Not allowed to edit this product' });
+    }
+
+    // Title validation if provided
+    if (title !== undefined) {
+      if (!String(title).trim()) {
+        return res.status(400).json({ message: 'Title cannot be empty' });
+      }
+      product.title = String(title).trim();
+    }
+
+    // Description validation
+    if (description !== undefined) {
+      product.description = String(description).trim();
+    }
+
+    // Category validation
+    if (category !== undefined) {
+      const normalizedCategoryInput = String(category || '').trim().toLowerCase();
+      const normalizedCategory = ALLOWED_PRODUCT_CATEGORY_MAP.get(normalizedCategoryInput);
+      if (!normalizedCategory) {
+        return res.status(400).json({
+          message: `Category must be one of: ${ALLOWED_PRODUCT_CATEGORIES.join(', ')}`,
+        });
+      }
+      product.category = normalizedCategory;
+      if (normalizedCategory === 'Others') {
+        product.customCategory = String(customCategory || '').trim();
+      } else {
+        product.customCategory = '';
+      }
+    } else if (customCategory !== undefined && product.category === 'Others') {
+      product.customCategory = String(customCategory).trim();
+    }
+
+    // Price validation
+    const targetPrice = realPrice !== undefined ? realPrice : price;
+    if (targetPrice !== undefined && targetPrice !== null) {
+      const parsedPrice = Number(targetPrice);
+      if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
+        return res.status(400).json({ message: 'Price must be a valid non-negative number' });
+      }
+      product.price = parsedPrice;
+      product.realPrice = parsedPrice;
+    }
+
+    // Discount validation
+    if (discountedPrice !== undefined) {
+      if (discountedPrice === null || String(discountedPrice).trim() === '') {
+        product.discountedPrice = null;
+        product.discountPercentage = 0;
+      } else {
+        const parsedDiscountedPrice = Number(discountedPrice);
+        if (Number.isNaN(parsedDiscountedPrice) || parsedDiscountedPrice < 0) {
+          return res.status(400).json({ message: 'Discounted price must be a valid non-negative number' });
+        }
+        if (parsedDiscountedPrice > product.realPrice) {
+          return res.status(400).json({ message: 'Discounted price cannot be greater than real price' });
+        }
+        product.discountedPrice = parsedDiscountedPrice;
+        product.discountPercentage = Number((((product.realPrice - parsedDiscountedPrice) / product.realPrice) * 100).toFixed(1));
+      }
+    } else if (targetPrice !== undefined && product.discountedPrice !== null) {
+      // Recompute percentage if base price changed
+      if (product.discountedPrice > product.realPrice) {
+        product.discountedPrice = null;
+        product.discountPercentage = 0;
+      } else {
+        product.discountPercentage = Number((((product.realPrice - product.discountedPrice) / product.realPrice) * 100).toFixed(1));
+      }
+    }
+
+    // Material validation
+    if (material !== undefined) {
+      product.material = String(material).trim();
+    }
+
+    // Stock validation & Inventory Transaction Logging
+    if (stock !== undefined && stock !== null) {
+      const parsedStock = Number(stock);
+      if (Number.isNaN(parsedStock) || parsedStock < 0) {
+        return res.status(400).json({ message: 'Stock must be a valid non-negative number' });
+      }
+      const previousStock = Number(product.stock || 0);
+      if (parsedStock !== previousStock) {
+        product.stock = parsedStock;
+        await logInventoryTransaction({
+          productId: product._id,
+          sellerId: req.user._id,
+          type: 'manual_adjustment',
+          quantityChange: parsedStock - previousStock,
+          previousStock,
+          newStock: parsedStock,
+          reason: 'Seller manual adjustment via listing edit',
+          source: 'seller',
+        });
+      }
+    }
+
+    // Packaging Dimensions
+    if (packageWeightGrams !== undefined && packageWeightGrams !== null) {
+      const val = Number(packageWeightGrams);
+      if (Number.isNaN(val) || val < 0) return res.status(400).json({ message: 'Package weight must be non-negative' });
+      product.packageWeightGrams = val;
+    }
+    if (packageLengthCm !== undefined && packageLengthCm !== null) {
+      const val = Number(packageLengthCm);
+      if (Number.isNaN(val) || val < 0) return res.status(400).json({ message: 'Package length must be non-negative' });
+      product.packageLengthCm = val;
+    }
+    if (packageBreadthCm !== undefined && packageBreadthCm !== null) {
+      const val = Number(packageBreadthCm);
+      if (Number.isNaN(val) || val < 0) return res.status(400).json({ message: 'Package breadth must be non-negative' });
+      product.packageBreadthCm = val;
+    }
+    if (packageHeightCm !== undefined && packageHeightCm !== null) {
+      const val = Number(packageHeightCm);
+      if (Number.isNaN(val) || val < 0) return res.status(400).json({ message: 'Package height must be non-negative' });
+      product.packageHeightCm = val;
+    }
+
+    // Image Aspect Ratio
+    if (imageAspectRatio !== undefined && imageAspectRatio !== null) {
+      const val = Number(imageAspectRatio);
+      if (Number.isNaN(val) || val < 0.5 || val > 2) return res.status(400).json({ message: 'Image aspect ratio must be between 0.5 and 2' });
+      product.imageAspectRatio = val;
+    }
+
+    // Customizable
+    if (customizable !== undefined) {
+      product.customizable = Boolean(customizable);
+    }
+
+    // Media & Images
+    if (images !== undefined || media !== undefined) {
+      const targetImages = images || [];
+      const targetMedia = media || [];
+
+      const sanitizedImages = Array.isArray(targetImages)
+        ? targetImages.filter(img => typeof img === 'string' && img.trim().length > 0)
+        : [];
+
+      const sanitizedMedia = Array.isArray(targetMedia)
+        ? targetMedia
+            .map((item) => {
+              const type = item?.type === 'video' ? 'video' : 'image';
+              const url = typeof item?.url === 'string' ? item.url.trim() : '';
+              const thumbnailUrl = typeof item?.thumbnailUrl === 'string' ? item.thumbnailUrl.trim() : '';
+              const thumbnailDataUri = sanitizeThumbnailDataUri(item?.thumbnailDataUri);
+              const ratio = Number(item?.aspectRatio || product.imageAspectRatio || 1);
+              if (!url) return null;
+              return {
+                type,
+                url,
+                thumbnailUrl,
+                thumbnailDataUri,
+                aspectRatio: Number.isNaN(ratio) ? product.imageAspectRatio : Math.max(0.5, Math.min(2, ratio)),
+              };
+            })
+            .filter(Boolean)
+        : [];
+
+      const normalizedImages = sanitizedImages
+        .map((url) => normalizePublicUrl(req, url))
+        .filter(Boolean);
+
+      const normalizedMedia = sanitizedMedia
+        .map((item) => {
+          const url = normalizePublicUrl(req, item.url);
+          if (!url) return null;
+          const thumbnailUrl = normalizePublicUrl(req, item.thumbnailUrl || (item.type === 'image' ? url : ''));
+          const thumbnailDataUri = sanitizeThumbnailDataUri(item.thumbnailDataUri);
+          return {
+            ...item,
+            url,
+            thumbnailUrl: thumbnailUrl || (item.type === 'image' ? url : ''),
+            thumbnailDataUri,
+          };
+        })
+        .filter(Boolean);
+
+      if (normalizedMedia.length > 0) {
+        product.media = normalizedMedia;
+        product.images = normalizedMedia.filter(m => m.type === 'image').map(m => m.url);
+      } else if (normalizedImages.length > 0) {
+        product.images = normalizedImages;
+        product.media = normalizedImages.map(url => ({
+          type: 'image',
+          url,
+          thumbnailUrl: url,
+          aspectRatio: product.imageAspectRatio,
+        }));
+      }
+    }
+
+    await product.save();
+    res.json({ message: 'Item updated successfully', item: normalizeProductMediaForResponse(req, product) });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+}
 
 async function updateStockHandler(req, res) {
   try {
@@ -1540,8 +1979,21 @@ async function updateStockHandler(req, res) {
       return res.status(403).json({ message: 'Not allowed to update this product stock' });
     }
 
-    product.stock = Math.max(0, Number(product.stock || 0)) + addBy;
+    const previousStock = Math.max(0, Number(product.stock || 0));
+    const newStock = previousStock + addBy;
+    product.stock = newStock;
     await product.save();
+
+    await logInventoryTransaction({
+      productId: product._id,
+      sellerId: req.user._id,
+      type: 'restock',
+      quantityChange: addBy,
+      previousStock,
+      newStock,
+      reason: 'Seller manual restock from insights panel',
+      source: 'seller',
+    });
 
     return res.json({
       message: 'Stock updated successfully',
@@ -1556,10 +2008,16 @@ async function updateStockHandler(req, res) {
   }
 }
 
+// PUT /api/products/:id - Edit listing
+router.put('/:id', auth, updateProductHandler);
+
+// POST /api/products/:id/update (compatibility fallback)
+router.post('/:id/update', auth, updateProductHandler);
+
 // PATCH /api/products/:id/stock
 router.patch('/:id/stock', auth, updateStockHandler);
 
-// POST /api/products/:id/stock (compatibility fallback for clients/environments where PATCH may fail)
+// POST /api/products/:id/stock (compatibility fallback)
 router.post('/:id/stock', auth, updateStockHandler);
 
 module.exports = router;

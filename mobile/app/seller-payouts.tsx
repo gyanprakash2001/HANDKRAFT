@@ -82,6 +82,74 @@ function AnimatedBalance({ to }: { to: number }) {
   return <ThemedText style={styles.heroAmount}>₹{display}</ThemedText>;
 }
 
+// ─── Payout Timeline ─────────────────────────────────────────────────────────
+
+interface TimelineStepProps {
+  label: string;
+  active: boolean;
+  done: boolean;
+  isLast?: boolean;
+}
+
+function TimelineStep({ label, active, done, isLast }: TimelineStepProps) {
+  const color = done ? '#7ef5a0' : active ? '#f5d16e' : '#2a3a4b';
+  return (
+    <View style={styles.timelineStepWrap}>
+      <View style={styles.stepDotContainer}>
+        <View style={[styles.stepDot, { backgroundColor: color, borderColor: done ? '#7ef5a0' : '#4a5d72' }]} />
+        {!isLast && <View style={[styles.stepLine, { backgroundColor: done ? '#7ef5a0' : '#2a3a4b' }]} />}
+      </View>
+      <ThemedText style={[styles.stepLabel, active && { color: '#f5d16e', fontWeight: '800' }, done && { color: '#7ef5a0' }]}>
+        {label}
+      </ThemedText>
+    </View>
+  );
+}
+
+function PayoutTimeline({ status }: { status: SellerPayoutStatus }) {
+  const steps = [
+    { key: 'awaiting_delivery', label: 'Ordered' },
+    { key: 'on_hold', label: 'On Hold' },
+    { key: 'ready_for_payout', label: 'Ready' },
+    { key: 'processing', label: 'Processing' },
+    { key: 'paid', label: 'Settled' },
+  ];
+
+  const getStepState = (stepKey: string) => {
+    const order: SellerPayoutStatus[] = ['awaiting_delivery', 'on_hold', 'ready_for_payout', 'processing', 'paid'];
+    const currentIndex = order.indexOf(status);
+    const stepIndex = order.indexOf(stepKey as SellerPayoutStatus);
+
+    if (currentIndex === -1) return { active: false, done: false };
+
+    return {
+      active: currentIndex === stepIndex,
+      done: stepIndex < currentIndex,
+    };
+  };
+
+  if (!['awaiting_delivery', 'on_hold', 'ready_for_payout', 'processing', 'paid'].includes(status)) {
+    return null;
+  }
+
+  return (
+    <View style={styles.timelineContainer}>
+      {steps.map((step, i) => {
+        const { active, done } = getStepState(step.key);
+        return (
+          <TimelineStep
+            key={step.key}
+            label={step.label}
+            active={active}
+            done={done}
+            isLast={i === steps.length - 1}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 // ─── Payout Card ──────────────────────────────────────────────────────────────
 
 function PayoutCard({ entry, isLast }: { entry: SellerPayoutEntry; isLast: boolean }) {
@@ -120,6 +188,33 @@ function PayoutCard({ entry, isLast }: { entry: SellerPayoutEntry; isLast: boole
 
       {open ? (
         <View style={styles.breakdown}>
+          {/* Visual Progress Timeline */}
+          <PayoutTimeline status={entry.status} />
+
+          {entry.status === 'awaiting_delivery' ? (
+            <ThemedText style={styles.timelineExplanText}>
+              🕒 Awaiting package delivery by carrier. Payout will begin once tracking updates to Delivered.
+            </ThemedText>
+          ) : entry.status === 'on_hold' ? (
+            <ThemedText style={styles.timelineExplanText}>
+              ❄️ Cooling hold: held for safety verification. Releases in {countdown || 'a short while'}.
+            </ThemedText>
+          ) : entry.status === 'ready_for_payout' ? (
+            <ThemedText style={styles.timelineExplanText}>
+              ⚡ Balance is ready! Click "Claim" at the top of the wallet screen to withdraw funds.
+            </ThemedText>
+          ) : entry.status === 'processing' ? (
+            <ThemedText style={styles.timelineExplanText}>
+              🔄 Settlement request submitted. Arrives in bank/UPI details in ~2 hours.
+            </ThemedText>
+          ) : entry.status === 'paid' ? (
+            <ThemedText style={styles.timelineExplanText}>
+              ✅ Payout successfully completed and settled to bank/UPI.
+            </ThemedText>
+          ) : null}
+
+          <View style={styles.bdDivider} />
+
           <BdRow label="Your sale price" value={fmt(entry.split.itemSubtotal)} />
           <BdRow label="Shipping deducted" value={`−${fmt(entry.split.shippingDeduction)}`} neg />
           <BdRow
@@ -658,4 +753,56 @@ const styles = StyleSheet.create({
 
   supportFooter: { flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
   supportText: { color: '#3a5a70', fontSize: 11 },
+  timelineContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    backgroundColor: '#0a1420',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: '#152438',
+    marginBottom: 6,
+  },
+  timelineStepWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    position: 'relative',
+  },
+  stepDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    zIndex: 2,
+  },
+  stepLine: {
+    height: 1.5,
+    width: '100%',
+    position: 'absolute',
+    left: '50%',
+    zIndex: 1,
+  },
+  stepLabel: {
+    fontSize: 8.5,
+    color: '#4a5d72',
+    marginTop: 4,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  timelineExplanText: {
+    fontSize: 9.5,
+    color: '#8aaaca',
+    lineHeight: 13,
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Linking, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Linking, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -13,6 +13,7 @@ import {
   SellerFulfillmentStatus,
   SellerOrder,
   SellerOrderItem,
+  updateSellerOrderItemStatus,
 } from '@/utils/api';
 
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -47,6 +48,10 @@ type GroupedSellerOrderItem = {
   fulfillmentStatus: SellerFulfillmentStatus;
   trackingEvents: SellerOrderItem['trackingEvents'];
   itemIndexes: number[];
+  packageWeightGrams?: number;
+  packageLengthCm?: number;
+  packageBreadthCm?: number;
+  packageHeightCm?: number;
 };
 
 function groupSellerOrderItems(items: SellerOrderItem[]): GroupedSellerOrderItem[] {
@@ -76,6 +81,10 @@ function groupSellerOrderItems(items: SellerOrderItem[]): GroupedSellerOrderItem
       fulfillmentStatus: item.fulfillmentStatus,
       trackingEvents: [...(item.trackingEvents || [])],
       itemIndexes: [item.itemIndex],
+      packageWeightGrams: item.packageWeightGrams,
+      packageLengthCm: item.packageLengthCm,
+      packageBreadthCm: item.packageBreadthCm,
+      packageHeightCm: item.packageHeightCm,
     });
   }
 
@@ -119,6 +128,20 @@ export default function SellerStageOrdersScreen() {
 
   useEffect(() => {
     loadOrders();
+  }, [loadOrders]);
+
+  const handleMarkAsPacked = useCallback(async (orderId: string, itemIndexes: number[]) => {
+    try {
+      setLoading(true);
+      for (const idx of itemIndexes) {
+        await updateSellerOrderItemStatus(orderId, idx, 'packed', 'Item packed by seller and ready for pickup.');
+      }
+      Alert.alert('Success', 'Item(s) marked as packed!');
+      await loadOrders(true);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to update item status');
+      setLoading(false);
+    }
   }, [loadOrders]);
 
   const statusLabelMap: Record<SellerFulfillmentStatus, string> = {
@@ -293,13 +316,55 @@ export default function SellerStageOrdersScreen() {
                       : 'Status updates automatically via NimbusPost tracking'}
                   </ThemedText>
 
-                  {/* Info text instead of manual action buttons */}
+                  {/* Action or info buttons */}
                   {stage === 'new' ? (
-                    <View style={styles.infoRow}>
-                      <Ionicons name="information-circle-outline" size={14} color="#9cb0cc" />
-                      <ThemedText style={styles.infoText}>
-                        Shipment will be booked automatically after payment. Tracking updates via NimbusPost.
-                      </ThemedText>
+                    <View style={styles.actionBlock}>
+                      {['new', 'processing'].includes(orderItem.fulfillmentStatus) ? (
+                        <View style={styles.packingWorkflow}>
+                          <View style={styles.packingChecklist}>
+                            <ThemedText style={styles.checklistTitle}>Packing Checklist:</ThemedText>
+                            <ThemedText style={styles.checklistText}>
+                              📦 deadweight: {orderItem.packageWeightGrams ?? 500}g · dimensions: {orderItem.packageLengthCm ?? 10}x{orderItem.packageBreadthCm ?? 10}x{orderItem.packageHeightCm ?? 10}cm
+                            </ThemedText>
+                            <ThemedText style={styles.checklistText}>
+                              ✉️ print label & verify buyer name: {item.shippingAddress?.fullName}
+                            </ThemedText>
+                          </View>
+                          <Pressable
+                            style={styles.packBtn}
+                            onPress={() => handleMarkAsPacked(item.id, orderItem.itemIndexes)}>
+                            <Ionicons name="gift-outline" size={14} color="#0a0a0a" />
+                            <ThemedText style={styles.packBtnText}>Mark as Packed</ThemedText>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <View style={styles.packedWorkflow}>
+                          <View style={styles.packedStatusRow}>
+                            <Ionicons name="checkmark-circle" size={16} color="#9df0a2" />
+                            <ThemedText style={styles.packedStatusText}>Packed & Awaiting Courier Pickup</ThemedText>
+                          </View>
+                          
+                          <View style={styles.labelBtnsRow}>
+                            {shipment?.carrier?.labelUrl ? (
+                              <Pressable
+                                style={styles.labelBtn}
+                                onPress={() => Linking.openURL(shipment.carrier.labelUrl).catch(() => {})}>
+                                <Ionicons name="print-outline" size={13} color="#9df0a2" />
+                                <ThemedText style={styles.labelBtnText}>Shipping Label</ThemedText>
+                              </Pressable>
+                            ) : null}
+
+                            {shipment?.carrier?.manifestUrl ? (
+                              <Pressable
+                                style={styles.labelBtn}
+                                onPress={() => Linking.openURL(shipment.carrier.manifestUrl).catch(() => {})}>
+                                <Ionicons name="document-text-outline" size={13} color="#9df0a2" />
+                                <ThemedText style={styles.labelBtnText}>Manifest</ThemedText>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        </View>
+                      )}
                     </View>
                   ) : stage === 'shipment' ? (
                     <View style={styles.infoRow}>
@@ -650,5 +715,84 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginBottom: 8,
     color: '#ff9090',
+  },
+  actionBlock: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#263a52',
+  },
+  packingWorkflow: {
+    gap: 8,
+  },
+  packingChecklist: {
+    backgroundColor: '#0e1724',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#1e2b3e',
+  },
+  checklistTitle: {
+    color: '#9df0a2',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  checklistText: {
+    color: '#a8bad3',
+    fontSize: 10.5,
+    lineHeight: 14,
+    marginTop: 2,
+  },
+  packBtn: {
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#9df0a2',
+    borderWidth: 1,
+    borderColor: '#78cf84',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  packBtnText: {
+    color: '#0a0a0a',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  packedWorkflow: {
+    gap: 8,
+  },
+  packedStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  packedStatusText: {
+    color: '#9df0a2',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  labelBtnsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  labelBtn: {
+    flex: 1,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#375a3d',
+    backgroundColor: '#1d4124',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  labelBtnText: {
+    color: '#d5f6da',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
