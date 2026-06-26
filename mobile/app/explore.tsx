@@ -659,16 +659,41 @@ export default function ExploreScreen() {
         </View>
       ) : null}
 
-      <View style={{ overflow: 'hidden' }}>
+      <Animated.View
+        style={{
+          height: topFiltersAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, topSectionHeight],
+          }),
+          opacity: topFiltersAnim.interpolate({
+            inputRange: [0, 0.1, 1],
+            outputRange: [0, 0, 1],
+          }),
+          transform: [
+            {
+              translateY: topFiltersAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-14, 0],
+              }),
+            },
+          ],
+          overflow: 'hidden',
+        }}>
         <Animated.View
           style={{
-            marginTop: topFiltersAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [-topSectionHeight, 0],
-            }),
-            opacity: topFiltersAnim,
+            transform: [
+              {
+                scale: topFiltersAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.98, 1],
+                }),
+              },
+            ],
           }}>
-          <View onLayout={(e) => setTopSectionHeight(Math.max(1, e.nativeEvent.layout.height))}>
+          <View onLayout={(e) => {
+            const h = e.nativeEvent.layout.height;
+            if (!hideTopFilters && h > 10) setTopSectionHeight(h);
+          }}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -754,7 +779,7 @@ export default function ExploreScreen() {
             ) : null}
           </View>
         </Animated.View>
-      </View>
+      </Animated.View>
 
       {loading && results.length === 0 ? (
         <View style={styles.loaderWrap}>
