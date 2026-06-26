@@ -1109,4 +1109,27 @@ router.delete('/me/addresses/:addressIndex', auth, async (req, res) => {
   }
 });
 
+// POST /api/users/me/push-token - Save user push token
+router.post('/me/push-token', auth, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ message: 'Push token is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.pushToken = token;
+    await user.save();
+
+    res.json({ success: true, message: 'Push token updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
 module.exports = router;

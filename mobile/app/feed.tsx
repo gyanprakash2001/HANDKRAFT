@@ -17,10 +17,12 @@ import LocalAvatar from '@/components/LocalAvatar';
 import currentUser from '@/utils/currentUser';
 import { normalizeProduct } from '@/utils/product';
 import { useCartNotification } from '@/contexts/cart-notification-context';
-import { getProfile, getProducts, ProductItem, ProductMediaItem, getChatConversations, getProfileDashboard, normalizeAssetUrl } from '@/utils/api';
+import { getProfile, getProducts, getProductById, ProductItem, ProductMediaItem, getChatConversations, getProfileDashboard, normalizeAssetUrl } from '@/utils/api';
 import { removeToken } from '@/utils/auth';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
+import { getRecentlyViewedIds, clearRecentlyViewed } from '@/utils/recently-viewed';
+import { registerForPushNotificationsAsync } from '@/utils/notifications';
 
 type ProfileMode = 'buyer' | 'seller';
 const PROFILE_MODE_KEY = 'HANDKRAFT_PROFILE_MODE';
@@ -302,6 +304,7 @@ export default function FeedScreen() {
   const topFiltersAnim = useRef(new Animated.Value(1)).current;
   const router = useRouter();
   const { totalCartItems, hydrateCartFromBackend } = useCartNotification();
+  const [recentlyViewedItems, setRecentlyViewedItems] = useState<ProductItem[]>([]);
 
   const handleMediaLayout = useCallback((postId: string, width: number) => {
     const normalized = Number(width) || 0;
@@ -481,6 +484,29 @@ export default function FeedScreen() {
     };
   }, []);
 
+  const loadRecentlyViewed = useCallback(async () => {
+    try {
+      const ids = await getRecentlyViewedIds();
+      if (!ids || ids.length === 0) {
+        setRecentlyViewedItems([]);
+        return;
+      }
+      const promises = ids.slice(0, 10).map(async (id) => {
+        try {
+          const prod = await getProductById(id);
+          return prod ? normalizeProduct(prod) : null;
+        } catch {
+          return null;
+        }
+      });
+      const results = await Promise.all(promises);
+      const filtered = results.filter((p): p is ProductItem => p !== null);
+      setRecentlyViewedItems(filtered);
+    } catch {
+      setRecentlyViewedItems([]);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       const isFirstFocus = firstFocusRef.current;
@@ -489,6 +515,7 @@ export default function FeedScreen() {
       loadFeed(!isFirstFocus);
       loadUnreadMessageCount();
       syncCartBadgeFromBackend();
+      loadRecentlyViewed();
       const pollerId = setInterval(() => {
         loadUnreadMessageCount();
       }, UNREAD_POLL_MS_DEFAULT);
@@ -496,7 +523,7 @@ export default function FeedScreen() {
       return () => {
         clearInterval(pollerId);
       };
-    }, [loadFeed, loadUnreadMessageCount, syncCartBadgeFromBackend])
+    }, [loadFeed, loadUnreadMessageCount, syncCartBadgeFromBackend, loadRecentlyViewed])
   );
 
   const handleFeedScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -566,6 +593,7 @@ export default function FeedScreen() {
     const unsub = currentUser.subscribe((p) => {
       try { setUserAvatar(p?.avatarUrl || null); } catch { /* ignore */ }
     });
+    registerForPushNotificationsAsync().catch(() => {});
     return () => unsub();
   }, []);
 
@@ -737,6 +765,18 @@ export default function FeedScreen() {
               <>
                 <ThemedText style={styles.originalPriceText}>{formatPrice(pricing.realPrice)}</ThemedText>
               </>
+            ) : null}
+          </View>
+          <View style={styles.trustBadgesRow}>
+            {item.stock > 0 && item.stock <= 3 ? (
+              <View style={[styles.trustBadge, styles.lowStockBadge]}>
+                <ThemedText style={styles.trustBadgeText}>🔥 Low Stock</ThemedText>
+              </View>
+            ) : null}
+            {item.ratingAverage && item.ratingAverage >= 4.5 ? (
+              <View style={[styles.trustBadge, styles.topRatedBadge]}>
+                <ThemedText style={styles.trustBadgeText}>⭐ Top Rated</ThemedText>
+              </View>
             ) : null}
           </View>
           <ThemedText numberOfLines={1} style={styles.socialProofText}>{socialProof}</ThemedText>
@@ -939,6 +979,58 @@ export default function FeedScreen() {
               </View>
             ) : (
               <>
+                {recentlyViewedItems.length > 0 && mode === 'buyer' && (
+                  <View style={styles.recentlyViewedSection}>
+                    <View style={styles.recentlyViewedHeader}>
+                      <ThemedText style={styles.recentlyViewedTitle}>Recently Viewed</ThemedText>
+                      <Pressable
+                        onPress={async () => {
+                          try {
+                            await clearRecentlyViewed();
+                            setRecentlyViewedItems([]);
+                          } catch {
+                            // ignore
+                          }
+                        }}
+                        style={styles.clearRecentlyViewedBtn}
+                      >
+                        <ThemedText style={styles.clearRecentlyViewedText}>Clear</ThemedText>
+                      </Pressable>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.recentlyViewedRow}
+                    >
+                      {recentlyViewedItems.map((item) => {
+                        const pricing = getProductPricing(item, priceOverridesById[item._id]);
+                        const media = getPostMedia(item);
+                        const imageSource = media[0]?.url ? { uri: normalizeAssetUrl(media[0].url) } : null;
+                        return (
+                          <Pressable
+                            key={item._id}
+                            style={styles.recentlyViewedCard}
+                            onPress={() => router.push({ pathname: '/product/[id]', params: { id: item._id } })}
+                          >
+                            <Image
+                              source={imageSource}
+                              style={styles.recentlyViewedImage}
+                              contentFit="cover"
+                            />
+                            <View style={styles.recentlyViewedInfo}>
+                              <ThemedText style={styles.recentlyViewedName} numberOfLines={1}>
+                                {item.title}
+                              </ThemedText>
+                              <ThemedText style={styles.recentlyViewedPrice}>
+                                {formatPrice(pricing.effectivePrice)}
+                              </ThemedText>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
                 <View style={styles.masonryWrap}>
                   <View style={styles.column}>{columns.left.map(renderCard)}</View>
                   <View style={styles.column}>{columns.right.map(renderCard)}</View>
@@ -1358,6 +1450,87 @@ const styles = StyleSheet.create({
     color: '#7d8fa6',
     fontSize: 12,
     fontWeight: '600',
+  },
+  recentlyViewedSection: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+    backgroundColor: '#0a0a0a',
+  },
+  recentlyViewedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+  recentlyViewedTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  clearRecentlyViewedBtn: {
+    padding: 4,
+  },
+  clearRecentlyViewedText: {
+    fontSize: 12,
+    color: '#8ea1b6',
+  },
+  recentlyViewedRow: {
+    paddingHorizontal: 10,
+    gap: 12,
+  },
+  recentlyViewedCard: {
+    width: 100,
+    backgroundColor: '#111',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    overflow: 'hidden',
+  },
+  recentlyViewedImage: {
+    width: 100,
+    height: 100,
+    backgroundColor: '#222',
+  },
+  recentlyViewedInfo: {
+    padding: 6,
+  },
+  recentlyViewedName: {
+    fontSize: 11,
+    color: '#ccc',
+    fontWeight: '500',
+  },
+  recentlyViewedPrice: {
+    fontSize: 11,
+    color: '#fff',
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  trustBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 6,
+  },
+  trustBadge: {
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 0.5,
+  },
+  lowStockBadge: {
+    backgroundColor: '#3d1c1a',
+    borderColor: '#7a2d29',
+  },
+  topRatedBadge: {
+    backgroundColor: '#3d301a',
+    borderColor: '#7a5a29',
+  },
+  trustBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#fff',
   },
   tabBar: {
     position: 'absolute',

@@ -2508,3 +2508,15 @@ export async function adminMarkPayoutsPaid(params: {
   }
   return res.json();
 }
+
+export async function registerPushToken(pushToken: string): Promise<{ success: boolean; message?: string }> {
+  const res = await fetchWithAuth('/users/me/push-token', {
+    method: 'POST',
+    body: JSON.stringify({ token: pushToken }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to register push token');
+  }
+  return res.json();
+}

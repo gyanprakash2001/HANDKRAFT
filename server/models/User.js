@@ -133,6 +133,7 @@ const userSchema = new mongoose.Schema({
   likedProductTimestamps: [likedProductTimestampSchema],
   cartItems: [cartItemSchema],
   addresses: [addressSchema],
+  pushToken: { type: String, default: '' },
   isAdmin: { type: Boolean, default: false },
   adminRole: {
     type: String,

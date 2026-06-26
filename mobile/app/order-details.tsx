@@ -7,6 +7,54 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { getUserOrderDetails, Order } from '@/utils/api';
+import OrderTimeline from '@/components/OrderTimeline';
+
+const getTimelineTimestamps = (order: any) => {
+  const timestamps: Record<string, string> = {
+    placed: order.createdAt,
+  };
+
+  if (order.items?.[0]?.trackingEvents) {
+    order.items[0].trackingEvents.forEach((evt: any) => {
+      if (evt.status && evt.at) {
+        timestamps[evt.status] = evt.at;
+      }
+    });
+  }
+
+  if (order.sellerShipments) {
+    order.sellerShipments.forEach((shipment: any) => {
+      if (shipment.timeline) {
+        shipment.timeline.forEach((evt: any) => {
+          if (evt.status && evt.at) {
+            let key = evt.status;
+            if (evt.status === 'ready_for_booking' || evt.status === 'booked' || evt.status === 'awb_assigned' || evt.status === 'pickup_scheduled') {
+              key = 'confirmed';
+            } else if (evt.status === 'in_transit') {
+              key = 'shipped';
+            }
+            if (!timestamps[key]) {
+              timestamps[key] = evt.at;
+            }
+          }
+        });
+      }
+    });
+  }
+
+  // Fallbacks
+  if (!timestamps.confirmed && (order.status === 'confirmed' || order.status === 'shipped' || order.status === 'delivered')) {
+    timestamps.confirmed = order.updatedAt;
+  }
+  if (!timestamps.shipped && (order.status === 'shipped' || order.status === 'delivered')) {
+    timestamps.shipped = order.updatedAt;
+  }
+  if (!timestamps.delivered && order.status === 'delivered') {
+    timestamps.delivered = order.updatedAt;
+  }
+
+  return timestamps;
+};
 
 export default function OrderDetailsScreen() {
   const router = useRouter();
@@ -158,6 +206,15 @@ export default function OrderDetailsScreen() {
             })}
           </ThemedText>
         </View>
+
+        {/* Visual Progress Timeline */}
+        <OrderTimeline
+          status={order.status}
+          timestamps={getTimelineTimestamps(order)}
+          carrierName={shipments[0]?.courierName}
+          awbNumber={shipments[0]?.awbNumber}
+          estimatedDelivery={order.expectedDeliveryDate ? String(order.expectedDeliveryDate) : undefined}
+        />
 
         {/* Tracking / Shipment Info */}
         {shipments.length > 0 && (

@@ -157,6 +157,10 @@ orderSchema.pre('save', async function() {
   const now = new Date();
   this.updatedAt = now;
 
+  if (this.isModified('status') && !this.isNew) {
+    this._statusChanged = true;
+  }
+
   if (Array.isArray(this.sellerShipments)) {
     this.sellerShipments.forEach((shipment) => {
       if (!shipment.createdAt) {
@@ -164,6 +168,35 @@ orderSchema.pre('save', async function() {
       }
       shipment.updatedAt = now;
     });
+  }
+});
+
+orderSchema.post('save', function(doc) {
+  if (doc._statusChanged) {
+    doc._statusChanged = false;
+    const { sendPushNotification } = require('../services/notifications');
+    let title = 'Order Update';
+    let body = `Your order status has changed to ${doc.status}.`;
+    
+    if (doc.status === 'confirmed') {
+      title = 'Order Confirmed! 🎉';
+      body = 'Your order has been confirmed by the seller.';
+    } else if (doc.status === 'shipped') {
+      title = 'Order Shipped! 🚀';
+      body = 'Good news! Your package has been shipped and is on the way.';
+    } else if (doc.status === 'delivered') {
+      title = 'Order Delivered! 🏡';
+      body = 'Your package has been delivered. Enjoy your handmade items!';
+    } else if (doc.status === 'cancelled') {
+      title = 'Order Cancelled';
+      body = 'Your order has been cancelled.';
+    }
+    
+    sendPushNotification(doc.user, title, body, {
+      type: 'order_status',
+      orderId: doc._id.toString(),
+      status: doc.status,
+    }).catch(err => console.error('Error sending order status push notification:', err));
   }
 });
 

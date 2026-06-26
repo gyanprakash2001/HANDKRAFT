@@ -358,6 +358,27 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
 
     await conversation.save();
 
+    // Trigger push notification to the recipient
+    const recipientId = conversation.participants.find((p) => String(p) !== me);
+    if (recipientId) {
+      const { sendPushNotification } = require('../services/notifications');
+      const senderUser = await User.findById(me).select('name');
+      const senderName = senderUser?.name || 'Someone';
+      const isImg = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(text));
+      const bodyText = isImg ? '📷 Sent an image' : text;
+
+      sendPushNotification(
+        recipientId,
+        `New message from ${senderName}`,
+        bodyText,
+        {
+          type: 'chat_message',
+          conversationId: conversation._id.toString(),
+          senderId: me,
+        }
+      ).catch((err) => console.error('Error sending chat push notification:', err));
+    }
+
     const isImage = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(message.text));
 
     res.status(201).json({

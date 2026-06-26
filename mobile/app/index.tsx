@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { View, StyleSheet, Image } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -9,6 +11,22 @@ import { ThemedText } from '@/components/themed-text';
 const logo = require('../assets/handkraft_logo.png');
 
 export default function HomeScreen() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const seen = await AsyncStorage.getItem('HANDKRAFT_SEEN_ONBOARDING');
+        if (seen !== 'true') {
+          router.replace('/onboarding');
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+    checkOnboarding();
+  }, []);
+
   return (
     <ThemedView style={styles.container}>
       <LinearGradient
