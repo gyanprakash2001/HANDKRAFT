@@ -75,7 +75,7 @@ export default function OnboardingScreen() {
     <ThemedView style={styles.container}>
       <View style={styles.header}>
         <View style={styles.logoWrap}>
-          <Image source={require('../assets/feed_logo_trim.png')} style={{ width: 140, height: 18 }} resizeMode="contain" />
+          <Image source={require('../assets/feed_logo.png')} style={{ width: 130, height: 34 }} resizeMode="contain" />
         </View>
         {activeIndex < SLIDES.length - 1 && (
           <Pressable onPress={handleSkip} style={styles.skipBtn}>
@@ -97,7 +97,7 @@ export default function OnboardingScreen() {
           <View key={index} style={styles.slide}>
             <View style={[styles.iconContainer, { borderColor: slide.color }]}>
               {slide.isLogo ? (
-                <Image source={require('../assets/images/icon.png')} style={{ width: 90, height: 90, borderRadius: 45 }} resizeMode="cover" />
+                <Image source={require('../assets/handkraft_logo.png')} style={{ width: 70, height: 70 }} resizeMode="contain" />
               ) : (
                 <Ionicons name={slide.icon as any} size={64} color={slide.color} />
               )}
