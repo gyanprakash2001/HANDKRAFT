@@ -1,31 +1,80 @@
-import { useEffect } from 'react';
-import { View, StyleSheet, Image } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, StyleSheet, Image, ActivityIndicator } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { getToken, removeToken } from '@/utils/auth';
+import { getProfile } from '@/utils/api';
+import currentUser from '@/utils/currentUser';
 
 // hero image placed in assets folder
 const logo = require('../assets/handkraft_logo.png');
 
 export default function HomeScreen() {
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    const checkOnboarding = async () => {
+    let active = true;
+    const checkSession = async () => {
       try {
         const seen = await AsyncStorage.getItem('HANDKRAFT_SEEN_ONBOARDING');
         if (seen !== 'true') {
-          router.replace('/onboarding');
+          if (active) {
+            router.replace('/onboarding');
+          }
+          return;
+        }
+
+        // Onboarding completed, check login status
+        const token = await getToken();
+        if (token) {
+          try {
+            const profile = await getProfile();
+            if (active) {
+              if (profile) {
+                currentUser.setProfile(profile);
+                router.replace('/feed');
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to auto-login with stored token, clearing:', err);
+            await removeToken();
+          }
         }
       } catch (err) {
-        // ignore
+        console.error('Session check failed:', err);
+      } finally {
+        if (active) {
+          setCheckingAuth(false);
+        }
       }
     };
-    checkOnboarding();
-  }, []);
+    checkSession();
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
+  if (checkingAuth) {
+    return (
+      <ThemedView style={styles.container}>
+        <LinearGradient
+          colors={['#1a1a1a', '#050505']}
+          style={styles.card}
+          start={[0, 0]}
+          end={[1, 1]}
+        >
+          <Image source={logo} style={styles.logo} resizeMode="contain" />
+          <ActivityIndicator size="large" color="#ffffff" style={{ marginTop: 24 }} />
+        </LinearGradient>
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={styles.container}>

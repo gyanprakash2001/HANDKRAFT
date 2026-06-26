@@ -38,6 +38,7 @@ import {
   addProductToCart,
 } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
+import { removeToken } from '@/utils/auth';
 import { resolveProductImageUri } from '@/utils/product';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
 const LOCAL_MANIFEST: string[] = Array.from({ length: 30 }, (_, i) => `local:avatar${String(i + 1).padStart(2, '0')}`);
@@ -682,8 +683,9 @@ export default function ProfileScreen() {
         text: 'Logout',
         style: 'destructive',
         onPress: async () => {
-          await AsyncStorage.removeItem('auth_token');
+          await removeToken();
           await AsyncStorage.removeItem('user_id');
+          currentUser.setProfile(null);
           router.replace('/login');
         },
       },
