@@ -39,8 +39,7 @@ import {
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { launchStableImageLibraryAsync } from '@/utils/media-picker';
 import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
-import { recordProductView } from '@/utils/recently-viewed';
-
+import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
 type Params = {
   id?: string;
 };
@@ -267,13 +266,8 @@ export default function ProductDetailsScreen() {
   const [product, setProduct] = useState<ProductItem | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<ProductItem[]>([]);
   const [sellerProfile, setSellerProfile] = useState<SellerPublicProfile | null>(null);
-  const [storyExpanded, setStoryExpanded] = useState(false);
 
-  useEffect(() => {
-    if (id) {
-      recordProductView(id);
-    }
-  }, [id]);
+
   const [reviewSort, setReviewSort] = useState<ProductReviewSort>('top');
   const [selectedReviewRatingFilter, setSelectedReviewRatingFilter] = useState<ReviewRatingFilter>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -943,7 +937,7 @@ export default function ProductDetailsScreen() {
 
               {actionMessage ? <ThemedText style={styles.actionMessage}>{actionMessage}</ThemedText> : null}
 
-              {/* Meet the Maker / Story Section */}
+              {/* Meet the Maker Section */}
               <View style={styles.makerSection}>
                 <ThemedText type="subtitle" style={styles.makerSectionTitle}>Meet the Maker</ThemedText>
                 <View style={styles.makerCard}>
@@ -954,17 +948,15 @@ export default function ProductDetailsScreen() {
                       <Image
                         source={resolveSellerAvatarSource(sellerProfile?.avatarUrl, product.sellerName)}
                         style={styles.makerAvatar}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
                       />
                     )}
                     <View style={styles.makerMeta}>
                       <ThemedText style={styles.makerName}>
                         {sellerProfile?.displayName || sellerProfile?.name || product.sellerName}
+                        {sellerProfile?.tagline ? ` • ${sellerProfile.tagline}` : ''}
                       </ThemedText>
-                      {sellerProfile?.tagline ? (
-                        <ThemedText style={styles.makerTagline} numberOfLines={1}>
-                          {sellerProfile.tagline}
-                        </ThemedText>
-                      ) : null}
                       {sellerProfile?.location ? (
                         <View style={styles.makerLocationRow}>
                           <Ionicons name="location-outline" size={12} color="#a6b8d4" />
@@ -973,35 +965,6 @@ export default function ProductDetailsScreen() {
                       ) : null}
                     </View>
                   </View>
-                  
-                  {sellerProfile?.story ? (
-                    <View style={styles.makerStoryContent}>
-                      <ThemedText
-                        style={styles.makerStoryText}
-                        numberOfLines={storyExpanded ? undefined : 3}
-                      >
-                        {sellerProfile.story}
-                      </ThemedText>
-                      <Pressable onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                        setStoryExpanded(!storyExpanded);
-                      }} style={styles.readMoreBtn}>
-                        <ThemedText style={styles.readMoreText}>
-                          {storyExpanded ? 'Read Less' : 'Read Full Story'}
-                        </ThemedText>
-                        <Ionicons
-                          name={storyExpanded ? 'chevron-up' : 'chevron-down'}
-                          size={12}
-                          color="#9fc8ff"
-                        />
-                      </Pressable>
-                    </View>
-                  ) : null}
-
-                  {sellerProfile?.storyVideoUrl ? (
-                    <View style={styles.makerVideoContainer}>
-                      <SellerStoryVideo uri={sellerProfile.storyVideoUrl} />
-                    </View>
                   ) : null}
 
                   <Pressable

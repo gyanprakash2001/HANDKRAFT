@@ -16,7 +16,6 @@ import { getProducts, normalizeAssetUrl, ProductItem, getProfile } from '@/utils
 import currentUser from '@/utils/currentUser';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
-import { getRecentlyViewedIds, clearRecentlyViewed } from '@/utils/recently-viewed';
 
 const RECENT_SEARCHES_KEY = 'HANDKRAFT_RECENT_SEARCHES';
 const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
@@ -236,7 +235,7 @@ export default function ExploreScreen() {
   const [error, setError] = useState<string | null>(null);
   const [allItems, setAllItems] = useState<ProductItem[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [recentlyViewedItems, setRecentlyViewedItems] = useState<ProductItem[]>([]);
+
   const [sortMode, setSortMode] = useState<SearchSortMode>('relevant');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
 
@@ -402,30 +401,7 @@ export default function ExploreScreen() {
     }
   }, []);
 
-  const loadRecentlyViewed = useCallback(async () => {
-    try {
-      const ids = await getRecentlyViewedIds();
-      if (!ids || ids.length === 0) {
-        setRecentlyViewedItems([]);
-        return;
-      }
 
-      const matched: ProductItem[] = [];
-      for (const id of ids) {
-        const found = allItems.find((item) => item._id === id);
-        if (found) {
-          matched.push(found);
-        }
-      }
-      setRecentlyViewedItems(matched.slice(0, 8));
-    } catch {
-      setRecentlyViewedItems([]);
-    }
-  }, [allItems]);
-
-  useEffect(() => {
-    loadRecentlyViewed();
-  }, [allItems, loadRecentlyViewed]);
 
   // subscribe to global avatar changes so the tab updates immediately
   useEffect(() => {
@@ -440,8 +416,7 @@ export default function ExploreScreen() {
       loadProducts(false);
       loadRecentSearches();
       loadAvatar();
-      loadRecentlyViewed();
-    }, [loadProducts, loadRecentSearches, loadAvatar, loadRecentlyViewed])
+    }, [loadProducts, loadRecentSearches, loadAvatar])
   );
 
   useEffect(() => {
@@ -453,33 +428,6 @@ export default function ExploreScreen() {
   }, []);
 
   const trimmedQuery = query.trim();
-
-  // Dynamic Trending Searches based on platform sales volume and ratings
-  const trendingSearches = useMemo(() => {
-    const scores = new Map<string, number>();
-
-    for (const item of allItems) {
-      const sold = Math.max(0, Number(item.monthlySold) || 0);
-      const rating = Math.max(0, Number(item.rating) || 0);
-      const weight = 10 + sold * 2.5 + rating * 1.5;
-
-      const addScore = (term: string, multiplier: number) => {
-        const clean = String(term || '').trim().toLowerCase();
-        if (!clean || clean.length < 3) return;
-        scores.set(clean, (scores.get(clean) || 0) + weight * multiplier);
-      };
-
-      addScore(item.category, 1.0);
-      if (item.material) {
-        addScore(item.material, 0.8);
-      }
-    }
-
-    return Array.from(scores.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map((entry) => entry[0]);
-  }, [allItems]);
 
   const liveSuggestions = useMemo(() => {
     const target = normalizeText(trimmedQuery);
@@ -722,78 +670,6 @@ export default function ExploreScreen() {
             </Pressable>
           ))}
         </ScrollView>
-      ) : null}
-
-      {/* Recently Viewed Products Strip in Explore */}
-      {!trimmedQuery && recentlyViewedItems.length > 0 ? (
-        <>
-          <View style={styles.sectionRow}>
-            <ThemedText style={styles.sectionTitle}>Recently Viewed</ThemedText>
-            <Pressable onPress={async () => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-              await clearRecentlyViewed();
-              setRecentlyViewedItems([]);
-            }}>
-              <ThemedText style={styles.clearText}>Clear</ThemedText>
-            </Pressable>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.recentViewedScroller}
-            contentContainerStyle={styles.recentViewedRow}
-            keyboardShouldPersistTaps="handled">
-            {recentlyViewedItems.map((item) => (
-              <Pressable
-                key={`recent-viewed-${item._id}`}
-                style={styles.recentViewedCard}
-                onPress={() => openProduct(item)}>
-                <Image
-                  source={{ uri: resolveProductImageSource(item) }}
-                  style={styles.recentViewedImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                />
-                <View style={styles.recentViewedInfo}>
-                  <ThemedText style={styles.recentViewedName} numberOfLines={1}>
-                    {item.title}
-                  </ThemedText>
-                  <ThemedText style={styles.recentViewedPrice}>
-                    {formatPriceINR(getProductPricing(item).effectivePrice)}
-                  </ThemedText>
-                </View>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </>
-      ) : null}
-
-      {!trimmedQuery && trendingSearches.length > 0 ? (
-        <>
-          <View style={styles.sectionRow}>
-            <ThemedText style={styles.sectionTitle}>Trending Searches</ThemedText>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsScroller}
-            contentContainerStyle={styles.chipsRow}
-            keyboardShouldPersistTaps="handled">
-            {trendingSearches.map((entry) => (
-              <Pressable
-                key={`trending-${entry}`}
-                style={styles.trendingChip}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                  setQuery(entry);
-                  persistRecentSearch(entry);
-                }}>
-                <Ionicons name="trending-up-outline" size={13} color="#9df0a2" />
-                <ThemedText style={styles.trendingChipText}>{entry}</ThemedText>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </>
       ) : null}
 
       {loading && results.length === 0 ? (
