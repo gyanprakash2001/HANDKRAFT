@@ -217,6 +217,39 @@ function resolveImageDisplayRatio(media: ProductMediaItem[], fallbackRatio: numb
   return clampAspectRatio(fallbackRatio);
 }
 
+function ProductDetailSkeleton() {
+  return (
+    <ThemedView style={[styles.container, { paddingBottom: 40 }]}>
+      {/* Hero Image Skeleton */}
+      <View style={styles.skeletonHeroImage} />
+      
+      <View style={{ padding: 16 }}>
+        {/* Title Line */}
+        <View style={[styles.skeletonLine, styles.skeletonTitle]} />
+        
+        {/* Price Row */}
+        <View style={[styles.skeletonLine, styles.skeletonPrice]} />
+        
+        {/* Badges Row */}
+        <View style={styles.skeletonBadgesRow}>
+          <View style={styles.skeletonBadgePill} />
+          <View style={styles.skeletonBadgePill} />
+          <View style={styles.skeletonBadgePill} />
+        </View>
+        
+        {/* Description Lines */}
+        <View style={[styles.skeletonLine, styles.skeletonDescLine, { width: '100%' }]} />
+        <View style={[styles.skeletonLine, styles.skeletonDescLine, { width: '95%' }]} />
+        <View style={[styles.skeletonLine, styles.skeletonDescLine, { width: '90%' }]} />
+        <View style={[styles.skeletonLine, styles.skeletonDescLine, { width: '60%' }]} />
+        
+        {/* Meet the Maker Placeholder */}
+        <View style={styles.skeletonMakerCard} />
+      </View>
+    </ThemedView>
+  );
+}
+
 export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams<Params>();
   const router = useRouter();
@@ -449,14 +482,6 @@ export default function ProductDetailsScreen() {
       });
     } catch (error) {
       console.warn('Share error:', error);
-    }
-  };
-      setActionMessage('Added to cart');
-    } catch (err: any) {
-      setActionMessage(err?.message || 'Failed to add to cart');
-    } finally {
-      addToCartInFlightRef.current = false;
-      setActionBusy(false);
     }
   };
 
@@ -722,11 +747,7 @@ export default function ProductDetailsScreen() {
   }, []);
 
   if (loading) {
-    return (
-      <ThemedView style={styles.center}>
-        <ActivityIndicator size="large" color="#fff" />
-      </ThemedView>
-    );
+    return <ProductDetailSkeleton />;
   }
 
   if (error || !product) {
@@ -2198,6 +2219,49 @@ const styles = StyleSheet.create({
     color: '#0a0a0a',
     fontSize: 13,
     fontWeight: '600',
+  },
+  skeletonLine: {
+    backgroundColor: '#202a35',
+    borderRadius: 6,
+  },
+  skeletonHeroImage: {
+    width: SCREEN_WIDTH,
+    height: 360,
+    backgroundColor: '#161f2b',
+  },
+  skeletonTitle: {
+    width: '75%',
+    height: 24,
+    marginTop: 10,
+  },
+  skeletonPrice: {
+    width: '35%',
+    height: 20,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  skeletonBadgesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  skeletonBadgePill: {
+    width: 90,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: '#1b2635',
+  },
+  skeletonDescLine: {
+    height: 12,
+    marginTop: 8,
+  },
+  skeletonMakerCard: {
+    height: 120,
+    borderRadius: 12,
+    backgroundColor: '#111822',
+    marginTop: 30,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
   },
 });
 
