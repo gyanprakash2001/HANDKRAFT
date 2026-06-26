@@ -12,7 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import LocalAvatar from '@/components/LocalAvatar';
-import { getProducts, normalizeAssetUrl, ProductItem, getProfile } from '@/utils/api';
+import { getProducts, getPopularCategories, normalizeAssetUrl, ProductItem, getProfile } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
@@ -235,6 +235,7 @@ export default function ExploreScreen() {
   const [error, setError] = useState<string | null>(null);
   const [allItems, setAllItems] = useState<ProductItem[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [popularCategories, setPopularCategories] = useState<string[]>([]);
 
   const [sortMode, setSortMode] = useState<SearchSortMode>('relevant');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
@@ -258,6 +259,15 @@ export default function ExploreScreen() {
       }
     } catch {
       setRecentSearches([]);
+    }
+  }, []);
+
+  const loadPopularCategories = useCallback(async () => {
+    try {
+      const categories = await getPopularCategories();
+      setPopularCategories(categories || []);
+    } catch {
+      setPopularCategories([]);
     }
   }, []);
 
@@ -416,7 +426,8 @@ export default function ExploreScreen() {
       loadProducts(false);
       loadRecentSearches();
       loadAvatar();
-    }, [loadProducts, loadRecentSearches, loadAvatar])
+      loadPopularCategories();
+    }, [loadProducts, loadRecentSearches, loadAvatar, loadPopularCategories])
   );
 
   useEffect(() => {
@@ -670,6 +681,34 @@ export default function ExploreScreen() {
             </Pressable>
           ))}
         </ScrollView>
+      ) : null}
+
+      {!trimmedQuery && popularCategories.length > 0 ? (
+        <>
+          <View style={styles.sectionRow}>
+            <ThemedText style={styles.sectionTitle}>Popular Categories</ThemedText>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipsScroller}
+            contentContainerStyle={styles.chipsRow}
+            keyboardShouldPersistTaps="handled">
+            {popularCategories.map((entry) => (
+              <Pressable
+                key={`popular-${entry}`}
+                style={styles.trendingChip}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  setQuery(entry);
+                  persistRecentSearch(entry);
+                }}>
+                <Ionicons name="flame-outline" size={13} color="#ff7a59" />
+                <ThemedText style={styles.trendingChipText}>{entry}</ThemedText>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </>
       ) : null}
 
       {loading && results.length === 0 ? (

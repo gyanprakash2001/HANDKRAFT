@@ -606,6 +606,44 @@ async function seedProducts(req, res) {
   }
 }
 
+// GET /api/products/popular-categories
+// Returns truly trending categories based on platform sales volume over the last 30 days
+router.get('/popular-categories', async (req, res) => {
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const aggregation = await Order.aggregate([
+      { $match: { createdAt: { $gte: thirtyDaysAgo }, status: { $ne: 'cancelled' } } },
+      { $unwind: '$items' },
+      { $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'productDoc'
+      }},
+      { $unwind: '$productDoc' },
+      { $group: {
+          _id: '$productDoc.category',
+          totalSold: { $sum: '$items.quantity' }
+      }},
+      { $sort: { totalSold: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // If no sales exist in the last 30 days, fallback to a default list to avoid empty state
+    if (aggregation.length === 0) {
+      return res.json({ categories: ['Jewelry', 'Home Decor', 'Art', 'Pottery', 'Textiles'] });
+    }
+
+    const categories = aggregation.map(a => a._id).filter(Boolean).slice(0, 6);
+    res.json({ categories });
+  } catch (error) {
+    console.error('[PRODUCTS] Error fetching popular categories:', error);
+    res.status(500).json({ message: 'Failed to fetch popular categories' });
+  }
+});
+
 // GET /api/products
 router.get('/', async (req, res) => {
   try {

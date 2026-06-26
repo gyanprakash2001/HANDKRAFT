@@ -836,6 +836,21 @@ export async function replaceCart(items: { productId: string; quantity: number }
   throw new Error(err.message || 'Failed to sync cart');
 }
 
+export async function getPopularCategories(): Promise<string[]> {
+  try {
+    const res = await fetchApi('/api/products/popular-categories', {
+      method: 'GET',
+    });
+    if (res.status === 200) {
+      const data = await res.json();
+      return Array.isArray(data.categories) ? data.categories : [];
+    }
+  } catch (error) {
+    console.error('Failed to fetch popular categories', error);
+  }
+  return [];
+}
+
 export async function getProducts(params: {
   page?: number;
   limit?: number;
