@@ -698,7 +698,7 @@ export default function ExploreScreen() {
                   },
                 ],
               }}>
-              <View style={{ width: '100%', position: 'absolute', top: 0, left: 0 }}>
+              <View style={{ width: '100%' }}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
