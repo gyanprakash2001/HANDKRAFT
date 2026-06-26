@@ -401,8 +401,12 @@ export default function ExploreScreen() {
   }, [hideTopFilters, topFiltersAnim]);
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = Math.max(0, event.nativeEvent.contentOffset.y);
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const y = Math.max(0, contentOffset.y);
     const delta = y - lastScrollYRef.current;
+    
+    // Prevent showing header due to rubber-banding at the bottom
+    const isBouncingBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 50;
 
     if (y <= 0) {
       setHideTopFilters(false);
@@ -410,13 +414,12 @@ export default function ExploreScreen() {
     } else {
       if (delta > 6 && y > 24) {
         setHideTopFilters(true);
-      } else if (delta < -6) {
+      } else if (delta < -10 && !isBouncingBottom) {
         setHideTopFilters(false);
       }
       lastScrollYRef.current = y;
     }
 
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
     const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 350;
     if (isCloseToBottom && hasMore && !loadingMore && !loading) {
       loadSearchResults(currentPage + 1, true);
