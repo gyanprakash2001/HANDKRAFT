@@ -1,18 +1,38 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { registerPushToken } from './api';
 
-// Configure notification behavior when app is foregrounded
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+let Notifications: any = null;
+let hasNativeModule = false;
+
+try {
+  // Use require dynamically inside try-catch to avoid bundle-time compile errors
+  // and handle devices/builds that don't have the native module compiled yet
+  Notifications = require('expo-notifications');
+  if (Notifications && typeof Notifications.getPermissionsAsync === 'function') {
+    hasNativeModule = true;
+  }
+} catch (e) {
+  console.warn('expo-notifications native module is not compiled in this client build:', e);
+}
+
+// Configure notification behavior when app is foregrounded (if native module is present)
+if (hasNativeModule && Notifications) {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  } catch (err) {
+    console.warn('Failed to configure notification handler:', err);
+    hasNativeModule = false;
+  }
+}
 
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
-  if (Platform.OS === 'web') {
+  if (Platform.OS === 'web' || !hasNativeModule || !Notifications) {
     return null;
   }
 
