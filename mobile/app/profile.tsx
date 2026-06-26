@@ -35,6 +35,7 @@ import {
   updateUserProfile,
   uploadAvatar,
   getDefaultAvatars,
+  addProductToCart,
 } from '@/utils/api';
 import currentUser from '@/utils/currentUser';
 import { resolveProductImageUri } from '@/utils/product';
@@ -218,6 +219,34 @@ const PROFILE_MODE_KEY = 'HANDKRAFT_PROFILE_MODE';
 const SELLER_SEEN_COUNT_KEY = 'HANDKRAFT_SELLER_SEEN_COUNT';
 const NEW_ORDERS_TAB_SEEN_COUNT_KEY = 'HANDKRAFT_NEW_ORDERS_TAB_SEEN_COUNT';
 
+function ProfileSkeleton() {
+  return (
+    <ThemedView style={styles.container}>
+      {/* Top Profile Card Skeleton */}
+      <View style={styles.skeletonProfileTop}>
+        <View style={styles.skeletonAvatar} />
+        <View style={{ flex: 1, gap: 8 }}>
+          <View style={[styles.skeletonLine, { width: '60%', height: 16 }]} />
+          <View style={[styles.skeletonLine, { width: '45%', height: 10 }]} />
+        </View>
+      </View>
+      
+      {/* Sub tabs row skeleton */}
+      <View style={styles.skeletonTabsRow}>
+        <View style={styles.skeletonTabButton} />
+        <View style={styles.skeletonTabButton} />
+        <View style={styles.skeletonTabButton} />
+      </View>
+
+      {/* Content list items skeleton */}
+      <ScrollView contentContainerStyle={styles.listContent}>
+        <View style={styles.skeletonListItem} />
+        <View style={styles.skeletonListItem} />
+      </ScrollView>
+    </ThemedView>
+  );
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ProfileMode>('buyer');
@@ -227,6 +256,53 @@ export default function ProfileScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setBuyerTab(tab);
   };
+
+  const handleReorder = async (orderItem: Order) => {
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      
+      let successCount = 0;
+      let outOfStockCount = 0;
+      
+      for (const item of orderItem.items) {
+        const productId = typeof item.product === 'string' ? item.product : (item.product as any)?._id || (item as any).productId;
+        if (!productId) continue;
+        
+        try {
+          await addProductToCart(productId, Number(item.quantity) || 1);
+          successCount++;
+        } catch (err: any) {
+          if (String(err?.message).toLowerCase().includes('stock') || String(err?.message).toLowerCase().includes('avail')) {
+            outOfStockCount++;
+          }
+        }
+      }
+      
+      if (successCount > 0) {
+        Alert.alert(
+          'Added to Cart',
+          `${successCount} item(s) from your order have been added to your cart. ${outOfStockCount > 0 ? `${outOfStockCount} item(s) were out of stock.` : ''}`,
+          [
+            {
+              text: 'View Cart',
+              onPress: () => router.push('/checkout'),
+            },
+            {
+              text: 'OK',
+              style: 'cancel',
+            }
+          ]
+        );
+      } else if (outOfStockCount > 0) {
+        Alert.alert('Out of stock', 'All items in this order are currently out of stock.');
+      } else {
+        Alert.alert('Error', 'Failed to add items to cart. Please try again.');
+      }
+    } catch {
+      Alert.alert('Error', 'An unexpected error occurred.');
+    }
+  };
+
   const [activeSavedBoard, setActiveSavedBoard] = useState('home');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -372,201 +448,6 @@ export default function ProfileScreen() {
   }, []);
 
   const pickImage = async () => {
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your photos to choose an avatar.');
-      // Prefer explicit media type to avoid runtime access of deprecated enums.
-      const mediaTypesOption = ['images'];
-
-      const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 1, copyToCacheDirectory: true });
-      const anyRes = result as any;
-      const uri = anyRes?.assets?.[0]?.uri || anyRes?.uri;
-      if (!uri) return;
-      setEditorUri(uri);
-      setEditorUploadMode(true);
-      setEditorVisible(true);
-    } catch (err) {
-      console.error('Pick image error', err);
-    }
-  };
-
-  const handleEditorSave = async ({ uri, base64, setOnProfile }: { uri: string; base64?: string; setOnProfile?: boolean }) => {
-    try {
-      setEditorVisible(false);
-      setIsUploadingAvatar(true);
-      // Ensure we upload the selected image to server so it becomes part of the avatar list.
-      let dataUri: string | undefined = base64 ? `data:image/jpeg;base64,${base64}` : undefined;
-
-      if (!dataUri && uri) {
-        try {
-          const isPng = String(uri).toLowerCase().endsWith('.png');
-          const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-          dataUri = `data:${isPng ? 'image/png' : 'image/jpeg'};base64,${fileBase64}`;
-        } catch {
-          // If reading as base64 fails (some Android content:// URIs), fall back to alerting the user.
-          dataUri = undefined;
-        }
-      }
-
-      if (dataUri) {
-        // Upload the avatar and set on profile if requested by the editor action.
-        const res = await uploadAvatar(dataUri, Boolean(setOnProfile));
-        const newAvatarUrl = res?.url || res?.user?.avatarUrl;
-        if (newAvatarUrl) {
-          const busted = cacheBustUrl(newAvatarUrl);
-          const base = String(newAvatarUrl).split('?')[0];
-          setServerAvatars((prev) => {
-            const filtered = (prev || []).filter((p) => String(p).split('?')[0] !== base);
-            return [busted, ...filtered];
-          });
-          // If server returned updated user (setOnProfile=true), update local profile.
-          if (setOnProfile && res?.user) {
-            const updatedUser = { ...res.user, avatarUrl: cacheBustUrl(res.user.avatarUrl) };
-            setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updatedUser } } : d));
-            currentUser.setProfile(updatedUser);
-          }
-        } else {
-          await loadDashboard();
-        }
-      } else if (uri) {
-        // Could not read file as base64 for upload — notify user.
-        Alert.alert('Upload failed', 'Could not read the selected image. Please allow photo permissions and try again, or pick a different image.');
-      }
-    } catch (err: any) {
-      Alert.alert('Upload failed', String(err?.message || err || 'Could not upload avatar'));
-    } finally {
-      setIsUploadingAvatar(false);
-      setEditorUri(null);
-      setEditorUploadMode(false);
-    }
-  };
-
-  const syncProfileModeFromStorage = useCallback(async () => {
-    try {
-      const storedMode = await AsyncStorage.getItem(PROFILE_MODE_KEY);
-      if (storedMode === 'buyer' || storedMode === 'seller') {
-        if (storedMode !== mode) {
-          setMode(storedMode);
-          if (storedMode === 'buyer') {
-            setBuyerTab('saved');
-          }
-        }
-      }
-    } catch {
-      // Keep current mode if storage read fails.
-    }
-  }, [mode]);
-
-  const loadDashboard = useCallback(async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
-    try {
-      setError(null);
-      if (mode === 'buyer') {
-        const data = await getProfileDashboard();
-        const userWithBust = { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) };
-        setDashboard({ ...data, user: userWithBust });
-        currentUser.setProfile(userWithBust);
-
-        Promise.allSettled([getUserOrderHistory(), getUserAddresses()])
-          .then(([ordersResult, addressesResult]) => {
-            if (ordersResult.status === 'fulfilled') {
-              try {
-                // Only show completed (paid) orders in buyer order list
-                const allOrders = ordersResult.value || [];
-                const completed = allOrders.filter((o: any) => String(o.paymentStatus || '').toLowerCase() === 'completed');
-                setOrders(completed);
-              } catch {
-                setOrders(ordersResult.value);
-              }
-            }
-            if (addressesResult.status === 'fulfilled') {
-              setAddresses(addressesResult.value);
-            }
-          })
-          .catch(() => {
-            // Secondary data is non-blocking for initial profile render.
-          });
-      } else {
-        const data = await getProfileDashboard();
-        const userWithBust = { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) };
-        setDashboard({ ...data, user: userWithBust });
-        currentUser.setProfile(userWithBust);
-
-        getSellerOrders()
-          .then((sellerOrderData) => {
-            setSellerOrders(sellerOrderData.orders || []);
-          })
-          .catch(() => {
-            // Non-blocking error for seller orders
-          });
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load profile');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const restoreMode = async () => {
-      try {
-        const storedMode = await AsyncStorage.getItem(PROFILE_MODE_KEY);
-        if (mounted && (storedMode === 'buyer' || storedMode === 'seller')) {
-          if (storedMode !== mode) {
-            setMode(storedMode);
-            if (storedMode === 'buyer') {
-              setBuyerTab('saved');
-            }
-          }
-        }
-      } catch {
-        // Keep default buyer mode if reading from storage fails.
-      }
-    };
-
-    restoreMode();
-    return () => {
-      mounted = false;
-    };
-  }, [mode]);
-
-  useEffect(() => {
-    const loadNotificationStatus = async () => {
-      try {
-        const [sellerSeenCountString, newTabSeenCountString] = await Promise.all([
-          AsyncStorage.getItem(SELLER_SEEN_COUNT_KEY),
-          AsyncStorage.getItem(NEW_ORDERS_TAB_SEEN_COUNT_KEY),
-        ]);
-
-        setSellerSeenCount(Math.max(0, Number(sellerSeenCountString) || 0));
-        setNewOrdersTabSeenCount(Math.max(0, Number(newTabSeenCountString) || 0));
-      } catch {
-        // Keep defaults if storage read fails.
-      }
-    };
-
-    loadNotificationStatus();
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      syncProfileModeFromStorage();
-    }, [syncProfileModeFromStorage])
-  );
-
-  // Refresh dashboard when screen gains focus so newly placed orders appear
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your photos to choose an avatar.');
@@ -1321,15 +1202,28 @@ export default function ProfileScreen() {
               ) : null}
             </View>
           </View>
-          <View
-            style={[
-              styles.statusBadge,
-              item.status === 'delivered' && styles.statusDelivered,
-              item.status === 'shipped' && styles.statusShipped,
-              item.status === 'pending' && styles.statusPending,
-              item.status === 'cancelled' && styles.statusCancelled,
-            ]}>
-            <ThemedText style={styles.statusText}>{item.status.toUpperCase()}</ThemedText>
+          <View style={{ alignItems: 'flex-end' }}>
+            <View
+              style={[
+                styles.statusBadge,
+                item.status === 'delivered' && styles.statusDelivered,
+                item.status === 'shipped' && styles.statusShipped,
+                item.status === 'pending' && styles.statusPending,
+                item.status === 'cancelled' && styles.statusCancelled,
+              ]}>
+              <ThemedText style={styles.statusText}>{item.status.toUpperCase()}</ThemedText>
+            </View>
+            {item.status === 'delivered' && (
+              <Pressable
+                style={styles.reorderBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleReorder(item);
+                }}>
+                <Ionicons name="reload" size={11} color="#0a0a0a" />
+                <ThemedText style={styles.reorderBtnText}>Buy Again</ThemedText>
+              </Pressable>
+            )}
           </View>
         </View>
       </Pressable>
@@ -1564,11 +1458,7 @@ export default function ProfileScreen() {
   }, [mode, switchBuyerTabBySwipe]);
 
   if (loading) {
-    return (
-      <ThemedView style={styles.center}>
-        <ActivityIndicator size="large" color="#fff" />
-      </ThemedView>
-    );
+    return <ProfileSkeleton />;
   }
 
   return (
@@ -1793,9 +1683,13 @@ export default function ProfileScreen() {
                 renderItem={(props) => renderAddressItem({ ...props, index: addresses.indexOf(props.item) })}
                 scrollEnabled={false}
                 contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
+              />
+            </View>
+          )}
+
           {/* Account Settings Tab */}
           {buyerTab === 'account' && (
-                <ScrollView style={styles.accountContainer} contentContainerStyle={[styles.accountContent, { paddingBottom: listBottomPadding }]}>
+            <ScrollView style={styles.accountContainer} contentContainerStyle={[styles.accountContent, { paddingBottom: listBottomPadding }]}>
               <ThemedText style={styles.sectionTitleFirst}>Account Information</ThemedText>
               <Pressable style={styles.settingItem} onPress={handleEditProfile}>
                 <View style={styles.settingItemLeft}>
@@ -1852,7 +1746,7 @@ export default function ProfileScreen() {
       {/* Seller Content */}
       {mode === 'seller' && (
         <FlatList
-          data={[]}
+          data={sellerOrders}
           keyExtractor={(item) => item.id}
           renderItem={renderSellerOrderRow}
           refreshing={refreshing}
@@ -3520,5 +3414,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  skeletonLine: {
+    backgroundColor: '#202a35',
+    borderRadius: 6,
+  },
+  skeletonProfileTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 62,
+    paddingBottom: 24,
+    gap: 16,
+  },
+  skeletonAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#1c2733',
+  },
+  skeletonTabsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 8,
+    marginBottom: 20,
+  },
+  skeletonTabButton: {
+    flex: 1,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#111822',
+  },
+  skeletonListItem: {
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    marginBottom: 12,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  reorderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#9df0a2',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 8,
+  },
+  reorderBtnText: {
+    color: '#0a0a0a',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

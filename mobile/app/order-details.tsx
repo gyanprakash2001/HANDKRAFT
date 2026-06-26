@@ -56,6 +56,37 @@ const getTimelineTimestamps = (order: any) => {
   return timestamps;
 };
 
+function OrderDetailsSkeleton() {
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.skeletonHeaderBack} />
+        <View style={[styles.skeletonLine, { width: 120, height: 18, marginLeft: 16 }]} />
+        <View style={styles.headerSpacer} />
+      </View>
+      <ScrollView contentContainerStyle={styles.content}>
+        {/* Status card skeleton */}
+        <View style={styles.skeletonStatusCard} />
+        
+        {/* Timeline skeleton */}
+        <View style={styles.skeletonTimelineCard} />
+        
+        {/* Items skeleton */}
+        <View style={styles.skeletonItemsCard}>
+          <View style={[styles.skeletonLine, { width: 80, height: 14, marginBottom: 12 }]} />
+          <View style={styles.skeletonItemRow}>
+            <View style={styles.skeletonItemThumb} />
+            <View style={{ flex: 1, gap: 6 }}>
+              <View style={[styles.skeletonLine, { width: '80%', height: 12 }]} />
+              <View style={[styles.skeletonLine, { width: '40%', height: 10 }]} />
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </ThemedView>
+  );
+}
+
 export default function OrderDetailsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -142,13 +173,7 @@ export default function OrderDetailsScreen() {
   );
 
   if (loading) {
-    return (
-      <ThemedView style={styles.container}>
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#fff" />
-        </View>
-      </ThemedView>
-    );
+    return <OrderDetailsSkeleton />;
   }
 
   if (error || !order) {
@@ -688,5 +713,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#b4b4b4',
     lineHeight: 18,
+  },
+  skeletonLine: {
+    backgroundColor: '#202a35',
+    borderRadius: 6,
+  },
+  skeletonHeaderBack: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#1c2733',
+  },
+  skeletonStatusCard: {
+    height: 90,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    marginBottom: 12,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  skeletonTimelineCard: {
+    height: 180,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    marginBottom: 12,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  skeletonItemsCard: {
+    padding: 16,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  skeletonItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  skeletonItemThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    backgroundColor: '#1c2733',
   },
 });

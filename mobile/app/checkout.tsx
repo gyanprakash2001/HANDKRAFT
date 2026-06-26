@@ -99,6 +99,40 @@ function getServiceType(daysToDelivery: number) {
   return daysToDelivery <= 2 ? 'Express' : 'Normal';
 }
 
+function CheckoutSkeleton() {
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.skeletonHeaderBack} />
+        <View style={[styles.skeletonLine, { width: 100, height: 18 }]} />
+        <View style={{ width: 28 }} />
+      </View>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* Cart Item Skeleton */}
+        <View style={styles.skeletonCartItem}>
+          <View style={styles.skeletonCartItemThumb} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <View style={[styles.skeletonLine, { width: '70%', height: 12 }]} />
+            <View style={[styles.skeletonLine, { width: '40%', height: 10 }]} />
+          </View>
+          <View style={[styles.skeletonLine, { width: 50, height: 12 }]} />
+        </View>
+
+        {/* Shipping address select card skeleton */}
+        <View style={styles.skeletonAddressCard} />
+
+        {/* Pricing breakdown skeleton */}
+        <View style={styles.skeletonTotalsCard}>
+          <View style={[styles.skeletonLine, { width: '100%', height: 10, marginBottom: 8 }]} />
+          <View style={[styles.skeletonLine, { width: '100%', height: 10, marginBottom: 8 }]} />
+          <View style={[styles.skeletonLine, { width: '100%', height: 10, marginBottom: 14 }]} />
+          <View style={[styles.skeletonLine, { width: '50%', height: 14 }]} />
+        </View>
+      </ScrollView>
+    </ThemedView>
+  );
+}
+
 export default function CheckoutScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -929,11 +963,7 @@ const ScatterView = ScrollView;
   };
 
   if (loading) {
-    return (
-      <ThemedView style={styles.center}>
-        <ActivityIndicator size="large" color="#fff" />
-      </ThemedView>
-    );
+    return <CheckoutSkeleton />;
   }
 
   if (step === 'confirmation' && order) {
@@ -2253,5 +2283,47 @@ const styles = StyleSheet.create({
     color: '#ff6b6b',
     fontSize: 11,
     fontWeight: '500',
+  },
+  skeletonLine: {
+    backgroundColor: '#202a35',
+    borderRadius: 6,
+  },
+  skeletonHeaderBack: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#1c2733',
+  },
+  skeletonCartItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    marginBottom: 12,
+    gap: 12,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  skeletonCartItemThumb: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    backgroundColor: '#1c2733',
+  },
+  skeletonAddressCard: {
+    height: 70,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    marginBottom: 12,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  skeletonTotalsCard: {
+    padding: 16,
+    borderRadius: 10,
+    backgroundColor: '#111822',
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
   },
 });
