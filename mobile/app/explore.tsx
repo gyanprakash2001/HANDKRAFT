@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -607,7 +608,6 @@ export default function ExploreScreen() {
       </View>
 
       {error ? <ThemedText style={styles.errorText}>{error}</ThemedText> : null}
-
       {trimmedQuery.length > 0 && liveSuggestions.length > 0 ? (
         <View style={styles.suggestionsWrap}>
           {liveSuggestions.map((entry) => (
@@ -615,6 +615,7 @@ export default function ExploreScreen() {
               key={`suggestion-${entry}`}
               style={styles.suggestionRow}
               onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                 setQuery(entry);
                 persistRecentSearch(entry);
               }}>
@@ -637,7 +638,10 @@ export default function ExploreScreen() {
             <Pressable
               key={option.key}
               style={[styles.sortChip, selected && styles.sortChipActive]}
-              onPress={() => setSortMode(option.key)}>
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                setSortMode(option.key);
+              }}>
               <ThemedText style={[styles.sortChipText, selected && styles.sortChipTextActive]}>{option.label}</ThemedText>
             </Pressable>
           );
@@ -647,7 +651,10 @@ export default function ExploreScreen() {
       {!trimmedQuery && recentSearches.length > 0 ? (
         <View style={styles.sectionRow}>
           <ThemedText style={styles.sectionTitle}>Recent</ThemedText>
-          <Pressable onPress={clearRecents}>
+          <Pressable onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            clearRecents();
+          }}>
             <ThemedText style={styles.clearText}>Clear</ThemedText>
           </Pressable>
         </View>
@@ -664,12 +671,43 @@ export default function ExploreScreen() {
             <Pressable
               key={`recent-${entry}`}
               style={styles.recentChip}
-              onPress={() => setQuery(entry)}>
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                setQuery(entry);
+              }}>
               <Ionicons name="time-outline" size={13} color="#acc7e0" />
               <ThemedText style={styles.recentChipText}>{entry}</ThemedText>
             </Pressable>
           ))}
         </ScrollView>
+      ) : null}
+
+      {!trimmedQuery ? (
+        <>
+          <View style={styles.sectionRow}>
+            <ThemedText style={styles.sectionTitle}>Trending Searches</ThemedText>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipsScroller}
+            contentContainerStyle={styles.chipsRow}
+            keyboardShouldPersistTaps="handled">
+            {['blue pottery', 'macramé', 'jute bags', 'wooden toys', 'terracotta', 'marble craft'].map((entry) => (
+              <Pressable
+                key={`trending-${entry}`}
+                style={styles.trendingChip}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  setQuery(entry);
+                  persistRecentSearch(entry);
+                }}>
+                <Ionicons name="trending-up-outline" size={13} color="#9df0a2" />
+                <ThemedText style={styles.trendingChipText}>{entry}</ThemedText>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </>
       ) : null}
 
       {!trimmedQuery && topCategories.length > 0 ? (
@@ -684,7 +722,10 @@ export default function ExploreScreen() {
             contentContainerStyle={styles.chipsRow}
             keyboardShouldPersistTaps="handled">
             {topCategories.map((entry) => (
-              <Pressable key={`category-${entry}`} style={styles.categoryChip} onPress={() => setQuery(entry)}>
+              <Pressable key={`category-${entry}`} style={styles.categoryChip} onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                setQuery(entry);
+              }}>
                 <ThemedText style={styles.categoryChipText}>{entry}</ThemedText>
               </Pressable>
             ))}
@@ -726,13 +767,21 @@ export default function ExploreScreen() {
       )}
 
       <View style={[styles.tabBar, { height: tabBarHeight, paddingBottom: tabBarBottomPadding }]}>
-        <Pressable style={styles.tabItem} onPress={() => router.push('/feed')}>
+        <Pressable style={styles.tabItem} onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          router.push('/feed');
+        }}>
           <Ionicons name="home-outline" size={26} color="#fff" />
         </Pressable>
-        <Pressable style={styles.tabItem} onPress={() => {}}>
+        <Pressable style={styles.tabItem} onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        }}>
           <Ionicons name="search" size={26} color="#fff" />
         </Pressable>
-        <Pressable style={styles.tabItem} onPress={() => router.push('/profile')}>
+        <Pressable style={styles.tabItem} onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          router.push('/profile');
+        }}>
           {isLocalTabAvatar ? (
             <LocalAvatar id={userAvatar || 'local:avatar01'} size={36} style={styles.tabAvatar} />
           ) : tabAvatarSource ? (
@@ -840,10 +889,10 @@ const styles = StyleSheet.create({
   sortChipText: {
     color: '#b7cce4',
     fontSize: 12,
-    fontWeight: '600',
   },
   sortChipTextActive: {
-    color: '#e8f4ff',
+    color: '#eef4ff',
+    fontWeight: '700',
   },
   sectionRow: {
     marginTop: 12,
@@ -904,6 +953,22 @@ const styles = StyleSheet.create({
     color: '#dcecff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  trendingChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#111822',
+    borderColor: '#253545',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    minHeight: 32,
+  },
+  trendingChipText: {
+    color: '#d7e7f9',
+    fontSize: 12,
   },
   loaderWrap: {
     flex: 1,
