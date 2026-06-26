@@ -497,7 +497,7 @@ export default function FeedScreen() {
       return () => {
         clearInterval(pollerId);
       };
-    }, [loadFeed, loadUnreadMessageCount, syncCartBadgeFromBackend, loadRecentlyViewed])
+    }, [loadFeed, loadUnreadMessageCount, syncCartBadgeFromBackend])
   );
 
   const handleFeedScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
