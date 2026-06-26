@@ -229,7 +229,6 @@ export default function ExploreScreen() {
   const searchRequestSeqRef = useRef(0);
 
   const [hideTopFilters, setHideTopFilters] = useState(false);
-  const [topSectionHeight, setTopSectionHeight] = useState(150);
   const lastScrollYRef = useRef(0);
   const topFiltersAnim = useRef(new Animated.Value(1)).current;
 
@@ -659,41 +658,44 @@ export default function ExploreScreen() {
         </View>
       ) : null}
 
-      <Animated.View
-        style={{
-          height: topFiltersAnim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, topSectionHeight],
-          }),
-          opacity: topFiltersAnim.interpolate({
-            inputRange: [0, 0.1, 1],
-            outputRange: [0, 0, 1],
-          }),
-          transform: [
-            {
-              translateY: topFiltersAnim.interpolate({
+      {(() => {
+        const isRecentVisible = !trimmedQuery && recentSearches.length > 0;
+        const isPopularVisible = !trimmedQuery && popularCategories.length > 0;
+        const targetTopSectionHeight = 46 + (isRecentVisible ? 73 : 0) + (isPopularVisible ? 73 : 0);
+
+        return (
+          <Animated.View
+            style={{
+              height: topFiltersAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: [-14, 0],
+                outputRange: [0, targetTopSectionHeight],
               }),
-            },
-          ],
-          overflow: 'hidden',
-        }}>
-        <Animated.View
-          style={{
-            transform: [
-              {
-                scale: topFiltersAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.98, 1],
-                }),
-              },
-            ],
-          }}>
-          <View onLayout={(e) => {
-            const h = e.nativeEvent.layout.height;
-            if (!hideTopFilters && h > 10) setTopSectionHeight(h);
-          }}>
+              opacity: topFiltersAnim.interpolate({
+                inputRange: [0, 0.1, 1],
+                outputRange: [0, 0, 1],
+              }),
+              transform: [
+                {
+                  translateY: topFiltersAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-14, 0],
+                  }),
+                },
+              ],
+              overflow: 'hidden',
+            }}>
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    scale: topFiltersAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              }}>
+              <View style={{ width: '100%', position: 'absolute', top: 0, left: 0 }}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -780,6 +782,7 @@ export default function ExploreScreen() {
           </View>
         </Animated.View>
       </Animated.View>
+      )}
 
       {loading && results.length === 0 ? (
         <View style={styles.loaderWrap}>
