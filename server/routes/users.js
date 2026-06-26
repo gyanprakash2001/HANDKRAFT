@@ -100,13 +100,31 @@ async function getDashboardPayload(user) {
   ]);
 
   const cartProductMap = new Map(cartProducts.map((product) => [String(product._id), product]));
-  const cartItems = cartEntries
+  
+  let needsCartUpdate = false;
+  const filteredCartItemsInDb = [];
+
+  for (const entry of cartEntries) {
+    const productIdStr = String(entry?.product || '');
+    if (productIdStr && cartProductMap.has(productIdStr)) {
+      filteredCartItemsInDb.push(entry);
+    } else {
+      needsCartUpdate = true;
+    }
+  }
+
+  if (needsCartUpdate) {
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { cartItems: filteredCartItemsInDb } }
+    ).catch((err) => console.error('[DASHBOARD] Failed to auto-cleanup cartItems in DB:', err));
+  }
+
+  const cartItems = filteredCartItemsInDb
     .map((entry) => {
       const product = cartProductMap.get(String(entry?.product || ''));
-      if (!product) return null;
       return { product, quantity: Number(entry.quantity) || 1 };
-    })
-    .filter(Boolean);
+    });
 
   return {
     user: {

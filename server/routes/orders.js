@@ -1314,6 +1314,8 @@ async function applySuccessfulPaymentEffects(order, { transactionId, paymentMeth
           carrier: shipment.carrier ? {
             provider: shipment.carrier.provider,
             courierId: shipment.carrier.courierId,
+
+
             courierName: shipment.carrier.courierName,
             awbNumber: shipment.carrier.awbNumber,
           } : null,
@@ -1380,16 +1382,34 @@ router.post('/estimate-shipping', auth, async (req, res) => {
       return res.status(400).json({ message: 'shippingAddress.postalCode is required' });
     }
 
+    const cleanCartItems = [];
+    let needsCartCleanup = false;
+    for (const cartItem of user.cartItems) {
+      const product = await Product.findById(cartItem.product);
+      if (!product || !product.isActive) {
+        needsCartCleanup = true;
+      } else {
+        cleanCartItems.push({ cartItem, product });
+      }
+    }
+
+    if (needsCartCleanup) {
+      const updatedCart = cleanCartItems.map(item => item.cartItem);
+      user.cartItems = updatedCart;
+      await User.updateOne({ _id: req.user._id }, { $set: { cartItems: updatedCart } }).catch((err) => {
+        console.error('[ORDERS][ESTIMATE_SHIPPING] Failed to update cleaned cartItems in DB:', err);
+      });
+    }
+
+    if (cleanCartItems.length === 0) {
+      return res.status(400).json({ message: 'Cart is empty' });
+    }
+
     const orderItems = [];
     let subtotal = 0;
     const sellerCache = new Map();
 
-    for (const cartItem of user.cartItems) {
-      const product = await Product.findById(cartItem.product);
-      if (!product || !product.isActive) {
-        return res.status(404).json({ message: `Product ${cartItem.product} not found` });
-      }
-
+    for (const { cartItem, product } of cleanCartItems) {
       if (product.stock < cartItem.quantity) {
         return res.status(400).json({ message: `Insufficient stock for ${product.title}` });
       }
@@ -1431,7 +1451,6 @@ router.post('/estimate-shipping', auth, async (req, res) => {
     }
 
     const quoteShipments = buildSellerShipmentSkeletons(orderItems, 'ESTIMATE');
-
     let shippingQuote;
     try {
       shippingQuote = await estimateOrderShippingFromNimbus({
@@ -1497,24 +1516,44 @@ router.post('/', auth, async (req, res) => {
     // Validate shipping address
     if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phoneNumber 
         || !shippingAddress.email || !shippingAddress.street || !shippingAddress.city 
+
         || !shippingAddress.postalCode || !shippingAddress.country) {
       debugLog('[CREATE_ORDER] Incomplete shipping address:', shippingAddress);
       return res.status(400).json({ message: 'Incomplete shipping address' });
     }
 
-    // Build order items and calculate subtotal
     debugLog('[CREATE_ORDER] Building order items...');
+    const cleanCartItems = [];
+    let needsCartCleanup = false;
+
+    for (const cartItem of user.cartItems) {
+      const product = await Product.findById(cartItem.product);
+      if (!product || !product.isActive) {
+        needsCartCleanup = true;
+        debugLog('[CREATE_ORDER] Product not found or inactive:', cartItem.product);
+      } else {
+        cleanCartItems.push({ cartItem, product });
+      }
+    }
+
+    if (needsCartCleanup) {
+      const updatedCart = cleanCartItems.map(item => item.cartItem);
+      user.cartItems = updatedCart;
+      await User.updateOne({ _id: req.user._id }, { $set: { cartItems: updatedCart } }).catch((err) => {
+        console.error('[ORDERS][CREATE_ORDER] Failed to update cleaned cartItems in DB:', err);
+      });
+    }
+
+    if (cleanCartItems.length === 0) {
+      return res.status(400).json({ message: 'Cart is empty' });
+    }
+
     const orderItems = [];
     let subtotal = 0;
     const sellerCache = new Map();
 
-    for (const cartItem of user.cartItems) {
-      debugLog('[CREATE_ORDER] Processing cart item:', cartItem.product, 'qty:', cartItem.quantity);
-      const product = await Product.findById(cartItem.product);
-      if (!product) {
-        debugLog('[CREATE_ORDER] Product not found:', cartItem.product);
-        return res.status(404).json({ message: `Product ${cartItem.product} not found` });
-      }
+    for (const { cartItem, product } of cleanCartItems) {
+      debugLog('[CREATE_ORDER] Processing cart item:', product._id, 'qty:', cartItem.quantity);
 
       if (product.stock < cartItem.quantity) {
         debugLog('[CREATE_ORDER] Insufficient stock for', product._id, '- available:', product.stock, 'requested:', cartItem.quantity);
