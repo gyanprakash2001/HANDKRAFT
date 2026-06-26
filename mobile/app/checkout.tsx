@@ -1185,14 +1185,6 @@ const ScatterView = ScrollView;
                       Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per successful order.
                     </ThemedText>
                   </View>
-                  {totalSavings > 0 && (
-                    <View style={styles.savingsPromoCard}>
-                      <Ionicons name="gift-outline" size={14} color="#9df0a2" />
-                      <ThemedText style={styles.savingsPromoText}>
-                        Artisan Club members save an extra 5%!
-                      </ThemedText>
-                    </View>
-                  )}
                   <View style={[styles.costRow, styles.costRowTotal]}>
                     <ThemedText style={styles.totalLabel}>Total</ThemedText>
                     <ThemedText style={styles.totalLabel}>₹{totalAmount.toFixed(2)}</ThemedText>

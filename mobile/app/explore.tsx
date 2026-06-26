@@ -16,6 +16,7 @@ import { getProducts, normalizeAssetUrl, ProductItem, getProfile } from '@/utils
 import currentUser from '@/utils/currentUser';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
+import { getRecentlyViewedIds, clearRecentlyViewed } from '@/utils/recently-viewed';
 
 const RECENT_SEARCHES_KEY = 'HANDKRAFT_RECENT_SEARCHES';
 const CUSTOMIZABLE_MARKER = '[CUSTOMIZABLE]';
@@ -115,6 +116,7 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Custom highlight renderer
 function buildHighlightRegex(query: string) {
   const terms = Array.from(new Set(tokenize(query)))
     .filter((entry) => entry.length >= 2)
@@ -234,6 +236,7 @@ export default function ExploreScreen() {
   const [error, setError] = useState<string | null>(null);
   const [allItems, setAllItems] = useState<ProductItem[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [recentlyViewedItems, setRecentlyViewedItems] = useState<ProductItem[]>([]);
   const [sortMode, setSortMode] = useState<SearchSortMode>('relevant');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
 
@@ -399,6 +402,31 @@ export default function ExploreScreen() {
     }
   }, []);
 
+  const loadRecentlyViewed = useCallback(async () => {
+    try {
+      const ids = await getRecentlyViewedIds();
+      if (!ids || ids.length === 0) {
+        setRecentlyViewedItems([]);
+        return;
+      }
+
+      const matched: ProductItem[] = [];
+      for (const id of ids) {
+        const found = allItems.find((item) => item._id === id);
+        if (found) {
+          matched.push(found);
+        }
+      }
+      setRecentlyViewedItems(matched.slice(0, 8));
+    } catch {
+      setRecentlyViewedItems([]);
+    }
+  }, [allItems]);
+
+  useEffect(() => {
+    loadRecentlyViewed();
+  }, [allItems, loadRecentlyViewed]);
+
   // subscribe to global avatar changes so the tab updates immediately
   useEffect(() => {
     const unsub = currentUser.subscribe((p) => {
@@ -412,7 +440,8 @@ export default function ExploreScreen() {
       loadProducts(false);
       loadRecentSearches();
       loadAvatar();
-    }, [loadProducts, loadRecentSearches, loadAvatar])
+      loadRecentlyViewed();
+    }, [loadProducts, loadRecentSearches, loadAvatar, loadRecentlyViewed])
   );
 
   useEffect(() => {
@@ -423,21 +452,34 @@ export default function ExploreScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  const topCategories = useMemo(() => {
-    const counts = new Map<string, number>();
+  const trimmedQuery = query.trim();
+
+  // Dynamic Trending Searches based on platform sales volume and ratings
+  const trendingSearches = useMemo(() => {
+    const scores = new Map<string, number>();
+
     for (const item of allItems) {
-      const category = String(item.category || '').trim();
-      if (!category) continue;
-      counts.set(category, (counts.get(category) || 0) + 1);
+      const sold = Math.max(0, Number(item.monthlySold) || 0);
+      const rating = Math.max(0, Number(item.rating) || 0);
+      const weight = 10 + sold * 2.5 + rating * 1.5;
+
+      const addScore = (term: string, multiplier: number) => {
+        const clean = String(term || '').trim().toLowerCase();
+        if (!clean || clean.length < 3) return;
+        scores.set(clean, (scores.get(clean) || 0) + weight * multiplier);
+      };
+
+      addScore(item.category, 1.0);
+      if (item.material) {
+        addScore(item.material, 0.8);
+      }
     }
 
-    return Array.from(counts.entries())
+    return Array.from(scores.entries())
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
+      .slice(0, 6)
       .map((entry) => entry[0]);
   }, [allItems]);
-
-  const trimmedQuery = query.trim();
 
   const liveSuggestions = useMemo(() => {
     const target = normalizeText(trimmedQuery);
@@ -682,7 +724,51 @@ export default function ExploreScreen() {
         </ScrollView>
       ) : null}
 
-      {!trimmedQuery ? (
+      {/* Recently Viewed Products Strip in Explore */}
+      {!trimmedQuery && recentlyViewedItems.length > 0 ? (
+        <>
+          <View style={styles.sectionRow}>
+            <ThemedText style={styles.sectionTitle}>Recently Viewed</ThemedText>
+            <Pressable onPress={async () => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              await clearRecentlyViewed();
+              setRecentlyViewedItems([]);
+            }}>
+              <ThemedText style={styles.clearText}>Clear</ThemedText>
+            </Pressable>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.recentViewedScroller}
+            contentContainerStyle={styles.recentViewedRow}
+            keyboardShouldPersistTaps="handled">
+            {recentlyViewedItems.map((item) => (
+              <Pressable
+                key={`recent-viewed-${item._id}`}
+                style={styles.recentViewedCard}
+                onPress={() => openProduct(item)}>
+                <Image
+                  source={{ uri: resolveProductImageSource(item) }}
+                  style={styles.recentViewedImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
+                <View style={styles.recentViewedInfo}>
+                  <ThemedText style={styles.recentViewedName} numberOfLines={1}>
+                    {item.title}
+                  </ThemedText>
+                  <ThemedText style={styles.recentViewedPrice}>
+                    {formatPriceINR(getProductPricing(item).effectivePrice)}
+                  </ThemedText>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
+
+      {!trimmedQuery && trendingSearches.length > 0 ? (
         <>
           <View style={styles.sectionRow}>
             <ThemedText style={styles.sectionTitle}>Trending Searches</ThemedText>
@@ -693,7 +779,7 @@ export default function ExploreScreen() {
             style={styles.chipsScroller}
             contentContainerStyle={styles.chipsRow}
             keyboardShouldPersistTaps="handled">
-            {['blue pottery', 'macramé', 'jute bags', 'wooden toys', 'terracotta', 'marble craft'].map((entry) => (
+            {trendingSearches.map((entry) => (
               <Pressable
                 key={`trending-${entry}`}
                 style={styles.trendingChip}
@@ -704,29 +790,6 @@ export default function ExploreScreen() {
                 }}>
                 <Ionicons name="trending-up-outline" size={13} color="#9df0a2" />
                 <ThemedText style={styles.trendingChipText}>{entry}</ThemedText>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </>
-      ) : null}
-
-      {!trimmedQuery && topCategories.length > 0 ? (
-        <>
-          <View style={styles.sectionRow}>
-            <ThemedText style={styles.sectionTitle}>Popular categories</ThemedText>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsScroller}
-            contentContainerStyle={styles.chipsRow}
-            keyboardShouldPersistTaps="handled">
-            {topCategories.map((entry) => (
-              <Pressable key={`category-${entry}`} style={styles.categoryChip} onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                setQuery(entry);
-              }}>
-                <ThemedText style={styles.categoryChipText}>{entry}</ThemedText>
               </Pressable>
             ))}
           </ScrollView>
@@ -969,6 +1032,47 @@ const styles = StyleSheet.create({
   trendingChipText: {
     color: '#d7e7f9',
     fontSize: 12,
+  },
+  recentViewedScroller: {
+    maxHeight: 110,
+    marginVertical: 4,
+  },
+  recentViewedRow: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  recentViewedCard: {
+    width: 170,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: '#111822',
+    borderColor: '#202a35',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    gap: 8,
+  },
+  recentViewedImage: {
+    width: 50,
+    height: 64,
+    borderRadius: 8,
+    backgroundColor: '#0a0f18',
+  },
+  recentViewedInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  recentViewedName: {
+    color: '#e2efff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  recentViewedPrice: {
+    color: '#9df0a2',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
   },
   loaderWrap: {
     flex: 1,

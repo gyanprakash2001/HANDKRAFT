@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { useCartNotification } from '@/contexts/cart-notification-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import LocalAvatar from '@/components/LocalAvatar';
 import {
   addProductToCart,
   ensureChatConversation,
@@ -944,10 +945,14 @@ export default function ProductDetailsScreen() {
                 <ThemedText type="subtitle" style={styles.makerSectionTitle}>Meet the Maker</ThemedText>
                 <View style={styles.makerCard}>
                   <View style={styles.makerHeader}>
-                    <Image
-                      source={resolveSellerAvatarSource(sellerProfile?.avatarUrl, product.sellerName)}
-                      style={styles.makerAvatar}
-                    />
+                    {sellerProfile?.avatarUrl && String(sellerProfile.avatarUrl).startsWith('local:') ? (
+                      <LocalAvatar id={sellerProfile.avatarUrl} size={48} style={styles.makerAvatar} />
+                    ) : (
+                      <Image
+                        source={resolveSellerAvatarSource(sellerProfile?.avatarUrl, product.sellerName)}
+                        style={styles.makerAvatar}
+                      />
+                    )}
                     <View style={styles.makerMeta}>
                       <ThemedText style={styles.makerName}>
                         {sellerProfile?.displayName || sellerProfile?.name || product.sellerName}
@@ -988,11 +993,7 @@ export default function ProductDetailsScreen() {
                         />
                       </Pressable>
                     </View>
-                  ) : (
-                    <ThemedText style={styles.makerStoryPlaceholder}>
-                      Crafting unique handmade treasures with passion. Support this independent creator!
-                    </ThemedText>
-                  )}
+                  ) : null}
 
                   {sellerProfile?.storyVideoUrl ? (
                     <View style={styles.makerVideoContainer}>

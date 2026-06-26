@@ -21,7 +21,6 @@ import { getProfile, getProducts, getProductById, ProductItem, ProductMediaItem,
 import { removeToken } from '@/utils/auth';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { CUSTOM_TAB_BAR_HEIGHT, getCustomTabBarHeight, getTabBarContentPadding } from '@/utils/safe-area';
-import { getRecentlyViewedIds, clearRecentlyViewed } from '@/utils/recently-viewed';
 import { registerForPushNotificationsAsync } from '@/utils/notifications';
 
 type ProfileMode = 'buyer' | 'seller';
@@ -304,7 +303,6 @@ export default function FeedScreen() {
   const topFiltersAnim = useRef(new Animated.Value(1)).current;
   const router = useRouter();
   const { totalCartItems, hydrateCartFromBackend } = useCartNotification();
-  const [recentlyViewedItems, setRecentlyViewedItems] = useState<ProductItem[]>([]);
 
   const handleMediaLayout = useCallback((postId: string, width: number) => {
     const normalized = Number(width) || 0;
@@ -484,29 +482,6 @@ export default function FeedScreen() {
     };
   }, []);
 
-  const loadRecentlyViewed = useCallback(async () => {
-    try {
-      const ids = await getRecentlyViewedIds();
-      if (!ids || ids.length === 0) {
-        setRecentlyViewedItems([]);
-        return;
-      }
-      const promises = ids.slice(0, 10).map(async (id) => {
-        try {
-          const prod = await getProductById(id);
-          return prod ? normalizeProduct(prod) : null;
-        } catch {
-          return null;
-        }
-      });
-      const results = await Promise.all(promises);
-      const filtered = results.filter((p): p is ProductItem => p !== null);
-      setRecentlyViewedItems(filtered);
-    } catch {
-      setRecentlyViewedItems([]);
-    }
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
       const isFirstFocus = firstFocusRef.current;
@@ -515,7 +490,6 @@ export default function FeedScreen() {
       loadFeed(!isFirstFocus);
       loadUnreadMessageCount();
       syncCartBadgeFromBackend();
-      loadRecentlyViewed();
       const pollerId = setInterval(() => {
         loadUnreadMessageCount();
       }, UNREAD_POLL_MS_DEFAULT);
@@ -979,58 +953,7 @@ export default function FeedScreen() {
               </View>
             ) : (
               <>
-                {recentlyViewedItems.length > 0 && mode === 'buyer' && (
-                  <View style={styles.recentlyViewedSection}>
-                    <View style={styles.recentlyViewedHeader}>
-                      <ThemedText style={styles.recentlyViewedTitle}>Recently Viewed</ThemedText>
-                      <Pressable
-                        onPress={async () => {
-                          try {
-                            await clearRecentlyViewed();
-                            setRecentlyViewedItems([]);
-                          } catch {
-                            // ignore
-                          }
-                        }}
-                        style={styles.clearRecentlyViewedBtn}
-                      >
-                        <ThemedText style={styles.clearRecentlyViewedText}>Clear</ThemedText>
-                      </Pressable>
-                    </View>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.recentlyViewedRow}
-                    >
-                      {recentlyViewedItems.map((item) => {
-                        const pricing = getProductPricing(item, priceOverridesById[item._id]);
-                        const media = getPostMedia(item);
-                        const imageSource = media[0]?.url ? { uri: normalizeAssetUrl(media[0].url) } : null;
-                        return (
-                          <Pressable
-                            key={item._id}
-                            style={styles.recentlyViewedCard}
-                            onPress={() => router.push({ pathname: '/product/[id]', params: { id: item._id } })}
-                          >
-                            <Image
-                              source={imageSource}
-                              style={styles.recentlyViewedImage}
-                              contentFit="cover"
-                            />
-                            <View style={styles.recentlyViewedInfo}>
-                              <ThemedText style={styles.recentlyViewedName} numberOfLines={1}>
-                                {item.title}
-                              </ThemedText>
-                              <ThemedText style={styles.recentlyViewedPrice}>
-                                {formatPrice(pricing.effectivePrice)}
-                              </ThemedText>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                )}
+
                 <View style={styles.masonryWrap}>
                   <View style={styles.column}>{columns.left.map(renderCard)}</View>
                   <View style={styles.column}>{columns.right.map(renderCard)}</View>
