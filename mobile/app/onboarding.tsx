@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { StyleSheet, View, ScrollView, Pressable, Dimensions, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import { StyleSheet, View, ScrollView, Pressable, Dimensions, NativeScrollEvent, NativeSyntheticEvent, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,10 +12,10 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const SLIDES = [
   {
-    icon: 'sparkles-outline',
+    isLogo: true,
     title: 'Discover Authentic Craftsmanship',
     description: 'Explore rare and unique goods made with love by handpicked local artisans across the country.',
-    color: '#7fb8ff',
+    color: '#ffffff',
   },
   {
     icon: 'chatbubbles-outline',
@@ -75,7 +75,7 @@ export default function OnboardingScreen() {
     <ThemedView style={styles.container}>
       <View style={styles.header}>
         <View style={styles.logoWrap}>
-          <ThemedText style={styles.logoText}>HANDKRAFT</ThemedText>
+          <Image source={require('../assets/feed_logo_trim.png')} style={{ width: 140, height: 18 }} resizeMode="contain" />
         </View>
         {activeIndex < SLIDES.length - 1 && (
           <Pressable onPress={handleSkip} style={styles.skipBtn}>
@@ -96,7 +96,11 @@ export default function OnboardingScreen() {
         {SLIDES.map((slide, index) => (
           <View key={index} style={styles.slide}>
             <View style={[styles.iconContainer, { borderColor: slide.color }]}>
-              <Ionicons name={slide.icon as any} size={64} color={slide.color} />
+              {slide.isLogo ? (
+                <Image source={require('../assets/images/icon.png')} style={{ width: 90, height: 90, borderRadius: 45 }} resizeMode="cover" />
+              ) : (
+                <Ionicons name={slide.icon as any} size={64} color={slide.color} />
+              )}
             </View>
             <ThemedText style={styles.slideTitle}>{slide.title}</ThemedText>
             <ThemedText style={styles.slideDescription}>{slide.description}</ThemedText>
