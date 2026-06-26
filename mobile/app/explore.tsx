@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, Pressable, TextInput, ActivityIndicator, ScrollView, Text, RefreshControl, Dimensions, Platform, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import { StyleSheet, View, Pressable, TextInput, ActivityIndicator, ScrollView, Text, RefreshControl, Dimensions, Platform, NativeScrollEvent, NativeSyntheticEvent, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
@@ -228,6 +228,11 @@ export default function ExploreScreen() {
   const loadingMoreRef = useRef(false);
   const searchRequestSeqRef = useRef(0);
 
+  const [hideTopFilters, setHideTopFilters] = useState(false);
+  const [topSectionHeight, setTopSectionHeight] = useState(150);
+  const lastScrollYRef = useRef(0);
+  const topFiltersAnim = useRef(new Animated.Value(1)).current;
+
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -384,7 +389,34 @@ export default function ExploreScreen() {
     loadSearchResults(1, false);
   }, [loadSearchResults]);
 
+  useEffect(() => {
+    topFiltersAnim.stopAnimation();
+    Animated.spring(topFiltersAnim, {
+      toValue: hideTopFilters ? 0 : 1,
+      damping: 20,
+      stiffness: 220,
+      mass: 0.8,
+      overshootClamping: true,
+      useNativeDriver: false,
+    }).start();
+  }, [hideTopFilters, topFiltersAnim]);
+
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = Math.max(0, event.nativeEvent.contentOffset.y);
+    const delta = y - lastScrollYRef.current;
+
+    if (y <= 0) {
+      setHideTopFilters(false);
+      lastScrollYRef.current = 0;
+    } else {
+      if (delta > 6 && y > 24) {
+        setHideTopFilters(true);
+      } else if (delta < -6) {
+        setHideTopFilters(false);
+      }
+      lastScrollYRef.current = y;
+    }
+
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
     const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 350;
     if (isCloseToBottom && hasMore && !loadingMore && !loading) {
@@ -627,89 +659,102 @@ export default function ExploreScreen() {
         </View>
       ) : null}
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.sortScroller}
-        contentContainerStyle={styles.sortRow}
-        keyboardShouldPersistTaps="handled">
-        {SORT_OPTIONS.map((option) => {
-          const selected = sortMode === option.key;
-          return (
-            <Pressable
-              key={option.key}
-              style={[styles.sortChip, selected && styles.sortChipActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                setSortMode(option.key);
-              }}>
-              <ThemedText style={[styles.sortChipText, selected && styles.sortChipTextActive]}>{option.label}</ThemedText>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {!trimmedQuery && recentSearches.length > 0 ? (
-        <View style={styles.sectionRow}>
-          <ThemedText style={styles.sectionTitle}>Recent</ThemedText>
-          <Pressable onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            clearRecents();
+      <View style={{ overflow: 'hidden' }}>
+        <Animated.View
+          style={{
+            marginTop: topFiltersAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-topSectionHeight, 0],
+            }),
+            opacity: topFiltersAnim,
           }}>
-            <ThemedText style={styles.clearText}>Clear</ThemedText>
-          </Pressable>
-        </View>
-      ) : null}
+          <View onLayout={(e) => setTopSectionHeight(Math.max(1, e.nativeEvent.layout.height))}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.sortScroller}
+              contentContainerStyle={styles.sortRow}
+              keyboardShouldPersistTaps="handled">
+              {SORT_OPTIONS.map((option) => {
+                const selected = sortMode === option.key;
+                return (
+                  <Pressable
+                    key={option.key}
+                    style={[styles.sortChip, selected && styles.sortChipActive]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      setSortMode(option.key);
+                    }}>
+                    <ThemedText style={[styles.sortChipText, selected && styles.sortChipTextActive]}>{option.label}</ThemedText>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
 
-      {!trimmedQuery && recentSearches.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chipsScroller}
-          contentContainerStyle={styles.chipsRow}
-          keyboardShouldPersistTaps="handled">
-          {recentSearches.map((entry) => (
-            <Pressable
-              key={`recent-${entry}`}
-              style={styles.recentChip}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                setQuery(entry);
-              }}>
-              <Ionicons name="time-outline" size={13} color="#acc7e0" />
-              <ThemedText style={styles.recentChipText}>{entry}</ThemedText>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
-
-      {!trimmedQuery && popularCategories.length > 0 ? (
-        <>
-          <View style={styles.sectionRow}>
-            <ThemedText style={styles.sectionTitle}>Popular Categories</ThemedText>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsScroller}
-            contentContainerStyle={styles.chipsRow}
-            keyboardShouldPersistTaps="handled">
-            {popularCategories.map((entry) => (
-              <Pressable
-                key={`popular-${entry}`}
-                style={styles.trendingChip}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                  setQuery(entry);
-                  persistRecentSearch(entry);
+            {!trimmedQuery && recentSearches.length > 0 ? (
+              <View style={styles.sectionRow}>
+                <ThemedText style={styles.sectionTitle}>Recent</ThemedText>
+                <Pressable onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                  clearRecents();
                 }}>
-                <Ionicons name="flame-outline" size={13} color="#ff7a59" />
-                <ThemedText style={styles.trendingChipText}>{entry}</ThemedText>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </>
-      ) : null}
+                  <ThemedText style={styles.clearText}>Clear</ThemedText>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {!trimmedQuery && recentSearches.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.chipsScroller}
+                contentContainerStyle={styles.chipsRow}
+                keyboardShouldPersistTaps="handled">
+                {recentSearches.map((entry) => (
+                  <Pressable
+                    key={`recent-${entry}`}
+                    style={styles.recentChip}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      setQuery(entry);
+                    }}>
+                    <Ionicons name="time-outline" size={13} color="#acc7e0" />
+                    <ThemedText style={styles.recentChipText}>{entry}</ThemedText>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
+
+            {!trimmedQuery && popularCategories.length > 0 ? (
+              <>
+                <View style={styles.sectionRow}>
+                  <ThemedText style={styles.sectionTitle}>Popular Categories</ThemedText>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.chipsScroller}
+                  contentContainerStyle={styles.chipsRow}
+                  keyboardShouldPersistTaps="handled">
+                  {popularCategories.map((entry) => (
+                    <Pressable
+                      key={`popular-${entry}`}
+                      style={styles.trendingChip}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        setQuery(entry);
+                        persistRecentSearch(entry);
+                      }}>
+                      <Ionicons name="sparkles-outline" size={13} color="#ffb347" />
+                      <ThemedText style={styles.trendingChipText}>{entry}</ThemedText>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+          </View>
+        </Animated.View>
+      </View>
 
       {loading && results.length === 0 ? (
         <View style={styles.loaderWrap}>
