@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, View, ScrollView, Dimensions, TextInput } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, View, ScrollView, Dimensions, TextInput, Share } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 
 import { useCartNotification } from '@/contexts/cart-notification-context';
 import { ThemedText } from '@/components/themed-text';
@@ -18,6 +20,8 @@ import {
   getProductReviews,
   getProducts,
   getProfileDashboard,
+  getSellerPublicProfile,
+  SellerPublicProfile,
   normalizeAssetUrl,
   ProductItem,
   ProductMediaItem,
@@ -34,6 +38,7 @@ import {
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { launchStableImageLibraryAsync } from '@/utils/media-picker';
 import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
+import { recordProductView } from '@/utils/recently-viewed';
 
 type Params = {
   id?: string;
@@ -98,6 +103,29 @@ function resolveSellerId(item: ProductItem | null): string | undefined {
     return item.seller._id;
   }
   return undefined;
+}
+
+function SellerStoryVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (videoPlayer) => {
+    videoPlayer.loop = false;
+  });
+
+  return (
+    <VideoView
+      style={styles.storyVideo}
+      player={player}
+      nativeControls
+      contentFit="cover"
+    />
+  );
+}
+
+function resolveSellerAvatarSource(avatarUrl?: string | null, fallbackName?: string) {
+  if (!avatarUrl) {
+    const seed = encodeURIComponent(fallbackName || 'Artisan');
+    return { uri: `https://avatars.dicebear.com/api/identicon/${seed}.png?background=%23eaf6ff` };
+  }
+  return { uri: normalizeAssetUrl(avatarUrl) };
 }
 
 function getProductPricing(item: ProductItem) {
@@ -192,6 +220,7 @@ function resolveImageDisplayRatio(media: ProductMediaItem[], fallbackRatio: numb
 export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams<Params>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -203,6 +232,14 @@ export default function ProductDetailsScreen() {
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const [product, setProduct] = useState<ProductItem | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<ProductItem[]>([]);
+  const [sellerProfile, setSellerProfile] = useState<SellerPublicProfile | null>(null);
+  const [storyExpanded, setStoryExpanded] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      recordProductView(id);
+    }
+  }, [id]);
   const [reviewSort, setReviewSort] = useState<ProductReviewSort>('top');
   const [selectedReviewRatingFilter, setSelectedReviewRatingFilter] = useState<ReviewRatingFilter>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -325,6 +362,17 @@ export default function ProductDetailsScreen() {
         setIsLiked(false);
       }
 
+      // Fetch seller public profile to get Maker's story & video
+      const sellerId = resolveSellerId(currentProduct);
+      if (sellerId) {
+        try {
+          const sellerResponse = await getSellerPublicProfile({ sellerId });
+          setSellerProfile(sellerResponse.seller);
+        } catch (err) {
+          console.warn('Failed to load seller public profile:', err);
+        }
+      }
+
       const related = await getProducts({
         category: currentProduct.category,
         limit: 8,
@@ -346,6 +394,7 @@ export default function ProductDetailsScreen() {
   const handleToggleLike = async () => {
     if (!product || actionBusy) return;
     try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       setActionBusy(true);
       setActionMessage(null);
       const res = await toggleLikedProduct(product._id);
@@ -369,6 +418,7 @@ export default function ProductDetailsScreen() {
   const handleAddToCart = async () => {
     if (!product || actionBusy || addToCartInFlightRef.current) return;
     try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       addToCartInFlightRef.current = true;
       setActionBusy(true);
       setActionMessage(null);
@@ -378,6 +428,29 @@ export default function ProductDetailsScreen() {
         showAutoModeToast();
       }
       showNotificationForItem(product, 1);
+    } catch (err: any) {
+      setActionMessage(err?.message || 'Failed to add item to cart');
+    } finally {
+      setActionBusy(false);
+      addToCartInFlightRef.current = false;
+    }
+  };
+
+  const handleShare = async () => {
+    if (!product) return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      const shareUrl = `${process.env.EXPO_PUBLIC_API_URL || 'https://handkraft.com'}/product/${product._id}`;
+      const message = `Check out this amazing handmade product on Handkraft:\n\n*${product.title}*\nBy ${product.sellerName}\nPrice: ${formatPriceINR(productPricing.effectivePrice)}\n\nDiscover it here: ${shareUrl}`;
+      
+      await Share.share({
+        message,
+        title: product.title,
+      });
+    } catch (error) {
+      console.warn('Share error:', error);
+    }
+  };
       setActionMessage('Added to cart');
     } catch (err: any) {
       setActionMessage(err?.message || 'Failed to add to cart');
@@ -700,6 +773,15 @@ export default function ProductDetailsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <View style={[styles.floatingHeader, { paddingTop: Math.max(10, insets.top) }]}>
+        <Pressable style={styles.floatingHeaderBtn} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={22} color="#fff" />
+        </Pressable>
+        <Pressable style={styles.floatingHeaderBtn} onPress={handleShare}>
+          <Ionicons name="share-social-outline" size={20} color="#fff" />
+        </Pressable>
+      </View>
+
       {autoModeToastVisible ? (
         <View pointerEvents="none" style={styles.autoModeToastWrap}>
           <ThemedText style={styles.autoModeToastText}>Switched to Buyer mode</ThemedText>
@@ -770,6 +852,27 @@ export default function ProductDetailsScreen() {
                   <ThemedText style={styles.originalPriceText}>{formatPriceINR(productPricing.realPrice)}</ThemedText>
                 ) : null}
               </View>
+
+              {/* Trust Badges */}
+              <View style={styles.trustBadgesRow}>
+                <View style={[styles.trustBadge, styles.handmadeBadge]}>
+                  <ThemedText style={styles.trustBadgeText}>🏷️ Handmade Verified</ThemedText>
+                </View>
+                {product.stock > 0 && product.stock <= 3 && (
+                  <View style={[styles.trustBadge, styles.lowStockBadge]}>
+                    <ThemedText style={styles.trustBadgeText}>🔥 Low Stock</ThemedText>
+                  </View>
+                )}
+                {reviewSummary.averageRating && reviewSummary.averageRating >= 4.5 ? (
+                  <View style={[styles.trustBadge, styles.topRatedBadge]}>
+                    <ThemedText style={styles.trustBadgeText}>⭐ Top Rated</ThemedText>
+                  </View>
+                ) : null}
+                <View style={[styles.trustBadge, styles.shippingBadge]}>
+                  <ThemedText style={styles.trustBadgeText}>⚡ Fast Dispatch</ThemedText>
+                </View>
+              </View>
+
               <ThemedText style={styles.descriptionText}>{cleanedDescription || 'No description provided.'}</ThemedText>
 
               {isCustomizable ? (
@@ -814,6 +917,77 @@ export default function ProductDetailsScreen() {
               </View>
 
               {actionMessage ? <ThemedText style={styles.actionMessage}>{actionMessage}</ThemedText> : null}
+
+              {/* Meet the Maker / Story Section */}
+              <View style={styles.makerSection}>
+                <ThemedText type="subtitle" style={styles.makerSectionTitle}>Meet the Maker</ThemedText>
+                <View style={styles.makerCard}>
+                  <View style={styles.makerHeader}>
+                    <Image
+                      source={resolveSellerAvatarSource(sellerProfile?.avatarUrl, product.sellerName)}
+                      style={styles.makerAvatar}
+                    />
+                    <View style={styles.makerMeta}>
+                      <ThemedText style={styles.makerName}>
+                        {sellerProfile?.displayName || sellerProfile?.name || product.sellerName}
+                      </ThemedText>
+                      {sellerProfile?.tagline ? (
+                        <ThemedText style={styles.makerTagline} numberOfLines={1}>
+                          {sellerProfile.tagline}
+                        </ThemedText>
+                      ) : null}
+                      {sellerProfile?.location ? (
+                        <View style={styles.makerLocationRow}>
+                          <Ionicons name="location-outline" size={12} color="#a6b8d4" />
+                          <ThemedText style={styles.makerLocation}>{sellerProfile.location}</ThemedText>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                  
+                  {sellerProfile?.story ? (
+                    <View style={styles.makerStoryContent}>
+                      <ThemedText
+                        style={styles.makerStoryText}
+                        numberOfLines={storyExpanded ? undefined : 3}
+                      >
+                        {sellerProfile.story}
+                      </ThemedText>
+                      <Pressable onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        setStoryExpanded(!storyExpanded);
+                      }} style={styles.readMoreBtn}>
+                        <ThemedText style={styles.readMoreText}>
+                          {storyExpanded ? 'Read Less' : 'Read Full Story'}
+                        </ThemedText>
+                        <Ionicons
+                          name={storyExpanded ? 'chevron-up' : 'chevron-down'}
+                          size={12}
+                          color="#9fc8ff"
+                        />
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <ThemedText style={styles.makerStoryPlaceholder}>
+                      Crafting unique handmade treasures with passion. Support this independent creator!
+                    </ThemedText>
+                  )}
+
+                  {sellerProfile?.storyVideoUrl ? (
+                    <View style={styles.makerVideoContainer}>
+                      <SellerStoryVideo uri={sellerProfile.storyVideoUrl} />
+                    </View>
+                  ) : null}
+
+                  <Pressable
+                    style={styles.visitShopBtn}
+                    onPress={handleOpenSellerProfile}
+                  >
+                    <Ionicons name="storefront-outline" size={16} color="#0a0a0a" />
+                    <ThemedText style={styles.visitShopBtnText}>Visit Artisan Shop</ThemedText>
+                  </Pressable>
+                </View>
+              </View>
 
               <View style={styles.reviewsSection}>
                 <View style={styles.reviewsHeaderRow}>
@@ -1795,6 +1969,39 @@ const styles = StyleSheet.create({
     color: '#92a0b2',
     textDecorationLine: 'line-through',
   },
+  trustBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginVertical: 12,
+  },
+  trustBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 0.5,
+  },
+  handmadeBadge: {
+    backgroundColor: '#162e3d',
+    borderColor: '#2b5875',
+  },
+  lowStockBadge: {
+    backgroundColor: '#3d1c1a',
+    borderColor: '#7a2d29',
+  },
+  topRatedBadge: {
+    backgroundColor: '#3d301a',
+    borderColor: '#7a5a29',
+  },
+  shippingBadge: {
+    backgroundColor: '#1a3d24',
+    borderColor: '#297a3f',
+  },
+  trustBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#fff',
+  },
   mediaViewerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(4, 8, 12, 0.96)',
@@ -1863,6 +2070,134 @@ const styles = StyleSheet.create({
     color: '#dce9fb',
     fontSize: 12,
     fontWeight: '700',
+  },
+  floatingHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    zIndex: 10,
+    backgroundColor: 'transparent',
+  },
+  floatingHeaderBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(10, 10, 10, 0.65)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  makerSection: {
+    marginTop: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1d2a3a',
+    paddingTop: 20,
+  },
+  makerSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+    color: '#edf4ff',
+  },
+  makerCard: {
+    backgroundColor: '#0f141c',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 0.5,
+    borderColor: '#1d2a3a',
+  },
+  makerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  makerAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+    backgroundColor: '#1b2330',
+  },
+  makerMeta: {
+    flex: 1,
+  },
+  makerName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  makerTagline: {
+    fontSize: 12,
+    color: '#90a4ae',
+    marginTop: 2,
+  },
+  makerLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  makerLocation: {
+    fontSize: 11,
+    color: '#a6b8d4',
+  },
+  makerStoryContent: {
+    marginBottom: 14,
+  },
+  makerStoryText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#cfd8dc',
+  },
+  readMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+  },
+  readMoreText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#9fc8ff',
+  },
+  makerStoryPlaceholder: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#90a4ae',
+    fontStyle: 'italic',
+    marginBottom: 14,
+  },
+  makerVideoContainer: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 14,
+    backgroundColor: '#000000',
+  },
+  storyVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  visitShopBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#9df0a2',
+    borderRadius: 8,
+    paddingVertical: 10,
+  },
+  visitShopBtnText: {
+    color: '#0a0a0a',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
 

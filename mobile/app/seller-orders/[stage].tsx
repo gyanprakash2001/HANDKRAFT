@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Linking, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Linking, Pressable, RefreshControl, StyleSheet, View, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -106,6 +106,18 @@ export default function SellerStageOrdersScreen() {
   const [error, setError] = useState<string | null>(null);
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [expandedOrderIds, setExpandedOrderIds] = useState<string[]>([]);
+
+  const handleShareShop = async () => {
+    try {
+      const shareUrl = `https://handkraft.com/seller/my-shop`;
+      await Share.share({
+        message: `Check out my custom handmade items on Handkraft! Support local independent creators:\n${shareUrl}`,
+        title: 'Share Shop Link',
+      });
+    } catch {
+      // Ignored
+    }
+  };
 
   const loadOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -428,6 +440,10 @@ export default function SellerStageOrdersScreen() {
             <Ionicons name="cube-outline" size={46} color="#68788d" />
             <ThemedText style={styles.emptyTitle}>No Orders In {stageTitle}</ThemedText>
             <ThemedText style={styles.emptyText}>Orders in this stage will show up here once available.</ThemedText>
+            <Pressable style={styles.shareShopBtn} onPress={handleShareShop}>
+              <Ionicons name="share-social-outline" size={16} color="#0a0a0a" />
+              <ThemedText style={styles.shareShopBtnText}>Share Shop Link to Get Orders</ThemedText>
+            </Pressable>
           </View>
         }
       />
@@ -794,5 +810,20 @@ const styles = StyleSheet.create({
     color: '#d5f6da',
     fontSize: 11,
     fontWeight: '700',
+  },
+  shareShopBtn: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#9df0a2',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  shareShopBtnText: {
+    color: '#0a0a0a',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

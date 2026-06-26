@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, Pressable, TextInput, Alert, NativeModules } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -249,6 +250,14 @@ export default function CheckoutScreen() {
   const isCodAvailable = getCodAvailable();
 
   const subtotal = cartItems.reduce((sum, item) => sum + getEffectiveProductPrice(item.product) * item.quantity, 0);
+  const totalSavings = useMemo(() => {
+    return cartItems.reduce((sum, item) => {
+      const originalPrice = Math.max(0, Number(item.product.realPrice ?? item.product.price) || 0);
+      const effectivePrice = getEffectiveProductPrice(item.product);
+      const savingsPerUnit = originalPrice - effectivePrice;
+      return sum + (savingsPerUnit > 0 ? savingsPerUnit * item.quantity : 0);
+    }, 0);
+  }, [cartItems]);
   const quoteDetails = shippingEstimate?.shippingQuote?.details || [];
   const hasLiveNimbusQuote = shippingEstimate?.shippingQuote?.source === 'nimbus_serviceability' && quoteDetails.length > 0;
 
@@ -805,6 +814,7 @@ const ScatterView = ScrollView;
           // Non-blocking: order is already successful.
         });
 
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         setStep('confirmation');
         return;
       }
@@ -887,8 +897,10 @@ const ScatterView = ScrollView;
       });
 
       // Payment successful
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setStep('confirmation');
     } catch (err: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       const errorMsg = err?.message || JSON.stringify(err) || 'Payment processing failed';
       console.warn('[CHECKOUT] Payment warning:', errorMsg);
       setError(errorMsg);
@@ -1110,11 +1122,26 @@ const ScatterView = ScrollView;
                   )}
                 </View>
 
+                {totalSavings > 0 && (
+                  <View style={styles.savingsBanner}>
+                    <Ionicons name="checkmark-circle-outline" size={16} color="#9df0a2" />
+                    <ThemedText style={styles.savingsBannerText}>
+                      Yay! You're saving ₹{totalSavings.toFixed(2)} on this order.
+                    </ThemedText>
+                  </View>
+                )}
+
                 <View style={styles.costSummary}>
                   <View style={styles.costRow}>
                     <ThemedText>Subtotal</ThemedText>
-                    <ThemedText>₹{displaySubtotal.toFixed(2)}</ThemedText>
+                    <ThemedText>₹{(displaySubtotal + totalSavings).toFixed(2)}</ThemedText>
                   </View>
+                  {totalSavings > 0 && (
+                    <View style={styles.costRow}>
+                      <ThemedText style={styles.savingsLabel}>Discount Savings</ThemedText>
+                      <ThemedText style={styles.savingsValue}>-₹{totalSavings.toFixed(2)}</ThemedText>
+                    </View>
+                  )}
                   <View style={styles.costRow}>
                     <ThemedText>Shipping</ThemedText>
                     <ThemedText>{shippingDisplayText}</ThemedText>
@@ -1123,11 +1150,19 @@ const ScatterView = ScrollView;
                     <ThemedText>Platform fee</ThemedText>
                     <ThemedText>₹{platformFee.toFixed(2)}</ThemedText>
                   </View>
-                <View style={styles.csrInfoRow}>
-                  <ThemedText style={styles.csrInfoText}>
-                    Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per successful order.
-                  </ThemedText>
-                </View>
+                  <View style={styles.csrInfoRow}>
+                    <ThemedText style={styles.csrInfoText}>
+                      Platform fee includes ₹{csrContributionPerPaidOrder} CSR contribution per successful order.
+                    </ThemedText>
+                  </View>
+                  {totalSavings > 0 && (
+                    <View style={styles.savingsPromoCard}>
+                      <Ionicons name="gift-outline" size={14} color="#9df0a2" />
+                      <ThemedText style={styles.savingsPromoText}>
+                        Artisan Club members save an extra 5%!
+                      </ThemedText>
+                    </View>
+                  )}
                   <View style={[styles.costRow, styles.costRowTotal]}>
                     <ThemedText style={styles.totalLabel}>Total</ThemedText>
                     <ThemedText style={styles.totalLabel}>₹{totalAmount.toFixed(2)}</ThemedText>
@@ -2123,6 +2158,47 @@ const styles = StyleSheet.create({
     color: '#9df0a2',
     fontSize: 16,
     fontWeight: '800',
+  },
+  savingsBanner: {
+    backgroundColor: '#0a2312',
+    borderWidth: 1,
+    borderColor: '#1f592f',
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+  },
+  savingsBannerText: {
+    color: '#9df0a2',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
+  savingsLabel: {
+    color: '#9df0a2',
+    fontWeight: '600',
+  },
+  savingsValue: {
+    color: '#9df0a2',
+    fontWeight: '700',
+  },
+  savingsPromoCard: {
+    backgroundColor: '#16231b',
+    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: '#2b593a',
+    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginVertical: 4,
+  },
+  savingsPromoText: {
+    color: '#9df0a2',
+    fontSize: 11,
+    fontWeight: '600',
   },
   paymentMethodContainer: {
     gap: 12,

@@ -222,6 +222,11 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ProfileMode>('buyer');
   const [buyerTab, setBuyerTab] = useState<BuyerTab>('saved');
+
+  const handleTabPress = (tab: BuyerTab) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setBuyerTab(tab);
+  };
   const [activeSavedBoard, setActiveSavedBoard] = useState('home');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -562,6 +567,201 @@ export default function ProfileScreen() {
   );
 
   // Refresh dashboard when screen gains focus so newly placed orders appear
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your photos to choose an avatar.');
+      // Prefer explicit media type to avoid runtime access of deprecated enums.
+      const mediaTypesOption = ['images'];
+
+      const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 1, copyToCacheDirectory: true });
+      const anyRes = result as any;
+      const uri = anyRes?.assets?.[0]?.uri || anyRes?.uri;
+      if (!uri) return;
+      setEditorUri(uri);
+      setEditorUploadMode(true);
+      setEditorVisible(true);
+    } catch (err) {
+      console.error('Pick image error', err);
+    }
+  };
+
+  const handleEditorSave = async ({ uri, base64, setOnProfile }: { uri: string; base64?: string; setOnProfile?: boolean }) => {
+    try {
+      setEditorVisible(false);
+      setIsUploadingAvatar(true);
+      // Ensure we upload the selected image to server so it becomes part of the avatar list.
+      let dataUri: string | undefined = base64 ? `data:image/jpeg;base64,${base64}` : undefined;
+
+      if (!dataUri && uri) {
+        try {
+          const isPng = String(uri).toLowerCase().endsWith('.png');
+          const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+          dataUri = `data:${isPng ? 'image/png' : 'image/jpeg'};base64,${fileBase64}`;
+        } catch {
+          // If reading as base64 fails (some Android content:// URIs), fall back to alerting the user.
+          dataUri = undefined;
+        }
+      }
+
+      if (dataUri) {
+        // Upload the avatar and set on profile if requested by the editor action.
+        const res = await uploadAvatar(dataUri, Boolean(setOnProfile));
+        const newAvatarUrl = res?.url || res?.user?.avatarUrl;
+        if (newAvatarUrl) {
+          const busted = cacheBustUrl(newAvatarUrl);
+          const base = String(newAvatarUrl).split('?')[0];
+          setServerAvatars((prev) => {
+            const filtered = (prev || []).filter((p) => String(p).split('?')[0] !== base);
+            return [busted, ...filtered];
+          });
+          // If server returned updated user (setOnProfile=true), update local profile.
+          if (setOnProfile && res?.user) {
+            const updatedUser = { ...res.user, avatarUrl: cacheBustUrl(res.user.avatarUrl) };
+            setDashboard((d) => (d ? { ...d, user: { ...d.user, ...updatedUser } } : d));
+            currentUser.setProfile(updatedUser);
+          }
+        } else {
+          await loadDashboard();
+        }
+      } else if (uri) {
+        // Could not read file as base64 for upload — notify user.
+        Alert.alert('Upload failed', 'Could not read the selected image. Please allow photo permissions and try again, or pick a different image.');
+      }
+    } catch (err: any) {
+      Alert.alert('Upload failed', String(err?.message || err || 'Could not upload avatar'));
+    } finally {
+      setIsUploadingAvatar(false);
+      setEditorUri(null);
+      setEditorUploadMode(false);
+    }
+  };
+
+  const syncProfileModeFromStorage = useCallback(async () => {
+    try {
+      const storedMode = await AsyncStorage.getItem(PROFILE_MODE_KEY);
+      if (storedMode === 'buyer' || storedMode === 'seller') {
+        if (storedMode !== mode) {
+          setMode(storedMode);
+          if (storedMode === 'buyer') {
+            setBuyerTab('saved');
+          }
+        }
+      }
+    } catch {
+      // Keep current mode if storage read fails.
+    }
+  }, [mode]);
+
+  const loadDashboard = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      setError(null);
+      if (mode === 'buyer') {
+        const data = await getProfileDashboard();
+        const userWithBust = { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) };
+        setDashboard({ ...data, user: userWithBust });
+        currentUser.setProfile(userWithBust);
+
+        Promise.allSettled([getUserOrderHistory(), getUserAddresses()])
+          .then(([ordersResult, addressesResult]) => {
+            if (ordersResult.status === 'fulfilled') {
+              try {
+                // Only show completed (paid) orders in buyer order list
+                const allOrders = ordersResult.value || [];
+                const completed = allOrders.filter((o: any) => String(o.paymentStatus || '').toLowerCase() === 'completed');
+                setOrders(completed);
+              } catch {
+                setOrders(ordersResult.value);
+              }
+            }
+            if (addressesResult.status === 'fulfilled') {
+              setAddresses(addressesResult.value);
+            }
+          })
+          .catch(() => {
+            // Secondary data is non-blocking for initial profile render.
+          });
+      } else {
+        const data = await getProfileDashboard();
+        const userWithBust = { ...data.user, avatarUrl: cacheBustUrl(data.user.avatarUrl) };
+        setDashboard({ ...data, user: userWithBust });
+        currentUser.setProfile(userWithBust);
+
+        getSellerOrders()
+          .then((sellerOrderData) => {
+            setSellerOrders(sellerOrderData.orders || []);
+          })
+          .catch(() => {
+            // Non-blocking error for seller orders
+          });
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load profile');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const restoreMode = async () => {
+      try {
+        const storedMode = await AsyncStorage.getItem(PROFILE_MODE_KEY);
+        if (mounted && (storedMode === 'buyer' || storedMode === 'seller')) {
+          if (storedMode !== mode) {
+            setMode(storedMode);
+            if (storedMode === 'buyer') {
+              setBuyerTab('saved');
+            }
+          }
+        }
+      } catch {
+        // Keep default buyer mode if reading from storage fails.
+      }
+    };
+
+    restoreMode();
+    return () => {
+      mounted = false;
+    };
+  }, [mode]);
+
+  useEffect(() => {
+    const loadNotificationStatus = async () => {
+      try {
+        const [sellerSeenCountString, newTabSeenCountString] = await Promise.all([
+          AsyncStorage.getItem(SELLER_SEEN_COUNT_KEY),
+          AsyncStorage.getItem(NEW_ORDERS_TAB_SEEN_COUNT_KEY),
+        ]);
+
+        setSellerSeenCount(Math.max(0, Number(sellerSeenCountString) || 0));
+        setNewOrdersTabSeenCount(Math.max(0, Number(newTabSeenCountString) || 0));
+      } catch {
+        // Keep defaults if storage read fails.
+      }
+    };
+
+    loadNotificationStatus();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      syncProfileModeFromStorage();
+    }, [syncProfileModeFromStorage])
+  );
+
+  // Refresh dashboard when screen gains focus so newly placed orders appear
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
@@ -569,6 +769,7 @@ export default function ProfileScreen() {
   );
 
   const onModeChange = (isSeller: boolean) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const nextMode: ProfileMode = isSeller ? 'seller' : 'buyer';
     setMode(nextMode);
     setBuyerTab('saved'); // Reset tab when switching modes
@@ -1445,7 +1646,7 @@ export default function ProfileScreen() {
         <View style={styles.tabsRow}>
           <Pressable
             style={[styles.tab, buyerTab === 'saved' && styles.tabActive]}
-            onPress={() => setBuyerTab('saved')}>
+            onPress={() => handleTabPress('saved')}>
             <View style={styles.tabInner}>
               <Ionicons name="heart-outline" size={13} color={buyerTab === 'saved' ? '#e9f4ff' : '#8ea3bd'} />
               <ThemedText style={[styles.tabText, buyerTab === 'saved' && styles.tabTextActive]}>Saved</ThemedText>
@@ -1453,7 +1654,7 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             style={[styles.tab, buyerTab === 'orders' && styles.tabActive]}
-            onPress={() => setBuyerTab('orders')}>
+            onPress={() => handleTabPress('orders')}>
             <View style={styles.tabInner}>
               <Ionicons name="bag-handle-outline" size={13} color={buyerTab === 'orders' ? '#e9f4ff' : '#8ea3bd'} />
               <ThemedText style={[styles.tabText, buyerTab === 'orders' && styles.tabTextActive]}>Orders</ThemedText>
@@ -1461,7 +1662,7 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             style={[styles.tab, buyerTab === 'addresses' && styles.tabActive]}
-            onPress={() => setBuyerTab('addresses')}>
+            onPress={() => handleTabPress('addresses')}>
             <View style={styles.tabInner}>
               <Ionicons name="location-outline" size={13} color={buyerTab === 'addresses' ? '#e9f4ff' : '#8ea3bd'} />
               <ThemedText style={[styles.tabText, buyerTab === 'addresses' && styles.tabTextActive]}>Addresses</ThemedText>
@@ -1469,13 +1670,12 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             style={[styles.tab, buyerTab === 'account' && styles.tabActive]}
-            onPress={() => setBuyerTab('account')}>
+            onPress={() => handleTabPress('account')}>
             <View style={styles.tabInner}>
               <Ionicons name="person-outline" size={13} color={buyerTab === 'account' ? '#e9f4ff' : '#8ea3bd'} />
               <ThemedText style={[styles.tabText, buyerTab === 'account' && styles.tabTextActive]}>Account</ThemedText>
             </View>
           </Pressable>
-          {/* CSR moved inline next to email */}
         </View>
       )}
 
@@ -1540,6 +1740,14 @@ export default function ProfileScreen() {
                   <Ionicons name="heart-outline" size={48} color="#666" />
                   <ThemedText style={styles.emptyTitle}>No Saved Items</ThemedText>
                   <ThemedText style={styles.subtleText}>Like items from feed to see them here.</ThemedText>
+                  <Pressable
+                    style={styles.exploreButton}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      router.replace('/feed');
+                    }}>
+                    <ThemedText style={styles.exploreButtonText}>Discover Handmade Treasures</ThemedText>
+                  </Pressable>
                 </View>
               }
             />
@@ -1558,11 +1766,14 @@ export default function ProfileScreen() {
                 <View style={styles.emptyState}>
                   <Ionicons name="document-outline" size={48} color="#666" />
                   <ThemedText style={styles.emptyTitle}>No Orders</ThemedText>
-                  <ThemedText style={styles.subtleText}>You haven&apos;t placed any orders yet.</ThemedText>
+                  <ThemedText style={styles.subtleText}>Your first handmade piece is waiting.</ThemedText>
                   <Pressable
                     style={styles.exploreButton}
-                    onPress={() => router.replace('/feed')}>
-                    <ThemedText style={styles.exploreButtonText}>Start Shopping</ThemedText>
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      router.replace('/feed');
+                    }}>
+                    <ThemedText style={styles.exploreButtonText}>Shop Now</ThemedText>
                   </Pressable>
                 </View>
               }
@@ -1582,17 +1793,6 @@ export default function ProfileScreen() {
                 renderItem={(props) => renderAddressItem({ ...props, index: addresses.indexOf(props.item) })}
                 scrollEnabled={false}
                 contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
-                ListEmptyComponent={
-                  <View style={styles.emptyState}>
-                    <Ionicons name="location-outline" size={48} color="#666" />
-                    <ThemedText style={styles.emptyTitle}>No Addresses</ThemedText>
-                    <ThemedText style={styles.subtleText}>Add a shipping address to get started.</ThemedText>
-                  </View>
-                }
-              />
-            </View>
-          )}
-
           {/* Account Settings Tab */}
           {buyerTab === 'account' && (
                 <ScrollView style={styles.accountContainer} contentContainerStyle={[styles.accountContent, { paddingBottom: listBottomPadding }]}>
