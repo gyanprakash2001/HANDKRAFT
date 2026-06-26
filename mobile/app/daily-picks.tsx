@@ -32,7 +32,7 @@ function getProductPricing(item: ProductItem) {
     realPrice,
     effectivePrice,
     hasDiscount,
-    discountPercentage: Math.max(0, Number.isFinite(computedDiscount) ? Number(computedDiscount.toFixed(1)) : 0),
+    discountPercentage: Math.max(0, Number.isFinite(computedDiscount) ? Math.round(computedDiscount) : 0),
   };
 }
 

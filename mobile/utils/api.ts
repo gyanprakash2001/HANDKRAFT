@@ -838,10 +838,10 @@ export async function replaceCart(items: { productId: string; quantity: number }
 
 export async function getPopularCategories(): Promise<string[]> {
   try {
-    const res = await fetchApi('/api/products/popular-categories', {
+    const res = await safeFetch('/api/products/popular-categories', {
       method: 'GET',
     });
-    if (res.status === 200) {
+    if (res.ok) {
       const data = await res.json();
       return Array.isArray(data.categories) ? data.categories : [];
     }
