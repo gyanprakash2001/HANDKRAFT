@@ -661,7 +661,7 @@ export default function ExploreScreen() {
       {(() => {
         const isRecentVisible = !trimmedQuery && recentSearches.length > 0;
         const isPopularVisible = !trimmedQuery && popularCategories.length > 0;
-        const targetTopSectionHeight = 46 + (isRecentVisible ? 73 : 0) + (isPopularVisible ? 73 : 0);
+        const targetTopSectionHeight = 56 + (isRecentVisible ? 84 : 0) + (isPopularVisible ? 84 : 0);
 
         return (
           <Animated.View
@@ -782,7 +782,8 @@ export default function ExploreScreen() {
           </View>
         </Animated.View>
       </Animated.View>
-      )}
+      );
+    })()}
 
       {loading && results.length === 0 ? (
         <View style={styles.loaderWrap}>
