@@ -837,18 +837,20 @@ export async function replaceCart(items: { productId: string; quantity: number }
 }
 
 export async function getPopularCategories(): Promise<string[]> {
+  const fallback = ['Jewelry', 'Home Decor', 'Art', 'Pottery', 'Textiles'];
   try {
     const res = await safeFetch('/api/products/popular-categories', {
       method: 'GET',
     });
     if (res.ok) {
       const data = await res.json();
-      return Array.isArray(data.categories) ? data.categories : [];
+      const categories = Array.isArray(data.categories) ? data.categories : [];
+      if (categories.length > 0) return categories;
     }
   } catch (error) {
     console.error('Failed to fetch popular categories', error);
   }
-  return [];
+  return fallback;
 }
 
 export async function getProducts(params: {
