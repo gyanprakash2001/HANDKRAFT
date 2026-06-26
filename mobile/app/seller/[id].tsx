@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,7 @@ import {
   getSellerPublicProfile,
   ProductItem,
   SellerPublicProfileResponse,
+  normalizeAssetUrl,
 } from '@/utils/api';
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 
@@ -56,14 +57,12 @@ function normalizeInstagramLink(value: string) {
   return `https://instagram.com/${encodeURIComponent(handle)}`;
 }
 
-function resolveAvatarSource(value: string) {
+function resolveAvatarSource(value?: string | null, fallbackName?: string) {
   if (!value) {
-    return { uri: 'https://placehold.co/200x200?text=Seller' };
+    const seed = encodeURIComponent(fallbackName || 'Artisan');
+    return { uri: `https://avatars.dicebear.com/api/identicon/${seed}.png?background=%23dbe7ff` };
   }
-  if (value.startsWith('http') || value.startsWith('data:') || value.startsWith('/')) {
-    return { uri: value };
-  }
-  return { uri: `https://avatars.dicebear.com/api/identicon/${encodeURIComponent(value)}.png?background=%23dbe7ff` };
+  return { uri: normalizeAssetUrl(value) };
 }
 
 export default function SellerPublicProfileScreen() {
@@ -252,7 +251,7 @@ export default function SellerPublicProfileScreen() {
               {String(payload.seller.avatarUrl || '').startsWith('local:') ? (
                 <LocalAvatar id={payload.seller.avatarUrl || 'local:avatar01'} size={84} style={styles.avatar} />
               ) : (
-                <Image source={resolveAvatarSource(payload.seller.avatarUrl || '')} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
+                <Image source={resolveAvatarSource(payload.seller.avatarUrl, payload.seller.displayName || payload.seller.name)} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
               )}
             </View>
 

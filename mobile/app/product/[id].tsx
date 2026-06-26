@@ -398,14 +398,17 @@ export default function ProductDetailsScreen() {
 
       // Fetch seller public profile to get Maker's story & video
       const sellerId = resolveSellerId(currentProduct);
-      if (sellerId) {
-        try {
-          const sellerResponse = await getSellerPublicProfile({ sellerId });
-          setSellerProfile(sellerResponse.seller);
-        } catch (err) {
-          console.warn('Failed to load seller public profile:', err);
-        }
+      try {
+        const sellerResponse = await getSellerPublicProfile({
+          sellerId,
+          sellerName: currentProduct.sellerName,
+          productId: currentProduct._id,
+        });
+        setSellerProfile(sellerResponse.seller);
+      } catch (err) {
+        console.warn('Failed to load seller public profile:', err);
       }
+
 
       const related = await getProducts({
         category: currentProduct.category,
