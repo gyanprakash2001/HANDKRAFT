@@ -303,39 +303,42 @@ export default function MessageThreadScreen() {
         showThemedAlert('Permission Required', 'Please allow access to your photos to send images.');
         return;
       }
-      const mediaTypesOption = ['images'];
+      const mediaTypesOption = ImagePicker.MediaTypeOptions.Images;
 
       const result = await (ImagePicker as any).launchImageLibraryAsync({
         mediaTypes: mediaTypesOption,
+        allowsMultipleSelection: true,
         quality: 0.8,
         copyToCacheDirectory: true
       });
-      const uri = (result as any)?.assets?.[0]?.uri || (result as any)?.uri;
-      if (!uri) return;
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
 
       const replyId = replyingTo?.id;
       setReplyingTo(null);
 
-      // Optimistic local preview
-      const tempId = `temp-${Date.now()}`;
-      const now = new Date().toISOString();
-      const localMsg: ChatMessage = {
-        id: tempId,
-        text: uri,
-        senderId: myId,
-        isMine: true,
-        isImage: true,
-        createdAt: now,
-      };
-      setMessages((prev) => [...prev, localMsg]);
+      for (const asset of result.assets) {
+        const uri = asset.uri;
+        if (!uri) continue;
+        
+        const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const now = new Date().toISOString();
+        const localMsg: ChatMessage = {
+          id: tempId,
+          text: uri,
+          senderId: myId,
+          isMine: true,
+          isImage: true,
+          createdAt: now,
+        };
+        setMessages((prev) => [...prev, localMsg]);
 
-      // Direct multipart upload
-      try {
-        const sent = await uploadChatImage(conversationId, uri, replyId);
-        setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
-      } catch (err: any) {
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        showThemedAlert('Upload Failed', err?.message || 'Failed to upload image. Please check your network connection.');
+        try {
+          const sent = await uploadChatImage(conversationId, uri, replyId);
+          setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
+        } catch (err: any) {
+          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+          showThemedAlert('Upload Failed', err?.message || 'Failed to upload image. Please check your network connection.');
+        }
       }
     } catch (err) {
       console.error('Pick image failed', err);
@@ -356,39 +359,42 @@ export default function MessageThreadScreen() {
         showThemedAlert('Permission Required', 'Please allow access to your media library to send videos.');
         return;
       }
-      const mediaTypesOption = ['videos'];
+      const mediaTypesOption = ImagePicker.MediaTypeOptions.Videos;
 
       const result = await (ImagePicker as any).launchImageLibraryAsync({
         mediaTypes: mediaTypesOption,
+        allowsMultipleSelection: true,
         quality: 0.8,
         copyToCacheDirectory: true
       });
-      const uri = (result as any)?.assets?.[0]?.uri || (result as any)?.uri;
-      if (!uri) return;
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
 
       const replyId = replyingTo?.id;
       setReplyingTo(null);
 
-      // Optimistic local preview
-      const tempId = `temp-${Date.now()}`;
-      const now = new Date().toISOString();
-      const localMsg: ChatMessage = {
-        id: tempId,
-        text: uri,
-        senderId: myId,
-        isMine: true,
-        isVideo: true,
-        createdAt: now,
-      };
-      setMessages((prev) => [...prev, localMsg]);
+      for (const asset of result.assets) {
+        const uri = asset.uri;
+        if (!uri) continue;
 
-      // Direct multipart upload
-      try {
-        const sent = await uploadChatImage(conversationId, uri, replyId);
-        setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
-      } catch (err: any) {
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        showThemedAlert('Upload Failed', err?.message || 'Failed to upload video. Please check your network connection.');
+        const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const now = new Date().toISOString();
+        const localMsg: ChatMessage = {
+          id: tempId,
+          text: uri,
+          senderId: myId,
+          isMine: true,
+          isVideo: true,
+          createdAt: now,
+        };
+        setMessages((prev) => [...prev, localMsg]);
+
+        try {
+          const sent = await uploadChatImage(conversationId, uri, replyId);
+          setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
+        } catch (err: any) {
+          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+          showThemedAlert('Upload Failed', err?.message || 'Failed to upload video. Please check your network connection.');
+        }
       }
     } catch (err) {
       console.error('Pick video failed', err);
