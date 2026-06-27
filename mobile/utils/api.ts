@@ -2069,14 +2069,11 @@ export async function uploadChatImage(conversationId: string, fileUri: string, r
     headers,
     httpMethod: 'POST',
     fieldName: 'image',
+    uploadType: 1, // FileSystemUploadType.MULTIPART
   };
   if (replyToId) {
     uploadOpts.parameters = { replyTo: replyToId };
   }
-  const uploadType =
-    (FileSystem as any).FileSystemUploadType?.MULTIPART ??
-    (FileSystem as any).UploadType?.MULTIPART;
-  if (uploadType) uploadOpts.uploadType = uploadType;
 
   try {
     devLog('[uploadChatImage] uploading', { url, uploadTarget, tempPath: prepared.tempPath });
@@ -2134,11 +2131,8 @@ export async function uploadProductFile(fileUri: string): Promise<{ url: string;
     headers,
     httpMethod: 'POST',
     fieldName: 'file',
+    uploadType: 1, // FileSystemUploadType.MULTIPART
   };
-  const uploadType =
-    (FileSystem as any).FileSystemUploadType?.MULTIPART ??
-    (FileSystem as any).UploadType?.MULTIPART;
-  if (uploadType) uploadOpts.uploadType = uploadType;
 
   try {
     devLog('[uploadProductFile] uploading', { url, uploadTarget, tempPath: prepared.tempPath });
@@ -2609,6 +2603,28 @@ export async function getPinnedMessage(conversationId: string): Promise<{ pinned
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to get pinned message');
+  }
+  return res.json();
+}
+
+export async function deleteChatMessage(conversationId: string, messageId: string): Promise<any> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete message');
+  }
+  return res.json();
+}
+
+export async function deleteChatConversation(conversationId: string): Promise<any> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete conversation');
   }
   return res.json();
 }

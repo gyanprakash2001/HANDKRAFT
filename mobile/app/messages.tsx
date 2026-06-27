@@ -8,7 +8,8 @@ import * as Haptics from 'expo-haptics';
 
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
-import { ChatConversation, getChatConversations } from '@/utils/api';
+import { ChatConversation, getChatConversations, deleteChatConversation } from '@/utils/api';
+import { ThemedAlert, AlertButton } from '@/components/ThemedAlert';
 
 type MessageSection = 'seller_inbox' | 'buyer_orders';
 
@@ -40,11 +41,13 @@ function ConversationRow({
   index,
   formatTimestamp,
   onPress,
+  onLongPress,
 }: {
   item: ChatConversation;
   index: number;
   formatTimestamp: (value?: string) => string;
   onPress: () => void;
+  onLongPress: () => void;
 }) {
   const entry = useMemo(() => new Animated.Value(0), []);
 
@@ -78,6 +81,10 @@ function ConversationRow({
         onPress={() => {
           Haptics.selectionAsync().catch(() => {});
           onPress();
+        }}
+        onLongPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          onLongPress();
         }}>
         <LinearGradient colors={getAvatarGradient(item.otherUser?.name)} style={styles.threadAvatar}>
           <ThemedText style={styles.threadAvatarText}>{getInitials(item.otherUser?.name)}</ThemedText>
@@ -134,6 +141,40 @@ export default function MessagesScreen() {
       setActiveSection(newSection);
       Haptics.selectionAsync().catch(() => {});
     }
+  };
+
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertButtons, setAlertButtons] = useState<AlertButton[]>([]);
+
+  const showThemedAlert = (title: string, message: string, buttons?: AlertButton[]) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertButtons(buttons || [{ text: 'OK', style: 'default' }]);
+    setAlertVisible(true);
+  };
+
+  const handleLongPressConversation = (conv: ChatConversation) => {
+    showThemedAlert(
+      'Delete Chat',
+      `Are you sure you want to delete your conversation with ${conv.otherUser?.name || 'this user'}? This will delete all messages.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteChatConversation(conv.id);
+              setConversations(prev => prev.filter(c => c.id !== conv.id));
+            } catch (err: any) {
+              showThemedAlert('Error', err?.message || 'Failed to delete conversation');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const formatTimestamp = (value?: string) => {
@@ -282,6 +323,7 @@ export default function MessagesScreen() {
                     },
                   })
                 }
+                onLongPress={() => handleLongPressConversation(item)}
               />
             )}
             ListEmptyComponent={
@@ -335,6 +377,7 @@ export default function MessagesScreen() {
                     },
                   })
                 }
+                onLongPress={() => handleLongPressConversation(item)}
               />
             )}
             ListEmptyComponent={
@@ -367,6 +410,14 @@ export default function MessagesScreen() {
           />
         </View>
       </ScrollView>
+
+      <ThemedAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        buttons={alertButtons}
+        onClose={() => setAlertVisible(false)}
+      />
     </ThemedView>
   );
 }

@@ -26,6 +26,7 @@ import {
   pinMessage,
   unpinMessage,
   getPinnedMessage,
+  deleteChatMessage,
 } from '@/utils/api';
 import MessageBubble from '@/components/MessageBubble';
 import MessageComposer from '@/components/MessageComposer';
@@ -210,6 +211,13 @@ export default function MessageThreadScreen() {
           }
         });
 
+        socket.on('message-deleted', (data) => {
+          if (data.conversationId === conversationId) {
+            setMessages(prev => prev.filter(m => m.id !== data.messageId));
+            setReplyingTo(prev => prev && prev.id === data.messageId ? null : prev);
+          }
+        });
+
       } catch (err) {
         console.error('Socket setup error:', err);
       }
@@ -230,6 +238,7 @@ export default function MessageThreadScreen() {
         currentSocket.off('message-reaction');
         currentSocket.off('message-pinned');
         currentSocket.off('message-unpinned');
+        currentSocket.off('message-deleted');
       }
     };
   }, [conversationId, otherUserId, myId]);
@@ -449,6 +458,18 @@ export default function MessageThreadScreen() {
     }
   };
 
+  const handleDeleteMessage = async () => {
+    if (!activeOptionMessage) return;
+    const msgId = activeOptionMessage.id;
+    try {
+      await deleteChatMessage(conversationId, msgId);
+      setMessages(prev => prev.filter(m => m.id !== msgId));
+      setReplyingTo(prev => prev && prev.id === msgId ? null : prev);
+    } catch (err: any) {
+      showThemedAlert('Error', err?.message || 'Failed to delete message');
+    }
+  };
+
   return (
     <ThemedView style={styles.container}>
       <LinearGradient colors={['#111b2a', '#0a0a0a']} style={styles.headerGradient} />
@@ -600,9 +621,11 @@ export default function MessageThreadScreen() {
         visible={messageOptionsVisible}
         message={activeOptionMessage}
         isPinned={pinnedMessage?.id === activeOptionMessage?.id}
+        isMine={activeOptionMessage ? activeOptionMessage.senderId === myId : false}
         onReact={handleSelectEmoji}
         onReply={() => setReplyingTo(activeOptionMessage)}
         onPin={handlePinAction}
+        onDelete={handleDeleteMessage}
         onClose={() => setMessageOptionsVisible(false)}
       />
 

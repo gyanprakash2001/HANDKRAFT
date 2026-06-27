@@ -8,9 +8,11 @@ interface MessageOptionsModalProps {
   visible: boolean;
   message: { id: string; text: string } | null;
   isPinned: boolean;
+  isMine: boolean;
   onReact: (emoji: string) => void;
   onReply: () => void;
   onPin: () => void;
+  onDelete: () => void;
   onClose: () => void;
 }
 
@@ -20,9 +22,11 @@ export default function MessageOptionsModal({
   visible,
   message,
   isPinned,
+  isMine,
   onReact,
   onReply,
   onPin,
+  onDelete,
   onClose,
 }: MessageOptionsModalProps) {
   if (!visible || !message) return null;
@@ -98,6 +102,16 @@ export default function MessageOptionsModal({
                   <Ionicons name="copy-outline" size={20} color="#ebf2ff" />
                   <ThemedText style={styles.actionText}>Copy Text</ThemedText>
                 </Pressable>
+
+                {isMine && (
+                  <Pressable
+                    style={({ pressed }) => [styles.actionItem, pressed && styles.actionPressed]}
+                    onPress={() => handleAction(onDelete)}
+                  >
+                    <Ionicons name="trash-outline" size={20} color="#ff6b6b" />
+                    <ThemedText style={[styles.actionText, { color: '#ff6b6b' }]}>Delete Message</ThemedText>
+                  </Pressable>
+                )}
 
                 <Pressable
                   style={({ pressed }) => [styles.actionItem, pressed && styles.actionPressed, styles.cancelItem]}

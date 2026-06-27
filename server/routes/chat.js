@@ -674,4 +674,77 @@ router.get('/conversations/:id/pinned', auth, async (req, res) => {
   }
 });
 
+// DELETE /api/chat/conversations/:id/messages/:messageId
+router.delete('/conversations/:id/messages/:messageId', auth, async (req, res) => {
+  try {
+    const me = String(req.user._id);
+    const { id: conversationId, messageId } = req.params;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    if (String(message.sender) !== me) {
+      return res.status(403).json({ message: 'Unauthorized to delete this message' });
+    }
+
+    await Message.deleteOne({ _id: messageId });
+
+    // Update conversation lastMessage if needed
+    const conversation = await Conversation.findById(conversationId);
+    if (conversation) {
+      const lastMsg = await Message.findOne({ conversation: conversationId }).sort({ createdAt: -1 });
+      conversation.lastMessage = lastMsg ? lastMsg.text : '';
+      conversation.lastMessageAt = lastMsg ? lastMsg.createdAt : conversation.createdAt;
+      
+      if (conversation.pinnedMessageId && String(conversation.pinnedMessageId) === messageId) {
+        conversation.pinnedMessageId = null;
+      }
+      await conversation.save();
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('message-deleted', { conversationId, messageId });
+    }
+
+    res.json({ message: 'Message deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
+// DELETE /api/chat/conversations/:id
+router.delete('/conversations/:id', auth, async (req, res) => {
+  try {
+    const me = String(req.user._id);
+    const { id: conversationId } = req.params;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    const isParticipant = (conversation.participants || []).some((id) => String(id) === me);
+    if (!isParticipant) {
+      return res.status(403).json({ message: 'Unauthorized' });
+    }
+
+    await Message.deleteMany({ conversation: conversationId });
+    await Conversation.deleteOne({ _id: conversationId });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('conversation-deleted', { conversationId });
+    }
+
+    res.json({ message: 'Conversation deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
 module.exports = router;
