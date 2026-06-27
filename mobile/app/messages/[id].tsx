@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -49,6 +49,9 @@ export default function MessageThreadScreen() {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState('');
   const [viewerType, setViewerType] = useState<'image' | 'video'>('image');
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const flatListRef = useRef<FlatList>(null);
 
   const headerTitle = useMemo(() => {
     const label = String(sellerName || '').trim();
@@ -97,7 +100,9 @@ export default function MessageThreadScreen() {
       setSending(true);
       setError(null);
       setDraft('');
-      await sendChatMessage(conversationId, text);
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+      await sendChatMessage(conversationId, text, undefined, replyId);
       const updated = await getChatMessages(conversationId);
       setMessages(updated);
     } catch (err: any) {
@@ -117,6 +122,9 @@ export default function MessageThreadScreen() {
       const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 0.8, copyToCacheDirectory: true });
       const uri = (result as any)?.assets?.[0]?.uri || (result as any)?.uri;
       if (!uri) return;
+
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
 
       // Optimistic local preview
       const tempId = `temp-${Date.now()}`;
@@ -140,7 +148,7 @@ export default function MessageThreadScreen() {
       } catch {
         // Attempt multipart upload as a fallback for URIs that can't be read as base64
         try {
-          const sent = await uploadChatImage(conversationId, uri);
+          const sent = await uploadChatImage(conversationId, uri, replyId);
           setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
           return;
         } catch {
@@ -150,7 +158,7 @@ export default function MessageThreadScreen() {
       }
 
       try {
-        const sent = await sendChatMessage(conversationId, '', dataUri);
+        const sent = await sendChatMessage(conversationId, '', dataUri, replyId);
         // Replace temp message with server message
         setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
       } catch (sendErr: any) {
@@ -168,6 +176,81 @@ export default function MessageThreadScreen() {
     setViewerType(payload.type);
     setViewerVisible(true);
   }, []);
+
+  const handlePickVideo = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your media library to send videos.');
+      const mediaTypesOption = ['videos'];
+
+      const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 0.8, copyToCacheDirectory: true });
+      const uri = (result as any)?.assets?.[0]?.uri || (result as any)?.uri;
+      if (!uri) return;
+
+      const replyId = replyingTo?.id;
+      setReplyingTo(null);
+
+      // Optimistic local preview
+      const tempId = `temp-${Date.now()}`;
+      const now = new Date().toISOString();
+      const localMsg: ChatMessage & { local?: boolean } = {
+        id: tempId,
+        text: uri,
+        senderId: currentUser.getProfile()?.id || 'me',
+        isMine: true,
+        isVideo: true,
+        createdAt: now,
+      };
+      setMessages((prev) => [...prev, localMsg]);
+
+      // Read file as base64; if that fails (Android content:// URIs), fallback to multipart upload
+      let dataUri: string | undefined;
+      try {
+        const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+        dataUri = `data:video/mp4;base64,${fileBase64}`;
+      } catch {
+        // Attempt multipart upload as a fallback
+        try {
+          const sent = await uploadChatImage(conversationId, uri, replyId);
+          setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
+          return;
+        } catch (uploadErr) {
+          console.error('Upload video failed', uploadErr);
+          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+          return Alert.alert('Video error', 'Could not read or upload the selected video. Please try a different video or grant permission.');
+        }
+      }
+
+      try {
+        const sent = await sendChatMessage(conversationId, '', dataUri, replyId);
+        setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
+      } catch (sendErr: any) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        Alert.alert('Send failed', sendErr?.message || 'Failed to send video');
+      }
+    } catch (err) {
+      console.error('Pick video failed', err);
+    }
+  };
+
+  const handlePressReplyPreview = useCallback((replyToId: string) => {
+    const idx = messages.findIndex((m) => m.id === replyToId);
+    if (idx !== -1) {
+      setHighlightedId(replyToId);
+      try {
+        flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+      } catch {
+        try {
+          flatListRef.current?.scrollToOffset({ offset: idx * 85, animated: true });
+        } catch {}
+      }
+      setTimeout(() => {
+        setHighlightedId(null);
+      }, 1500);
+    } else {
+      Alert.alert('Message not found', 'The replied-to message is no longer in this conversation window.');
+    }
+  }, [messages]);
 
   return (
     <ThemedView style={styles.container}>
@@ -193,10 +276,17 @@ export default function MessageThreadScreen() {
           </View>
         ) : (
             <FlatList
+            ref={flatListRef}
             data={messages}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.messageListContent}
             keyboardShouldPersistTaps="handled"
+            onScrollToIndexFailed={(info) => {
+              flatListRef.current?.scrollToOffset({
+                offset: info.highestMeasuredFrameIndex * 85,
+                animated: true,
+              });
+            }}
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Ionicons name="chatbubble-ellipses-outline" size={28} color="#7f93ae" />
@@ -213,6 +303,9 @@ export default function MessageThreadScreen() {
                   isOutgoing={Boolean(item.isMine)}
                   showAvatar={showAvatar}
                   onPressMedia={handleOpenMedia}
+                  onSwipeToReply={setReplyingTo}
+                  onPressReplyPreview={handlePressReplyPreview}
+                  highlighted={highlightedId === item.id}
                 />
               );
             }}
@@ -235,7 +328,31 @@ export default function MessageThreadScreen() {
           </View>
         ) : null}
 
-        <MessageComposer value={draft} onChangeText={setDraft} onSend={handleSend} sending={sending} onPickImage={handlePickImage} />
+        {replyingTo ? (
+          <View style={styles.replyPreviewBar}>
+            <View style={styles.replyBarBorder} />
+            <View style={styles.replyBarContent}>
+              <ThemedText style={styles.replyBarSender}>
+                Replying to {replyingTo.isMine ? 'yourself' : (sellerName || 'Seller')}
+              </ThemedText>
+              <ThemedText style={styles.replyBarText} numberOfLines={1}>
+                {replyingTo.text.startsWith('data:') || replyingTo.text.startsWith('http') ? (replyingTo.isImage ? '📷 Photo' : '🎥 Video') : replyingTo.text}
+              </ThemedText>
+            </View>
+            <Pressable style={styles.replyBarClose} onPress={() => setReplyingTo(null)}>
+              <Ionicons name="close-circle" size={20} color="#7f93ae" />
+            </Pressable>
+          </View>
+        ) : null}
+
+        <MessageComposer
+          value={draft}
+          onChangeText={setDraft}
+          onSend={handleSend}
+          sending={sending}
+          onPickImage={handlePickImage}
+          onPickVideo={handlePickVideo}
+        />
       </KeyboardAvoidingView>
 
       <MediaViewerModal
@@ -458,5 +575,37 @@ const styles = StyleSheet.create({
   },
   sendBtnPressed: {
     transform: [{ scale: 0.93 }],
+  },
+  replyPreviewBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#121c2a',
+    borderTopWidth: 1,
+    borderTopColor: '#263244',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+  },
+  replyBarBorder: {
+    width: 4,
+    height: 32,
+    backgroundColor: '#9df0a2',
+    borderRadius: 2,
+  },
+  replyBarContent: {
+    flex: 1,
+    paddingLeft: 10,
+  },
+  replyBarSender: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9df0a2',
+  },
+  replyBarText: {
+    fontSize: 12,
+    color: '#8da0bb',
+    marginTop: 2,
+  },
+  replyBarClose: {
+    padding: 4,
   },
 });

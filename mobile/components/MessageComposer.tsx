@@ -9,17 +9,22 @@ export default function MessageComposer({
   onSend,
   sending,
   onPickImage,
+  onPickVideo,
 }: {
   value: string;
   onChangeText: (t: string) => void;
   onSend: () => void;
   sending?: boolean;
   onPickImage?: () => void;
+  onPickVideo?: () => void;
 }) {
   return (
     <View style={styles.wrap}>
       <Pressable style={styles.leftIcon} onPress={() => onPickImage && onPickImage()}>
         <Ionicons name="image-outline" size={20} color="#9fb3c9" />
+      </Pressable>
+      <Pressable style={styles.leftIcon} onPress={() => onPickVideo && onPickVideo()}>
+        <Ionicons name="videocam-outline" size={20} color="#9fb3c9" />
       </Pressable>
       <TextInput
         value={value}

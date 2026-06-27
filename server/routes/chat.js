@@ -246,19 +246,42 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
 
     const messages = await Message.find({ conversation: conversationId })
       .sort({ createdAt: 1 })
-      .select('_id sender text createdAt')
+      .select('_id sender text createdAt replyTo')
+      .populate({
+        path: 'replyTo',
+        select: 'text sender createdAt',
+        populate: { path: 'sender', select: 'name' }
+      })
       .lean();
 
     const formatted = messages.map((message) => {
       const text = message.text || '';
       const isImage = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(text));
+      const isVideo = /\/uploads\/messages\/.*\.(mp4|mov|m4v|webm|avi)$/i.test(String(text));
+
+      let replyToData = null;
+      if (message.replyTo) {
+        const replyText = message.replyTo.text || '';
+        const replyIsImage = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(replyText));
+        const replyIsVideo = /\/uploads\/messages\/.*\.(mp4|mov|m4v|webm|avi)$/i.test(String(replyText));
+        replyToData = {
+          id: String(message.replyTo._id),
+          text: replyText,
+          senderName: message.replyTo.sender?.name || 'Someone',
+          isImage: replyIsImage,
+          isVideo: replyIsVideo
+        };
+      }
+
       return {
         id: String(message._id),
         text: text,
         senderId: String(message.sender),
         isMine: String(message.sender) === me,
         isImage: Boolean(isImage),
+        isVideo: Boolean(isVideo),
         createdAt: message.createdAt,
+        replyTo: replyToData,
       };
     });
 
@@ -290,16 +313,30 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
     let text = normalizeText(req.body?.text || '');
 
     // If a multipart file was uploaded (field 'image'), prefer that.
-    if (req.file && req.file.buffer && typeof req.file.mimetype === 'string' && req.file.mimetype.startsWith('image/')) {
+    if (req.file && req.file.buffer && typeof req.file.mimetype === 'string') {
       try {
-        const buffer = req.file.buffer;
-        const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`;
-        const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
-        await sharp(buffer).jpeg({ quality: 80, mozjpeg: true }).toFile(outPath);
-        text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
-      } catch (imgErr) {
-        console.error('Chat image write failed', imgErr);
-        return res.status(500).json({ message: 'Failed to process image' });
+        const isImg = req.file.mimetype.startsWith('image/');
+        const isVid = req.file.mimetype.startsWith('video/');
+
+        if (isImg) {
+          const buffer = req.file.buffer;
+          const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`;
+          const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
+          await sharp(buffer).jpeg({ quality: 80, mozjpeg: true }).toFile(outPath);
+          text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
+        } else if (isVid) {
+          const buffer = req.file.buffer;
+          const ext = req.file.originalname ? path.extname(req.file.originalname) : '.mp4';
+          const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext || '.mp4'}`;
+          const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
+          fs.writeFileSync(outPath, buffer);
+          text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
+        } else {
+          return res.status(400).json({ message: 'Unsupported file type. Only images and videos are supported.' });
+        }
+      } catch (err) {
+        console.error('Chat file write failed', err);
+        return res.status(500).json({ message: 'Failed to process media file' });
       }
     } else {
       const dataUri = req.body?.dataUri;
@@ -307,22 +344,52 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
         return res.status(400).json({ message: 'Message text or image is required' });
       }
 
-      // If dataUri present, persist image and set text to its public URL
+      // If dataUri present, persist image or video and set text to its public URL
       if (dataUri && typeof dataUri === 'string' && dataUri.startsWith('data:')) {
-        const m = dataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
-        if (!m) return res.status(400).json({ message: 'Invalid image data' });
-        const base64 = m[2];
-        const buffer = Buffer.from(base64, 'base64');
-        const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`;
-        const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
-        try {
-          await sharp(buffer).jpeg({ quality: 80, mozjpeg: true }).toFile(outPath);
-          text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
-        } catch (imgErr) {
-          console.error('Chat image write failed', imgErr);
-          return res.status(500).json({ message: 'Failed to process image' });
+        const isVideo = dataUri.startsWith('data:video/');
+        if (isVideo) {
+          const m = dataUri.match(/^data:(video\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+          if (!m) return res.status(400).json({ message: 'Invalid video data' });
+          const base64 = m[2];
+          const buffer = Buffer.from(base64, 'base64');
+          const ext = m[1].split('/')[1] || 'mp4';
+          const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+          const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
+          try {
+            fs.writeFileSync(outPath, buffer);
+            text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
+          } catch (vidErr) {
+            console.error('Chat video write failed', vidErr);
+            return res.status(500).json({ message: 'Failed to process video' });
+          }
+        } else {
+          const m = dataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+          if (!m) return res.status(400).json({ message: 'Invalid image data' });
+          const base64 = m[2];
+          const buffer = Buffer.from(base64, 'base64');
+          const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`;
+          const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
+          try {
+            await sharp(buffer).jpeg({ quality: 80, mozjpeg: true }).toFile(outPath);
+            text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
+          } catch (imgErr) {
+            console.error('Chat image write failed', imgErr);
+            return res.status(500).json({ message: 'Failed to process image' });
+          }
         }
       }
+    }
+
+    let replyTo = req.body?.replyTo;
+    if (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) {
+      const repliedMsg = await Message.findById(replyTo);
+      if (repliedMsg) {
+        replyTo = repliedMsg._id;
+      } else {
+        replyTo = undefined;
+      }
+    } else {
+      replyTo = undefined;
     }
 
     const conversation = await Conversation.findById(conversationId);
@@ -341,6 +408,7 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
       conversation: conversation._id,
       sender: me,
       text,
+      replyTo,
     });
 
     conversation.lastMessage = text;
@@ -365,7 +433,8 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
       const senderUser = await User.findById(me).select('name');
       const senderName = senderUser?.name || 'Someone';
       const isImg = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(text));
-      const bodyText = isImg ? '📷 Sent an image' : text;
+      const isVid = /\/uploads\/messages\/.*\.(mp4|mov|m4v|webm|avi)$/i.test(String(text));
+      const bodyText = isImg ? '📷 Sent a photo' : (isVid ? '🎥 Sent a video' : text);
 
       sendPushNotification(
         recipientId,
@@ -380,6 +449,24 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
     }
 
     const isImage = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(message.text));
+    const isVideo = /\/uploads\/messages\/.*\.(mp4|mov|m4v|webm|avi)$/i.test(String(message.text));
+
+    let replyToData = null;
+    if (replyTo) {
+      const populatedReply = await Message.findById(replyTo).populate('sender', 'name').lean();
+      if (populatedReply) {
+        const replyText = populatedReply.text || '';
+        const replyIsImage = /\/uploads\/messages\/.*\.(jpg|jpeg|png|webp)$/i.test(String(replyText));
+        const replyIsVideo = /\/uploads\/messages\/.*\.(mp4|mov|m4v|webm|avi)$/i.test(String(replyText));
+        replyToData = {
+          id: String(populatedReply._id),
+          text: replyText,
+          senderName: populatedReply.sender?.name || 'Someone',
+          isImage: replyIsImage,
+          isVideo: replyIsVideo
+        };
+      }
+    }
 
     res.status(201).json({
       message: {
@@ -388,7 +475,9 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
         senderId: String(message.sender),
         isMine: true,
         isImage: Boolean(isImage),
+        isVideo: Boolean(isVideo),
         createdAt: message.createdAt,
+        replyTo: replyToData,
       },
     });
   } catch (err) {

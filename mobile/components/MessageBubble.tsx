@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { PanGestureHandler, State, PanGestureHandlerStateChangeEvent } from 'react-native-gesture-handler';
+import * as Haptics from 'expo-haptics';
+
 import { ThemedText } from '@/components/themed-text';
 import LocalAvatar from '@/components/LocalAvatar';
 import type { ChatMessage } from '@/utils/api';
@@ -23,7 +26,8 @@ function getMessageMedia(message: ChatMessage) {
   }
 
   const isVideo = Boolean(
-    lower.startsWith('data:video/')
+    message.isVideo
+    || lower.startsWith('data:video/')
     || /\.(mp4|mov|m4v|webm|avi)(\?|#|$)/i.test(lower)
     || /\/uploads\/messages\/.*\.(mp4|mov|m4v|webm|avi)(\?|#|$)/i.test(lower)
   );
@@ -39,14 +43,23 @@ export default function MessageBubble({
   isOutgoing,
   showAvatar,
   onPressMedia,
+  onSwipeToReply,
+  onPressReplyPreview,
+  highlighted,
 }: {
   message: ChatMessage;
   isOutgoing: boolean;
   showAvatar?: boolean;
   onPressMedia?: (payload: { uri: string; type: 'image' | 'video' }) => void;
+  onSwipeToReply?: (message: ChatMessage) => void;
+  onPressReplyPreview?: (replyToId: string) => void;
+  highlighted?: boolean;
 }) {
   const entry = useMemo(() => new Animated.Value(0), []);
   const media = useMemo(() => getMessageMedia(message), [message]);
+
+  const dragX = useRef(new Animated.Value(0)).current;
+  const hasTriggeredHaptic = useRef(false);
 
   useEffect(() => {
     Animated.timing(entry, {
@@ -65,89 +78,203 @@ export default function MessageBubble({
     }
   }, [message.createdAt]);
 
-  return (
-    <Animated.View
-      style={[
-        styles.wrap,
-        { opacity: entry, transform: [{ translateY: entry.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] },
-        isOutgoing ? styles.rowRight : styles.rowLeft,
-      ]}
-    >
-      {!isOutgoing && showAvatar ? (
-        <View style={styles.avatarWrap}>
-          <LocalAvatar id={message.senderId} size={36} />
+  const onGestureEvent = Animated.event(
+    [{ nativeEvent: { translationX: dragX } }],
+    {
+      useNativeDriver: true,
+      listener: (event: any) => {
+        const tx = event.nativeEvent.translationX;
+        if (tx < 0) {
+          dragX.setValue(0);
+          return;
+        }
+        if (tx > 90) {
+          dragX.setValue(90);
+        }
+        if (tx >= 60 && !hasTriggeredHaptic.current) {
+          hasTriggeredHaptic.current = true;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } else if (tx < 60 && hasTriggeredHaptic.current) {
+          hasTriggeredHaptic.current = false;
+        }
+      }
+    }
+  );
+
+  const onHandlerStateChange = (event: PanGestureHandlerStateChangeEvent) => {
+    const { state, translationX } = event.nativeEvent;
+    if (state === State.END || state === State.CANCELLED || state === State.FAILED) {
+      if (translationX >= 60 && state === State.END) {
+        onSwipeToReply?.(message);
+      }
+      hasTriggeredHaptic.current = false;
+      Animated.spring(dragX, {
+        toValue: 0,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      }).start();
+    }
+  };
+
+  const renderReplyPreview = (reply: any, isMineBubble: boolean) => {
+    return (
+      <Pressable
+        onPress={() => onPressReplyPreview && onPressReplyPreview(reply.id)}
+        style={[
+          styles.replyPreview,
+          isMineBubble ? styles.replyPreviewMine : styles.replyPreviewOther
+        ]}
+      >
+        <View style={[styles.replyBorder, isMineBubble ? styles.replyBorderMine : styles.replyBorderOther]} />
+        <View style={styles.replyContent}>
+          <Text style={[styles.replySender, isMineBubble ? styles.replySenderMine : styles.replySenderOther]} numberOfLines={1}>
+            {reply.senderName}
+          </Text>
+          <Text style={[styles.replyText, isMineBubble ? styles.replyTextMine : styles.replyTextOther]} numberOfLines={1}>
+            {reply.isImage ? '📷 Photo' : (reply.isVideo ? '🎥 Video' : reply.text)}
+          </Text>
         </View>
-      ) : null}
+      </Pressable>
+    );
+  };
 
-      <View style={[styles.bubbleWrap, isOutgoing ? styles.bubbleWrapRight : styles.bubbleWrapLeft]}>
-        {(() => {
-          if (media?.type === 'image') {
-            return (
-              <Pressable
-                onPress={() => onPressMedia?.(media)}
-                style={({ pressed }) => [styles.bubble, isOutgoing ? styles.bubbleRightImage : styles.bubbleLeftImage, pressed && styles.mediaPressed]}
-              >
-                <Image source={{ uri: media.uri }} style={styles.image} contentFit="cover" cachePolicy="memory-disk" />
-                <View style={styles.mediaHintBadge}>
-                  <Ionicons name="expand-outline" size={12} color="#fff" />
-                  <Text style={styles.mediaHintText}>Open</Text>
-                </View>
-                <Text style={[styles.meta, isOutgoing ? styles.metaRight : styles.metaLeft]}>{time}</Text>
-              </Pressable>
-            );
-          }
+  const renderDoubleCheckmarks = (isMine: boolean) => {
+    if (!isMine) return null;
+    return (
+      <Ionicons
+        name="checkmark-done"
+        size={14}
+        color="#13321b"
+        style={{ marginLeft: 4, alignSelf: 'flex-end' }}
+      />
+    );
+  };
 
-          if (media?.type === 'video') {
-            return (
-              <Pressable
-                onPress={() => onPressMedia?.(media)}
-                style={({ pressed }) => [styles.bubble, isOutgoing ? styles.bubbleRightVideo : styles.bubbleLeftVideo, pressed && styles.mediaPressed]}
-              >
-                <LinearGradient
-                  colors={isOutgoing ? ['#b6f6bf', '#70d98d'] : ['#162230', '#101822']}
-                  style={styles.videoPreview}
-                >
-                  <View style={styles.videoIconCircle}>
-                    <Ionicons name="play" size={18} color={isOutgoing ? '#0b1c10' : '#f1f6ff'} />
-                  </View>
-                  <ThemedText style={[styles.videoLabel, isOutgoing ? styles.videoLabelOutgoing : styles.videoLabelIncoming]}>
-                    Video
-                  </ThemedText>
-                  <ThemedText style={[styles.videoSubLabel, isOutgoing ? styles.videoLabelOutgoing : styles.videoLabelIncoming]} numberOfLines={1}>
-                    Tap to open fullscreen
-                  </ThemedText>
-                </LinearGradient>
-                <Text style={[styles.meta, isOutgoing ? styles.metaRight : styles.metaLeft]}>{time}</Text>
-              </Pressable>
-            );
-          }
+  return (
+    <PanGestureHandler
+      activeOffsetX={[-10, 10]}
+      failOffsetY={[-10, 10]}
+      onGestureEvent={onGestureEvent}
+      onHandlerStateChange={onHandlerStateChange}
+      enabled={!!onSwipeToReply}
+    >
+      <Animated.View
+        style={[
+          styles.wrap,
+          { opacity: entry, transform: [{ translateY: entry.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] },
+          isOutgoing ? styles.rowRight : styles.rowLeft,
+          highlighted && styles.highlightedWrap,
+        ]}
+      >
+        {onSwipeToReply && (
+          <Animated.View style={[styles.replyIconContainer, {
+            opacity: dragX.interpolate({ inputRange: [0, 60], outputRange: [0, 1], extrapolate: 'clamp' }),
+            transform: [{
+              scale: dragX.interpolate({ inputRange: [0, 60], outputRange: [0.6, 1], extrapolate: 'clamp' })
+            }, {
+              translateX: dragX.interpolate({ inputRange: [0, 60], outputRange: [-25, 0], extrapolate: 'clamp' })
+            }]
+          }]}>
+            <Ionicons name="arrow-undo-outline" size={20} color="#9df0a2" />
+          </Animated.View>
+        )}
 
-          if (isOutgoing) {
-            return (
-              <LinearGradient colors={["#9df0a2", "#5fd37e"]} style={[styles.bubble, styles.bubbleRight]}>
-                <ThemedText style={[styles.text, styles.textRight]}>{message.text}</ThemedText>
-                <Text style={[styles.meta, styles.metaRight]}>{time}</Text>
-              </LinearGradient>
-            );
-          }
-
-          return (
-            <View style={[styles.bubble, styles.bubbleLeft]}>
-              <ThemedText style={[styles.text, styles.textLeft]}>{message.text}</ThemedText>
-              <Text style={[styles.meta, styles.metaLeft]}>{time}</Text>
+        <Animated.View style={[{ flex: 1, flexDirection: 'row', justifyContent: isOutgoing ? 'flex-end' : 'flex-start', transform: [{ translateX: dragX }] }]}>
+          {!isOutgoing && showAvatar ? (
+            <View style={styles.avatarWrap}>
+              <LocalAvatar id={message.senderId} size={36} />
             </View>
-          );
-        })()}
-      </View>
-    </Animated.View>
+          ) : null}
+
+          <View style={[styles.bubbleWrap, isOutgoing ? styles.bubbleWrapRight : styles.bubbleWrapLeft]}>
+            {(() => {
+              if (media?.type === 'image') {
+                return (
+                  <Pressable
+                    onPress={() => onPressMedia?.(media)}
+                    style={({ pressed }) => [styles.bubble, isOutgoing ? styles.bubbleRightImage : styles.bubbleLeftImage, pressed && styles.mediaPressed]}
+                  >
+                    {message.replyTo && renderReplyPreview(message.replyTo, isOutgoing)}
+                    <Image source={{ uri: media.uri }} style={styles.image} contentFit="cover" cachePolicy="memory-disk" />
+                    <View style={styles.mediaHintBadge}>
+                      <Ionicons name="expand-outline" size={12} color="#fff" />
+                      <Text style={styles.mediaHintText}>Open</Text>
+                    </View>
+                    <View style={styles.metaRow}>
+                      <Text style={[styles.meta, isOutgoing ? styles.metaRight : styles.metaLeft, { marginTop: 0 }]}>{time}</Text>
+                      {renderDoubleCheckmarks(isOutgoing)}
+                    </View>
+                  </Pressable>
+                );
+              }
+
+              if (media?.type === 'video') {
+                return (
+                  <Pressable
+                    onPress={() => onPressMedia?.(media)}
+                    style={({ pressed }) => [styles.bubble, isOutgoing ? styles.bubbleRightVideo : styles.bubbleLeftVideo, pressed && styles.mediaPressed]}
+                  >
+                    {message.replyTo && renderReplyPreview(message.replyTo, isOutgoing)}
+                    <LinearGradient
+                      colors={isOutgoing ? ['#b6f6bf', '#70d98d'] : ['#162230', '#101822']}
+                      style={styles.videoPreview}
+                    >
+                      <View style={styles.videoIconCircle}>
+                        <Ionicons name="play" size={18} color={isOutgoing ? '#0b1c10' : '#f1f6ff'} />
+                      </View>
+                      <ThemedText style={[styles.videoLabel, isOutgoing ? styles.videoLabelOutgoing : styles.videoLabelIncoming]}>
+                        Video
+                      </ThemedText>
+                      <ThemedText style={[styles.videoSubLabel, isOutgoing ? styles.videoLabelOutgoing : styles.videoLabelIncoming]} numberOfLines={1}>
+                        Tap to open fullscreen
+                      </ThemedText>
+                    </LinearGradient>
+                    <View style={styles.metaRow}>
+                      <Text style={[styles.meta, isOutgoing ? styles.metaRight : styles.metaLeft, { marginTop: 0 }]}>{time}</Text>
+                      {renderDoubleCheckmarks(isOutgoing)}
+                    </View>
+                  </Pressable>
+                );
+              }
+
+              if (isOutgoing) {
+                return (
+                  <LinearGradient colors={["#9df0a2", "#5fd37e"]} style={[styles.bubble, styles.bubbleRight]}>
+                    {message.replyTo && renderReplyPreview(message.replyTo, true)}
+                    <ThemedText style={[styles.text, styles.textRight]}>{message.text}</ThemedText>
+                    <View style={styles.metaRow}>
+                      <Text style={[styles.meta, styles.metaRight, { marginTop: 0 }]}>{time}</Text>
+                      {renderDoubleCheckmarks(true)}
+                    </View>
+                  </LinearGradient>
+                );
+              }
+
+              return (
+                <View style={[styles.bubble, styles.bubbleLeft]}>
+                  {message.replyTo && renderReplyPreview(message.replyTo, false)}
+                  <ThemedText style={[styles.text, styles.textLeft]}>{message.text}</ThemedText>
+                  <Text style={[styles.meta, styles.metaLeft]}>{time}</Text>
+                </View>
+              );
+            })()}
+          </View>
+        </Animated.View>
+      </Animated.View>
+    </PanGestureHandler>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
     width: '100%',
-    marginVertical: 6,
+    marginVertical: 4,
     paddingHorizontal: 8,
+  },
+  highlightedWrap: {
+    backgroundColor: 'rgba(157, 240, 162, 0.15)',
+    borderRadius: 12,
   },
   rowLeft: {
     flexDirection: 'row',
@@ -283,5 +410,71 @@ const styles = StyleSheet.create({
   },
   metaLeft: {
     color: '#7f93ae',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginTop: 6,
+  },
+  replyIconContainer: {
+    position: 'absolute',
+    left: -35,
+    top: '35%',
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 0,
+  },
+  replyPreview: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.06)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 6,
+    maxWidth: 220,
+  },
+  replyPreviewMine: {
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+  },
+  replyPreviewOther: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  replyBorder: {
+    width: 3,
+    borderTopLeftRadius: 3,
+    borderBottomLeftRadius: 3,
+  },
+  replyBorderMine: {
+    backgroundColor: '#05210b',
+  },
+  replyBorderOther: {
+    backgroundColor: '#9df0a2',
+  },
+  replyContent: {
+    flex: 1,
+    paddingLeft: 8,
+  },
+  replySender: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  replySenderMine: {
+    color: '#05210b',
+  },
+  replySenderOther: {
+    color: '#9df0a2',
+  },
+  replyText: {
+    fontSize: 10,
+    marginTop: 1,
+  },
+  replyTextMine: {
+    color: '#1e3823',
+  },
+  replyTextOther: {
+    color: '#8da0bb',
   },
 });

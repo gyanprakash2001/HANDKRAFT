@@ -1822,7 +1822,15 @@ export interface ChatMessage {
   senderId: string;
   isMine: boolean;
   isImage?: boolean;
+  isVideo?: boolean;
   createdAt: string;
+  replyTo?: {
+    id: string;
+    text: string;
+    senderName: string;
+    isImage: boolean;
+    isVideo: boolean;
+  } | null;
 }
 
 export async function ensureChatConversation(payload: {
@@ -1884,10 +1892,11 @@ export async function getChatMessages(conversationId: string): Promise<ChatMessa
   return data.messages || [];
 }
 
-export async function sendChatMessage(conversationId: string, text: string, dataUri?: string): Promise<ChatMessage> {
+export async function sendChatMessage(conversationId: string, text: string, dataUri?: string, replyToId?: string): Promise<ChatMessage> {
   const body: any = {};
   if (dataUri) body.dataUri = dataUri;
   else body.text = text;
+  if (replyToId) body.replyTo = replyToId;
 
   const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages`, {
     method: 'POST',
@@ -2037,7 +2046,7 @@ async function fetchFormUpload(url: string, uploadTarget: string, fieldName: str
   }
 }
 
-export async function uploadChatImage(conversationId: string, fileUri: string): Promise<ChatMessage> {
+export async function uploadChatImage(conversationId: string, fileUri: string, replyToId?: string): Promise<ChatMessage> {
   const headersObj = await authHeaders();
   const headers: Record<string, string> = {};
   if (headersObj && headersObj.Authorization) headers.Authorization = headersObj.Authorization;
@@ -2052,6 +2061,9 @@ export async function uploadChatImage(conversationId: string, fileUri: string): 
     httpMethod: 'POST',
     fieldName: 'image',
   };
+  if (replyToId) {
+    uploadOpts.parameters = { replyTo: replyToId };
+  }
   const uploadType =
     (FileSystem as any).FileSystemUploadType?.MULTIPART ??
     (FileSystem as any).UploadType?.MULTIPART;
