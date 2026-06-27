@@ -8,6 +8,7 @@ const conversationSchema = new mongoose.Schema(
         user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
         lastReadAt: { type: Date, default: Date.now },
         unreadCount: { type: Number, default: 0, min: 0 },
+        clearedAt: { type: Date, default: null },
       },
     ],
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },

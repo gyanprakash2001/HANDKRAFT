@@ -179,8 +179,14 @@ router.get('/conversations', auth, async (req, res) => {
 
     const formatted = conversations.map((conversation) => {
       ensureParticipantStates(conversation);
-      const other = (conversation.participants || []).find((user) => String(user._id) !== me);
       const state = (conversation.participantStates || []).find((entry) => String(entry.user) === me);
+      
+      // Hide conversation if it has been cleared/deleted by the user and there are no new messages since then
+      if (state && state.clearedAt && conversation.lastMessageAt && new Date(conversation.lastMessageAt) <= new Date(state.clearedAt)) {
+        return null;
+      }
+
+      const other = (conversation.participants || []).find((user) => String(user._id) !== me);
       const isSellerSide = Boolean(conversation.product?.seller && String(conversation.product.seller) === me);
 
       return {
@@ -215,7 +221,7 @@ router.get('/conversations', auth, async (req, res) => {
       };
     });
 
-    res.json({ conversations: formatted });
+    res.json({ conversations: formatted.filter(Boolean) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });
@@ -250,7 +256,17 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
       { $addToSet: { readBy: me } }
     );
 
-    const messages = await Message.find({ conversation: conversationId })
+    const query = {
+      conversation: conversationId,
+      deletedBy: { $ne: me }
+    };
+
+    const myState = (conversation.participantStates || []).find((entry) => String(entry.user) === me);
+    if (myState && myState.clearedAt) {
+      query.createdAt = { $gt: myState.clearedAt };
+    }
+
+    const messages = await Message.find(query)
       .sort({ createdAt: 1 })
       .select('_id sender text createdAt replyTo reactions readBy')
       .populate({
@@ -332,8 +348,17 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
     // If a multipart file was uploaded (field 'image'), prefer that.
     if (req.file && req.file.buffer && typeof req.file.mimetype === 'string') {
       try {
-        const isImg = req.file.mimetype.startsWith('image/');
-        const isVid = req.file.mimetype.startsWith('video/');
+        let isImg = req.file.mimetype.startsWith('image/');
+        let isVid = req.file.mimetype.startsWith('video/');
+
+        // Fallback check based on filename extension if mimetype is generic/octet-stream
+        if (!isImg && !isVid && req.file.originalname) {
+          const ext = path.extname(req.file.originalname).toLowerCase();
+          const imgExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+          const vidExts = ['.mp4', '.mov', '.m4v', '.webm', '.avi'];
+          if (imgExts.includes(ext)) isImg = true;
+          if (vidExts.includes(ext)) isVid = true;
+        }
 
         if (isImg) {
           const buffer = req.file.buffer;
@@ -356,13 +381,46 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
         return res.status(500).json({ message: 'Failed to process media file' });
       }
     } else {
+      const b64 = req.body?.base64 || req.body?.fileBase64 || req.body?.file || null;
       const dataUri = req.body?.dataUri;
-      if (!text && !dataUri) {
+      if (!text && !dataUri && !b64) {
         return res.status(400).json({ message: 'Message text or image is required' });
       }
 
-      // If dataUri present, persist image or video and set text to its public URL
-      if (dataUri && typeof dataUri === 'string' && dataUri.startsWith('data:')) {
+      // If base64 payload is provided, process it
+      if (b64 && typeof b64 === 'string') {
+        const mime = req.body.mimeType || req.body.mimetype || 'application/octet-stream';
+        let isImg = mime.startsWith('image/');
+        let isVid = mime.startsWith('video/');
+        const providedName = String(req.body.filename || req.body.name || `upload-${Date.now()}`);
+        const ext = path.extname(providedName).toLowerCase() || (isImg ? '.jpg' : '.mp4');
+
+        if (!isImg && !isVid) {
+          const imgExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+          const vidExts = ['.mp4', '.mov', '.m4v', '.webm', '.avi'];
+          if (imgExts.includes(ext)) isImg = true;
+          if (vidExts.includes(ext)) isVid = true;
+        }
+
+        if (isImg || isVid) {
+          try {
+            const buffer = Buffer.from(b64, 'base64');
+            const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
+            const outPath = path.join(MESSAGE_UPLOAD_DIR, fileName);
+            if (isImg) {
+              await sharp(buffer).jpeg({ quality: 80, mozjpeg: true }).toFile(outPath);
+            } else {
+              fs.writeFileSync(outPath, buffer);
+            }
+            text = `${req.protocol}://${req.get('host')}/uploads/messages/${fileName}`;
+          } catch (err) {
+            console.error('Chat base64 write failed', err);
+            return res.status(500).json({ message: 'Failed to process fallback media file' });
+          }
+        } else {
+          return res.status(400).json({ message: 'Unsupported file type. Only images and videos are supported.' });
+        }
+      } else if (dataUri && typeof dataUri === 'string' && dataUri.startsWith('data:')) {
         const isVideo = dataUri.startsWith('data:video/');
         if (isVideo) {
           const m = dataUri.match(/^data:(video\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
@@ -674,39 +732,46 @@ router.get('/conversations/:id/pinned', auth, async (req, res) => {
   }
 });
 
-// DELETE /api/chat/conversations/:id/messages/:messageId
-router.delete('/conversations/:id/messages/:messageId', auth, async (req, res) => {
+// Handler for deleting a single message
+async function deleteMessageHandler(req, res) {
   try {
     const me = String(req.user._id);
     const { id: conversationId, messageId } = req.params;
+    const mode = String(req.query.mode || req.body.mode || 'me').trim().toLowerCase();
 
     const message = await Message.findById(messageId);
     if (!message) {
       return res.status(404).json({ message: 'Message not found' });
     }
 
-    if (String(message.sender) !== me) {
-      return res.status(403).json({ message: 'Unauthorized to delete this message' });
-    }
-
-    await Message.deleteOne({ _id: messageId });
-
-    // Update conversation lastMessage if needed
-    const conversation = await Conversation.findById(conversationId);
-    if (conversation) {
-      const lastMsg = await Message.findOne({ conversation: conversationId }).sort({ createdAt: -1 });
-      conversation.lastMessage = lastMsg ? lastMsg.text : '';
-      conversation.lastMessageAt = lastMsg ? lastMsg.createdAt : conversation.createdAt;
-      
-      if (conversation.pinnedMessageId && String(conversation.pinnedMessageId) === messageId) {
-        conversation.pinnedMessageId = null;
+    if (mode === 'everyone') {
+      if (String(message.sender) !== me) {
+        return res.status(403).json({ message: 'Unauthorized to delete this message for everyone' });
       }
-      await conversation.save();
-    }
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`conv:${conversationId}`).emit('message-deleted', { conversationId, messageId });
+      await Message.deleteOne({ _id: messageId });
+
+      // Update conversation lastMessage if needed
+      const conversation = await Conversation.findById(conversationId);
+      if (conversation) {
+        const lastMsg = await Message.findOne({ conversation: conversationId }).sort({ createdAt: -1 });
+        conversation.lastMessage = lastMsg ? lastMsg.text : '';
+        conversation.lastMessageAt = lastMsg ? lastMsg.createdAt : conversation.createdAt;
+        
+        if (conversation.pinnedMessageId && String(conversation.pinnedMessageId) === messageId) {
+          conversation.pinnedMessageId = null;
+        }
+        await conversation.save();
+      }
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`conv:${conversationId}`).emit('message-deleted', { conversationId, messageId });
+      }
+    } else {
+      // mode === 'me'
+      // Add user to the deletedBy array for this message
+      await Message.updateOne({ _id: messageId }, { $addToSet: { deletedBy: me } });
     }
 
     res.json({ message: 'Message deleted successfully' });
@@ -714,10 +779,10 @@ router.delete('/conversations/:id/messages/:messageId', auth, async (req, res) =
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });
   }
-});
+}
 
-// DELETE /api/chat/conversations/:id
-router.delete('/conversations/:id', auth, async (req, res) => {
+// Handler for deleting/clearing an entire conversation
+async function deleteConversationHandler(req, res) {
   try {
     const me = String(req.user._id);
     const { id: conversationId } = req.params;
@@ -732,12 +797,22 @@ router.delete('/conversations/:id', auth, async (req, res) => {
       return res.status(403).json({ message: 'Unauthorized' });
     }
 
-    await Message.deleteMany({ conversation: conversationId });
-    await Conversation.deleteOne({ _id: conversationId });
+    // Instead of deleting from DB which deletes it for both users:
+    // 1. Add current user to `deletedBy` for all existing messages in this conversation
+    await Message.updateMany({ conversation: conversationId }, { $addToSet: { deletedBy: me } });
+
+    // 2. Set clearedAt to current date/time for the participant
+    ensureParticipantStates(conversation);
+    const myState = (conversation.participantStates || []).find((state) => String(state.user) === me);
+    if (myState) {
+      myState.clearedAt = new Date();
+      myState.unreadCount = 0;
+      await conversation.save();
+    }
 
     const io = req.app.get('io');
     if (io) {
-      io.to(`conv:${conversationId}`).emit('conversation-deleted', { conversationId });
+      io.to(`conv:${conversationId}`).emit('conversation-deleted', { conversationId, userId: me });
     }
 
     res.json({ message: 'Conversation deleted successfully' });
@@ -745,6 +820,18 @@ router.delete('/conversations/:id', auth, async (req, res) => {
     console.error(err);
     res.status(500).json({ message: err.message || 'Server error' });
   }
-});
+}
+
+// DELETE /api/chat/conversations/:id/messages/:messageId
+router.delete('/conversations/:id/messages/:messageId', auth, deleteMessageHandler);
+
+// POST /api/chat/conversations/:id/messages/:messageId/delete (compatibility fallback)
+router.post('/conversations/:id/messages/:messageId/delete', auth, deleteMessageHandler);
+
+// DELETE /api/chat/conversations/:id
+router.delete('/conversations/:id', auth, deleteConversationHandler);
+
+// POST /api/chat/conversations/:id/delete (compatibility fallback)
+router.post('/conversations/:id/delete', auth, deleteConversationHandler);
 
 module.exports = router;

@@ -103,15 +103,13 @@ export default function MessageOptionsModal({
                   <ThemedText style={styles.actionText}>Copy Text</ThemedText>
                 </Pressable>
 
-                {isMine && (
-                  <Pressable
-                    style={({ pressed }) => [styles.actionItem, pressed && styles.actionPressed]}
-                    onPress={() => handleAction(onDelete)}
-                  >
-                    <Ionicons name="trash-outline" size={20} color="#ff6b6b" />
-                    <ThemedText style={[styles.actionText, { color: '#ff6b6b' }]}>Delete Message</ThemedText>
-                  </Pressable>
-                )}
+                <Pressable
+                  style={({ pressed }) => [styles.actionItem, pressed && styles.actionPressed]}
+                  onPress={() => handleAction(onDelete)}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#ff6b6b" />
+                  <ThemedText style={[styles.actionText, { color: '#ff6b6b' }]}>Delete Message</ThemedText>
+                </Pressable>
 
                 <Pressable
                   style={({ pressed }) => [styles.actionItem, pressed && styles.actionPressed, styles.cancelItem]}

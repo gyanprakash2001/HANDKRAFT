@@ -467,12 +467,65 @@ export default function MessageThreadScreen() {
   const handleDeleteMessage = async () => {
     if (!activeOptionMessage) return;
     const msgId = activeOptionMessage.id;
-    try {
-      await deleteChatMessage(conversationId, msgId);
-      setMessages(prev => prev.filter(m => m.id !== msgId));
-      setReplyingTo(prev => prev && prev.id === msgId ? null : prev);
-    } catch (err: any) {
-      showThemedAlert('Error', err?.message || 'Failed to delete message');
+    const isMine = activeOptionMessage.senderId === myId;
+
+    if (isMine) {
+      // User's own message: show options to delete for everyone, delete for me, or cancel
+      showThemedAlert(
+        'Delete Message',
+        'Do you want to delete this message for everyone or just for yourself?',
+        [
+          {
+            text: 'Delete for Everyone',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteChatMessage(conversationId, msgId, 'everyone');
+                setMessages(prev => prev.filter(m => m.id !== msgId));
+                setReplyingTo(prev => prev && prev.id === msgId ? null : prev);
+              } catch (err: any) {
+                showThemedAlert('Error', err?.message || 'Failed to delete message');
+              }
+            }
+          },
+          {
+            text: 'Delete for Me',
+            style: 'default',
+            onPress: async () => {
+              try {
+                await deleteChatMessage(conversationId, msgId, 'me');
+                setMessages(prev => prev.filter(m => m.id !== msgId));
+                setReplyingTo(prev => prev && prev.id === msgId ? null : prev);
+              } catch (err: any) {
+                showThemedAlert('Error', err?.message || 'Failed to delete message');
+              }
+            }
+          },
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
+    } else {
+      // Someone else's message: show options to delete for me, or cancel
+      showThemedAlert(
+        'Delete Message',
+        'Do you want to delete this message for yourself? The other participant will still be able to see it.',
+        [
+          {
+            text: 'Delete for Me',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteChatMessage(conversationId, msgId, 'me');
+                setMessages(prev => prev.filter(m => m.id !== msgId));
+                setReplyingTo(prev => prev && prev.id === msgId ? null : prev);
+              } catch (err: any) {
+                showThemedAlert('Error', err?.message || 'Failed to delete message');
+              }
+            }
+          },
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
     }
   };
 

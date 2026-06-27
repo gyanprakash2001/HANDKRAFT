@@ -2065,10 +2065,14 @@ export async function uploadChatImage(conversationId: string, fileUri: string, r
   const prepared = await prepareLocalUploadUri(fileUri);
   const uploadTarget = prepared.uri;
 
+  const filename = String(uploadTarget).split('/').pop() || '';
+  const mimeType = guessMimeTypeFromName(filename);
+
   const uploadOpts: any = {
     headers,
     httpMethod: 'POST',
     fieldName: 'image',
+    mimeType: mimeType,
     uploadType: 1, // FileSystemUploadType.MULTIPART
   };
   if (replyToId) {
@@ -2607,25 +2611,50 @@ export async function getPinnedMessage(conversationId: string): Promise<{ pinned
   return res.json();
 }
 
-export async function deleteChatMessage(conversationId: string, messageId: string): Promise<any> {
-  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}`, {
-    method: 'DELETE',
+export async function deleteChatMessage(conversationId: string, messageId: string, mode?: 'me' | 'everyone'): Promise<any> {
+  const queryParam = mode ? `?mode=${mode}` : '';
+  try {
+    const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}${queryParam}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (e) {
+    // Fallback on request level error
+  }
+
+  // Fallback to POST if DELETE is blocked/unsupported
+  const fallbackRes = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}/delete${queryParam}`, {
+    method: 'POST',
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
+  if (!fallbackRes.ok) {
+    const err = await fallbackRes.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to delete message');
   }
-  return res.json();
+  return fallbackRes.json();
 }
 
 export async function deleteChatConversation(conversationId: string): Promise<any> {
-  const res = await fetchWithAuth(`/chat/conversations/${conversationId}`, {
-    method: 'DELETE',
+  try {
+    const res = await fetchWithAuth(`/chat/conversations/${conversationId}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (e) {
+    // Fallback on request level error
+  }
+
+  // Fallback to POST if DELETE is blocked/unsupported
+  const fallbackRes = await fetchWithAuth(`/chat/conversations/${conversationId}/delete`, {
+    method: 'POST',
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
+  if (!fallbackRes.ok) {
+    const err = await fallbackRes.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to delete conversation');
   }
-  return res.json();
+  return fallbackRes.json();
 }
 
