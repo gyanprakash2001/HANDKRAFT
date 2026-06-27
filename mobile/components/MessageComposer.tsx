@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, TextInput, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, TextInput, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -18,13 +18,32 @@ export default function MessageComposer({
   onPickImage?: () => void;
   onPickVideo?: () => void;
 }) {
+  const handleAttachmentPress = () => {
+    Alert.alert(
+      'Share Media',
+      'Choose a media type to share',
+      [
+        {
+          text: '📷 Photo',
+          onPress: () => onPickImage?.(),
+        },
+        {
+          text: '🎥 Video',
+          onPress: () => onPickVideo?.(),
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
   return (
     <View style={styles.wrap}>
-      <Pressable style={styles.leftIcon} onPress={() => onPickImage && onPickImage()}>
-        <Ionicons name="image-outline" size={20} color="#9fb3c9" />
-      </Pressable>
-      <Pressable style={styles.leftIcon} onPress={() => onPickVideo && onPickVideo()}>
-        <Ionicons name="videocam-outline" size={20} color="#9fb3c9" />
+      <Pressable style={styles.leftIcon} onPress={handleAttachmentPress}>
+        <Ionicons name="attach-outline" size={24} color="#9fb3c9" />
       </Pressable>
       <TextInput
         value={value}
@@ -55,6 +74,8 @@ const styles = StyleSheet.create({
   leftIcon: {
     padding: 8,
     borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   input: {
     flex: 1,

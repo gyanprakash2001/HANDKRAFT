@@ -100,6 +100,10 @@ function updateApiRootFromBaseUrl(baseUrl: string) {
   }
 }
 
+export function getApiRootUrl() {
+  return API_ROOT_URL;
+}
+
 function getFetchBaseUrlOrder() {
   const preferred = FETCH_BASE_URLS.includes(preferredFetchBaseUrl)
     ? preferredFetchBaseUrl
@@ -1831,6 +1835,11 @@ export interface ChatMessage {
     isImage: boolean;
     isVideo: boolean;
   } | null;
+  reactions?: {
+    userId: string;
+    emoji: string;
+  }[];
+  readBy?: string[];
 }
 
 export async function ensureChatConversation(payload: {
@@ -2549,3 +2558,58 @@ export async function registerPushToken(pushToken: string): Promise<{ success: b
   }
   return res.json();
 }
+
+export async function addReaction(conversationId: string, messageId: string, emoji: string): Promise<any> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to add reaction');
+  }
+  return res.json();
+}
+
+export async function removeReaction(conversationId: string, messageId: string): Promise<any> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}/reactions`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to remove reaction');
+  }
+  return res.json();
+}
+
+export async function pinMessage(conversationId: string, messageId: string): Promise<any> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/messages/${messageId}/pin`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to pin message');
+  }
+  return res.json();
+}
+
+export async function unpinMessage(conversationId: string): Promise<any> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/pin`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to unpin message');
+  }
+  return res.json();
+}
+
+export async function getPinnedMessage(conversationId: string): Promise<{ pinnedMessage: { id: string; text: string; senderId: string; createdAt: string } | null }> {
+  const res = await fetchWithAuth(`/chat/conversations/${conversationId}/pinned`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to get pinned message');
+  }
+  return res.json();
+}
+

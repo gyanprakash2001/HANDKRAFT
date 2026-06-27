@@ -39,7 +39,6 @@ import {
 import { recordFeedInteraction } from '@/utils/feed-behavior';
 import { launchStableImageLibraryAsync } from '@/utils/media-picker';
 import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
-import { normalizeProduct, resolveProductImageUris } from '@/utils/product';
 type Params = {
   id?: string;
 };

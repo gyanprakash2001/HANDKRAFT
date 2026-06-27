@@ -244,9 +244,15 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
 
     ensureParticipantStates(conversation);
 
+    // Mark all other users' messages in this conversation as read by me
+    await Message.updateMany(
+      { conversation: conversationId, sender: { $ne: me }, readBy: { $ne: me } },
+      { $addToSet: { readBy: me } }
+    );
+
     const messages = await Message.find({ conversation: conversationId })
       .sort({ createdAt: 1 })
-      .select('_id sender text createdAt replyTo')
+      .select('_id sender text createdAt replyTo reactions readBy')
       .populate({
         path: 'replyTo',
         select: 'text sender createdAt',
@@ -282,6 +288,11 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
         isVideo: Boolean(isVideo),
         createdAt: message.createdAt,
         replyTo: replyToData,
+        reactions: (message.reactions || []).map(r => ({
+          userId: String(r.userId),
+          emoji: r.emoji
+        })),
+        readBy: (message.readBy || []).map(id => String(id)),
       };
     });
 
@@ -290,6 +301,12 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
       myState.unreadCount = 0;
       myState.lastReadAt = new Date();
       await conversation.save();
+    }
+
+    // Emit messages-read over Socket.IO if available
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('messages-read', { userId: me, conversationId });
     }
 
     res.json({ messages: formatted });
@@ -468,17 +485,188 @@ router.post('/conversations/:id/messages', auth, upload.single('image'), async (
       }
     }
 
+    const responseObj = {
+      id: String(message._id),
+      text: message.text,
+      senderId: String(message.sender),
+      isMine: false, // will be overridden by client
+      isImage: Boolean(isImage),
+      isVideo: Boolean(isVideo),
+      createdAt: message.createdAt,
+      replyTo: replyToData,
+      reactions: [],
+      readBy: [me],
+    };
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('new-message', responseObj);
+    }
+
     res.status(201).json({
       message: {
-        id: String(message._id),
-        text: message.text,
-        senderId: String(message.sender),
+        ...responseObj,
         isMine: true,
-        isImage: Boolean(isImage),
-        isVideo: Boolean(isVideo),
-        createdAt: message.createdAt,
-        replyTo: replyToData,
       },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
+// POST /api/chat/conversations/:id/messages/:messageId/reactions
+router.post('/conversations/:id/messages/:messageId/reactions', auth, async (req, res) => {
+  try {
+    const me = String(req.user._id);
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+
+    if (!emoji) {
+      return res.status(400).json({ message: 'Emoji is required' });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Remove existing reaction by same user if any
+    message.reactions = (message.reactions || []).filter(r => String(r.userId) !== me);
+    // Add new reaction
+    message.reactions.push({ userId: me, emoji });
+    await message.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${message.conversation}`).emit('message-reaction', {
+        messageId: String(message._id),
+        reactions: message.reactions.map(r => ({ userId: String(r.userId), emoji: r.emoji }))
+      });
+    }
+
+    res.json({ message: 'Reaction added', reactions: message.reactions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
+// DELETE /api/chat/conversations/:id/messages/:messageId/reactions
+router.delete('/conversations/:id/messages/:messageId/reactions', auth, async (req, res) => {
+  try {
+    const me = String(req.user._id);
+    const { messageId } = req.params;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Remove reaction by same user
+    message.reactions = (message.reactions || []).filter(r => String(r.userId) !== me);
+    await message.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${message.conversation}`).emit('message-reaction', {
+        messageId: String(message._id),
+        reactions: message.reactions.map(r => ({ userId: String(r.userId), emoji: r.emoji }))
+      });
+    }
+
+    res.json({ message: 'Reaction removed', reactions: message.reactions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
+// POST /api/chat/conversations/:id/messages/:messageId/pin
+router.post('/conversations/:id/messages/:messageId/pin', auth, async (req, res) => {
+  try {
+    const { id: conversationId, messageId } = req.params;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    conversation.pinnedMessageId = message._id;
+    await conversation.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('message-pinned', {
+        conversationId,
+        pinnedMessage: {
+          id: String(message._id),
+          text: message.text,
+          senderId: String(message.sender),
+          createdAt: message.createdAt
+        }
+      });
+    }
+
+    res.json({ message: 'Message pinned successfully', pinnedMessageId: message._id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
+// DELETE /api/chat/conversations/:id/pin
+router.delete('/conversations/:id/pin', auth, async (req, res) => {
+  try {
+    const { id: conversationId } = req.params;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    conversation.pinnedMessageId = null;
+    await conversation.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('message-unpinned', { conversationId });
+    }
+
+    res.json({ message: 'Message unpinned successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message || 'Server error' });
+  }
+});
+
+// GET /api/chat/conversations/:id/pinned
+router.get('/conversations/:id/pinned', auth, async (req, res) => {
+  try {
+    const { id: conversationId } = req.params;
+
+    const conversation = await Conversation.findById(conversationId).populate('pinnedMessageId');
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    if (!conversation.pinnedMessageId) {
+      return res.json({ pinnedMessage: null });
+    }
+
+    const msg = conversation.pinnedMessageId;
+    res.json({
+      pinnedMessage: {
+        id: String(msg._id),
+        text: msg.text,
+        senderId: String(msg.sender),
+        createdAt: msg.createdAt
+      }
     });
   } catch (err) {
     console.error(err);

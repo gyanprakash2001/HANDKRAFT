@@ -19,11 +19,22 @@ import * as Haptics from 'expo-haptics';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ChatMessage, getChatMessages, sendChatMessage, uploadChatImage } from '@/utils/api';
+import {
+  ChatMessage,
+  getChatMessages,
+  sendChatMessage,
+  uploadChatImage,
+  addReaction,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessage,
+} from '@/utils/api';
 import MessageBubble from '@/components/MessageBubble';
 import MessageComposer from '@/components/MessageComposer';
 import MediaViewerModal from '@/components/MediaViewerModal';
 import TypingIndicator from '@/components/TypingIndicator';
+import EmojiPicker from '@/components/EmojiPicker';
+import { getSocket } from '@/utils/socket';
 
 import currentUser from '@/utils/currentUser';
 
@@ -32,8 +43,6 @@ type Params = {
   sellerName?: string;
   productTitle?: string;
 };
-
-// MessageBubble, composer and typing indicator are implemented as separate components
 
 export default function MessageThreadScreen() {
   const router = useRouter();
@@ -45,13 +54,26 @@ export default function MessageThreadScreen() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [otherTyping] = useState(false);
+
+  const [isOtherOnline, setIsOtherOnline] = useState(false);
+  const [otherTyping, setOtherTyping] = useState(false);
+  const [pinnedMessage, setPinnedMessage] = useState<{ id: string; text: string; senderId: string; createdAt: string } | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerMessage, setPickerMessage] = useState<ChatMessage | null>(null);
+
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState('');
   const [viewerType, setViewerType] = useState<'image' | 'video'>('image');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+
+  const myId = currentUser.getProfile()?.id || 'me';
+
+  const otherUserId = useMemo(() => {
+    const firstOtherMsg = messages.find(m => m.senderId !== myId);
+    return firstOtherMsg ? firstOtherMsg.senderId : null;
+  }, [messages, myId]);
 
   const headerTitle = useMemo(() => {
     const label = String(sellerName || '').trim();
@@ -75,21 +97,155 @@ export default function MessageThreadScreen() {
     }
   }, [conversationId]);
 
+  const loadPinned = useCallback(async () => {
+    try {
+      const data = await getPinnedMessage(conversationId);
+      if (data && data.pinnedMessage) {
+        setPinnedMessage(data.pinnedMessage);
+      }
+    } catch {}
+  }, [conversationId]);
+
   useEffect(() => {
     loadMessages();
-  }, [loadMessages]);
+    loadPinned();
+  }, [loadMessages, loadPinned]);
 
-  useFocusEffect(
-    useCallback(() => {
-      const intervalId = setInterval(() => {
-        loadMessages(true);
-      }, 4000);
+  // Real-Time Socket Setup
+  useEffect(() => {
+    let active = true;
+    let currentSocket: any = null;
 
-      return () => {
-        clearInterval(intervalId);
-      };
-    }, [loadMessages])
-  );
+    const setupSocket = async () => {
+      try {
+        const socket = await getSocket();
+        if (!active) return;
+        currentSocket = socket;
+
+        socket.emit('join-conversation', { conversationId });
+
+        socket.on('typing', (data) => {
+          if (data.conversationId === conversationId && data.userId !== myId) {
+            setOtherTyping(true);
+          }
+        });
+
+        socket.on('stop-typing', (data) => {
+          if (data.conversationId === conversationId && data.userId !== myId) {
+            setOtherTyping(false);
+          }
+        });
+
+        socket.on('user-online', (data) => {
+          if (otherUserId && data.userId === otherUserId) {
+            setIsOtherOnline(true);
+          }
+        });
+
+        socket.on('user-offline', (data) => {
+          if (otherUserId && data.userId === otherUserId) {
+            setIsOtherOnline(false);
+          }
+        });
+
+        socket.on('messages-read', (data) => {
+          if (data.conversationId === conversationId && data.userId !== myId) {
+            setMessages(prev => prev.map(m => {
+              if (m.senderId === myId && (!m.readBy || !m.readBy.includes(data.userId))) {
+                return {
+                  ...m,
+                  readBy: [...(m.readBy || []), data.userId]
+                };
+              }
+              return m;
+            }));
+          }
+        });
+
+        socket.on('new-message', (msg) => {
+          if (msg.senderId !== myId) {
+            setMessages(prev => {
+              if (prev.some(m => m.id === msg.id)) return prev;
+              return [...prev, msg];
+            });
+            socket.emit('messages-read', { conversationId });
+          }
+        });
+
+        socket.on('message-reaction', (data) => {
+          setMessages(prev => prev.map(m => {
+            if (m.id === data.messageId) {
+              return {
+                ...m,
+                reactions: data.reactions
+              };
+            }
+            return m;
+          }));
+        });
+
+        socket.on('message-pinned', (data) => {
+          if (data.conversationId === conversationId) {
+            setPinnedMessage(data.pinnedMessage);
+          }
+        });
+
+        socket.on('message-unpinned', (data) => {
+          if (data.conversationId === conversationId) {
+            setPinnedMessage(null);
+          }
+        });
+
+      } catch (err) {
+        console.error('Socket setup error:', err);
+      }
+    };
+
+    setupSocket();
+
+    return () => {
+      active = false;
+      if (currentSocket) {
+        currentSocket.emit('leave-conversation', { conversationId });
+        currentSocket.off('typing');
+        currentSocket.off('stop-typing');
+        currentSocket.off('user-online');
+        currentSocket.off('user-offline');
+        currentSocket.off('messages-read');
+        currentSocket.off('new-message');
+        currentSocket.off('message-reaction');
+        currentSocket.off('message-pinned');
+        currentSocket.off('message-unpinned');
+      }
+    };
+  }, [conversationId, otherUserId, myId]);
+
+  // Typing logic
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isTypingRef = useRef(false);
+
+  const handleDraftChange = (text: string) => {
+    setDraft(text);
+    getSocket().then(socket => {
+      if (text.length > 0) {
+        if (!isTypingRef.current) {
+          isTypingRef.current = true;
+          socket.emit('typing', { conversationId });
+        }
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+          isTypingRef.current = false;
+          socket.emit('stop-typing', { conversationId });
+        }, 2000);
+      } else {
+        if (isTypingRef.current) {
+          isTypingRef.current = false;
+          socket.emit('stop-typing', { conversationId });
+        }
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      }
+    }).catch(() => {});
+  };
 
   const handleSend = async () => {
     const text = draft.trim();
@@ -102,9 +258,14 @@ export default function MessageThreadScreen() {
       setDraft('');
       const replyId = replyingTo?.id;
       setReplyingTo(null);
-      await sendChatMessage(conversationId, text, undefined, replyId);
-      const updated = await getChatMessages(conversationId);
-      setMessages(updated);
+
+      // Stop typing status instantly
+      isTypingRef.current = false;
+      const socket = await getSocket();
+      socket.emit('stop-typing', { conversationId });
+
+      const newMsg = await sendChatMessage(conversationId, text, undefined, replyId);
+      setMessages((prev) => [...prev, newMsg]);
     } catch (err: any) {
       setError(err?.message || 'Failed to send message');
     } finally {
@@ -116,7 +277,6 @@ export default function MessageThreadScreen() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your photos to send images.');
-      // Use explicit 'images' media type to avoid touching deprecated enums.
       const mediaTypesOption = ['images'];
 
       const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 0.8, copyToCacheDirectory: true });
@@ -126,40 +286,36 @@ export default function MessageThreadScreen() {
       const replyId = replyingTo?.id;
       setReplyingTo(null);
 
-      // Optimistic local preview
       const tempId = `temp-${Date.now()}`;
       const now = new Date().toISOString();
-      const localMsg: ChatMessage & { local?: boolean } = {
+      const localMsg: ChatMessage = {
         id: tempId,
         text: uri,
-        senderId: currentUser.getProfile()?.id || 'me',
+        senderId: myId,
         isMine: true,
         isImage: true,
         createdAt: now,
       };
       setMessages((prev) => [...prev, localMsg]);
 
-      // Read file as base64; if that fails (Android content:// URIs), fallback to multipart upload
       let dataUri: string | undefined;
       try {
         const isPng = String(uri).toLowerCase().endsWith('.png');
         const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
         dataUri = `data:${isPng ? 'image/png' : 'image/jpeg'};base64,${fileBase64}`;
       } catch {
-        // Attempt multipart upload as a fallback for URIs that can't be read as base64
         try {
           const sent = await uploadChatImage(conversationId, uri, replyId);
           setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
           return;
         } catch {
           setMessages((prev) => prev.filter((m) => m.id !== tempId));
-          return Alert.alert('Image error', 'Could not read or upload the selected image. Please try a different image or grant permission.');
+          return Alert.alert('Image error', 'Could not read or upload the selected image.');
         }
       }
 
       try {
         const sent = await sendChatMessage(conversationId, '', dataUri, replyId);
-        // Replace temp message with server message
         setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
       } catch (sendErr: any) {
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -190,26 +346,23 @@ export default function MessageThreadScreen() {
       const replyId = replyingTo?.id;
       setReplyingTo(null);
 
-      // Optimistic local preview
       const tempId = `temp-${Date.now()}`;
       const now = new Date().toISOString();
-      const localMsg: ChatMessage & { local?: boolean } = {
+      const localMsg: ChatMessage = {
         id: tempId,
         text: uri,
-        senderId: currentUser.getProfile()?.id || 'me',
+        senderId: myId,
         isMine: true,
         isVideo: true,
         createdAt: now,
       };
       setMessages((prev) => [...prev, localMsg]);
 
-      // Read file as base64; if that fails (Android content:// URIs), fallback to multipart upload
       let dataUri: string | undefined;
       try {
         const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
         dataUri = `data:video/mp4;base64,${fileBase64}`;
       } catch {
-        // Attempt multipart upload as a fallback
         try {
           const sent = await uploadChatImage(conversationId, uri, replyId);
           setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
@@ -217,7 +370,7 @@ export default function MessageThreadScreen() {
         } catch (uploadErr) {
           console.error('Upload video failed', uploadErr);
           setMessages((prev) => prev.filter((m) => m.id !== tempId));
-          return Alert.alert('Video error', 'Could not read or upload the selected video. Please try a different video or grant permission.');
+          return Alert.alert('Video error', 'Could not read or upload the selected video.');
         }
       }
 
@@ -252,30 +405,124 @@ export default function MessageThreadScreen() {
     }
   }, [messages]);
 
+  const handleLongPressBubble = (msg: ChatMessage) => {
+    const isPinned = pinnedMessage && pinnedMessage.id === msg.id;
+    Alert.alert(
+      'Message Options',
+      'Choose an action',
+      [
+        {
+          text: '❤️ React with Emoji',
+          onPress: () => {
+            setPickerMessage(msg);
+            setPickerVisible(true);
+          }
+        },
+        {
+          text: isPinned ? '📌 Unpin Message' : '📌 Pin Message',
+          onPress: async () => {
+            try {
+              if (isPinned) {
+                await unpinMessage(conversationId);
+                setPinnedMessage(null);
+              } else {
+                await pinMessage(conversationId, msg.id);
+                setPinnedMessage({
+                  id: msg.id,
+                  text: msg.text,
+                  senderId: msg.senderId,
+                  createdAt: msg.createdAt
+                });
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to update pin');
+            }
+          }
+        },
+        {
+          text: 'Reply',
+          onPress: () => setReplyingTo(msg)
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const handleSelectEmoji = async (emoji: string) => {
+    if (!pickerMessage) return;
+    try {
+      await addReaction(conversationId, pickerMessage.id, emoji);
+      setMessages(prev => prev.map(m => {
+        if (m.id === pickerMessage.id) {
+          const newReactions = (m.reactions || []).filter(r => r.userId !== myId);
+          newReactions.push({ userId: myId, emoji });
+          return { ...m, reactions: newReactions };
+        }
+        return m;
+      }));
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to react');
+    }
+  };
+
   return (
     <ThemedView style={styles.container}>
       <LinearGradient colors={['#111b2a', '#0a0a0a']} style={styles.headerGradient} />
+      
+      {/* Header */}
       <View style={styles.header}>
         <Pressable style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#fff" />
         </Pressable>
         <View style={styles.headerTextWrap}>
-          <ThemedText style={styles.headerTitle}>{headerTitle}</ThemedText>
-          {productTitle ? <ThemedText style={styles.headerSubtitle}>About {String(productTitle)}</ThemedText> : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <ThemedText style={styles.headerTitle}>{headerTitle}</ThemedText>
+            {isOtherOnline && <View style={styles.onlineDot} />}
+          </View>
+          <ThemedText style={styles.headerSubtitle}>
+            {isOtherOnline ? 'Online' : (productTitle ? `About ${String(productTitle)}` : 'Offline')}
+          </ThemedText>
         </View>
       </View>
 
+      {/* Pinned Message Sticky Banner */}
+      {pinnedMessage && (
+        <View style={styles.pinnedBanner}>
+          <Ionicons name="pin" size={16} color="#9df0a2" style={{ marginRight: 8 }} />
+          <Pressable style={{ flex: 1 }} onPress={() => handlePressReplyPreview(pinnedMessage.id)}>
+            <ThemedText style={styles.pinnedTitle}>Pinned Message</ThemedText>
+            <ThemedText style={styles.pinnedText} numberOfLines={1}>
+              {pinnedMessage.text.startsWith('http') || pinnedMessage.text.startsWith('data:') ? '🎥 Media' : pinnedMessage.text}
+            </ThemedText>
+          </Pressable>
+          <Pressable onPress={async () => {
+            try {
+              await unpinMessage(conversationId);
+              setPinnedMessage(null);
+            } catch {}
+          }}>
+            <Ionicons name="close-circle" size={18} color="#7f93ae" />
+          </Pressable>
+        </View>
+      )}
+
+      {/* KeyboardAvoidingView Wrap */}
       <KeyboardAvoidingView
         style={styles.threadWrap}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 10}>
+        
         {loading && messages.length === 0 ? (
           <View style={styles.loadingState}>
             <ActivityIndicator size="small" color="#9df0a2" />
             <ThemedText style={styles.loadingText}>Opening conversation...</ThemedText>
           </View>
         ) : (
-            <FlatList
+          <FlatList
             ref={flatListRef}
             data={messages}
             keyExtractor={(item) => item.id}
@@ -305,6 +552,7 @@ export default function MessageThreadScreen() {
                   onPressMedia={handleOpenMedia}
                   onSwipeToReply={setReplyingTo}
                   onPressReplyPreview={handlePressReplyPreview}
+                  onLongPress={handleLongPressBubble}
                   highlighted={highlightedId === item.id}
                 />
               );
@@ -347,7 +595,7 @@ export default function MessageThreadScreen() {
 
         <MessageComposer
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={handleDraftChange}
           onSend={handleSend}
           sending={sending}
           onPickImage={handlePickImage}
@@ -360,6 +608,12 @@ export default function MessageThreadScreen() {
         mediaUri={viewerUri}
         mediaType={viewerType}
         onClose={() => setViewerVisible(false)}
+      />
+
+      <EmojiPicker
+        visible={pickerVisible}
+        onSelect={handleSelectEmoji}
+        onClose={() => setPickerVisible(false)}
       />
     </ThemedView>
   );
@@ -414,6 +668,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#5fd37e',
+  },
+  pinnedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#121c2a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#263244',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+  },
+  pinnedTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9df0a2',
+  },
+  pinnedText: {
+    fontSize: 12,
+    color: '#8da0bb',
+    marginTop: 2,
+  },
   threadWrap: {
     flex: 1,
   },
@@ -452,56 +731,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
   },
-  messageRow: {
-    flexDirection: 'row',
-  },
-  messageAnimatedWrap: {
-    width: '100%',
-  },
-  messageRowMine: {
-    justifyContent: 'flex-end',
-  },
-  messageRowOther: {
-    justifyContent: 'flex-start',
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    borderRadius: 15,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-    borderWidth: 1,
-  },
-  messageBubbleMine: {
-    backgroundColor: '#9df0a2',
-    borderColor: '#6ec77a',
-    borderBottomRightRadius: 5,
-  },
-  messageBubbleOther: {
-    backgroundColor: '#151e2d',
-    borderColor: '#2b3b54',
-    borderBottomLeftRadius: 5,
-  },
-  messageText: {
-    fontSize: 13.5,
-    lineHeight: 18,
-  },
-  messageTextMine: {
-    color: '#0a0a0a',
-  },
-  messageTextOther: {
-    color: '#e5edf8',
-  },
-  messageMeta: {
-    fontSize: 10,
-    marginTop: 5,
-    alignSelf: 'flex-end',
-  },
-  messageMetaMine: {
-    color: '#233027',
-  },
-  messageMetaOther: {
-    color: '#7f93ae',
-  },
   errorBanner: {
     marginHorizontal: 10,
     marginBottom: 70,
@@ -527,54 +756,6 @@ const styles = StyleSheet.create({
   },
   errorRetryPressed: {
     opacity: 0.76,
-  },
-  composerWrap: {
-    marginHorizontal: 10,
-    marginBottom: 10,
-    marginTop: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#2d3e56',
-    backgroundColor: '#121c2a',
-    paddingHorizontal: 9,
-    paddingVertical: 9,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 7,
-  },
-  composerInput: {
-    flex: 1,
-    color: '#fff',
-    maxHeight: 90,
-    fontSize: 14,
-    lineHeight: 18,
-    paddingHorizontal: 7,
-    paddingTop: 4,
-    paddingBottom: 4,
-  },
-  sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  sendBtnGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnGlow: {
-    shadowColor: '#7fef9d',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  sendBtnDisabled: {
-    opacity: 0.65,
-  },
-  sendBtnPressed: {
-    transform: [{ scale: 0.93 }],
   },
   replyPreviewBar: {
     flexDirection: 'row',
