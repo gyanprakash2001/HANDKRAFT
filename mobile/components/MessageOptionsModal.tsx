@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, Text, Pressable, Modal, TouchableWithoutFeedback, Clipboard } from 'react-native';
+import { StyleSheet, View, Text, Pressable, Modal, TouchableWithoutFeedback, Clipboard, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { ThemedText } from './themed-text';
