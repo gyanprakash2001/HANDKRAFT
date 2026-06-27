@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -10,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,8 +31,10 @@ import MessageBubble from '@/components/MessageBubble';
 import MessageComposer from '@/components/MessageComposer';
 import MediaViewerModal from '@/components/MediaViewerModal';
 import TypingIndicator from '@/components/TypingIndicator';
-import EmojiPicker from '@/components/EmojiPicker';
 import { getSocket } from '@/utils/socket';
+import { ThemedAlert, AlertButton } from '@/components/ThemedAlert';
+import ShareMediaModal from '@/components/ShareMediaModal';
+import MessageOptionsModal from '@/components/MessageOptionsModal';
 
 import currentUser from '@/utils/currentUser';
 
@@ -58,8 +58,22 @@ export default function MessageThreadScreen() {
   const [isOtherOnline, setIsOtherOnline] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
   const [pinnedMessage, setPinnedMessage] = useState<{ id: string; text: string; senderId: string; createdAt: string } | null>(null);
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const [pickerMessage, setPickerMessage] = useState<ChatMessage | null>(null);
+  
+  // Custom Themed Modal States
+  const [shareMediaVisible, setShareMediaVisible] = useState(false);
+  const [messageOptionsVisible, setMessageOptionsVisible] = useState(false);
+  const [activeOptionMessage, setActiveOptionMessage] = useState<ChatMessage | null>(null);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertButtons, setAlertButtons] = useState<AlertButton[]>([]);
+
+  const showThemedAlert = (title: string, message: string, buttons: AlertButton[] = []) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertButtons(buttons);
+    setAlertVisible(true);
+  };
 
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState('');
@@ -276,16 +290,24 @@ export default function MessageThreadScreen() {
   const handlePickImage = async () => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your photos to send images.');
+      if (!perm.granted) {
+        showThemedAlert('Permission Required', 'Please allow access to your photos to send images.');
+        return;
+      }
       const mediaTypesOption = ['images'];
 
-      const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 0.8, copyToCacheDirectory: true });
+      const result = await (ImagePicker as any).launchImageLibraryAsync({
+        mediaTypes: mediaTypesOption,
+        quality: 0.8,
+        copyToCacheDirectory: true
+      });
       const uri = (result as any)?.assets?.[0]?.uri || (result as any)?.uri;
       if (!uri) return;
 
       const replyId = replyingTo?.id;
       setReplyingTo(null);
 
+      // Optimistic local preview
       const tempId = `temp-${Date.now()}`;
       const now = new Date().toISOString();
       const localMsg: ChatMessage = {
@@ -298,28 +320,13 @@ export default function MessageThreadScreen() {
       };
       setMessages((prev) => [...prev, localMsg]);
 
-      let dataUri: string | undefined;
+      // Direct multipart upload
       try {
-        const isPng = String(uri).toLowerCase().endsWith('.png');
-        const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        dataUri = `data:${isPng ? 'image/png' : 'image/jpeg'};base64,${fileBase64}`;
-      } catch {
-        try {
-          const sent = await uploadChatImage(conversationId, uri, replyId);
-          setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
-          return;
-        } catch {
-          setMessages((prev) => prev.filter((m) => m.id !== tempId));
-          return Alert.alert('Image error', 'Could not read or upload the selected image.');
-        }
-      }
-
-      try {
-        const sent = await sendChatMessage(conversationId, '', dataUri, replyId);
+        const sent = await uploadChatImage(conversationId, uri, replyId);
         setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
-      } catch (sendErr: any) {
+      } catch (err: any) {
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        Alert.alert('Send failed', sendErr?.message || 'Failed to send image');
+        showThemedAlert('Upload Failed', err?.message || 'Failed to upload image. Please check your network connection.');
       }
     } catch (err) {
       console.error('Pick image failed', err);
@@ -336,16 +343,24 @@ export default function MessageThreadScreen() {
   const handlePickVideo = async () => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return Alert.alert('Permission required', 'Please allow access to your media library to send videos.');
+      if (!perm.granted) {
+        showThemedAlert('Permission Required', 'Please allow access to your media library to send videos.');
+        return;
+      }
       const mediaTypesOption = ['videos'];
 
-      const result = await (ImagePicker as any).launchImageLibraryAsync({ mediaTypes: mediaTypesOption, quality: 0.8, copyToCacheDirectory: true });
+      const result = await (ImagePicker as any).launchImageLibraryAsync({
+        mediaTypes: mediaTypesOption,
+        quality: 0.8,
+        copyToCacheDirectory: true
+      });
       const uri = (result as any)?.assets?.[0]?.uri || (result as any)?.uri;
       if (!uri) return;
 
       const replyId = replyingTo?.id;
       setReplyingTo(null);
 
+      // Optimistic local preview
       const tempId = `temp-${Date.now()}`;
       const now = new Date().toISOString();
       const localMsg: ChatMessage = {
@@ -358,28 +373,13 @@ export default function MessageThreadScreen() {
       };
       setMessages((prev) => [...prev, localMsg]);
 
-      let dataUri: string | undefined;
+      // Direct multipart upload
       try {
-        const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        dataUri = `data:video/mp4;base64,${fileBase64}`;
-      } catch {
-        try {
-          const sent = await uploadChatImage(conversationId, uri, replyId);
-          setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
-          return;
-        } catch (uploadErr) {
-          console.error('Upload video failed', uploadErr);
-          setMessages((prev) => prev.filter((m) => m.id !== tempId));
-          return Alert.alert('Video error', 'Could not read or upload the selected video.');
-        }
-      }
-
-      try {
-        const sent = await sendChatMessage(conversationId, '', dataUri, replyId);
+        const sent = await uploadChatImage(conversationId, uri, replyId);
         setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
-      } catch (sendErr: any) {
+      } catch (err: any) {
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        Alert.alert('Send failed', sendErr?.message || 'Failed to send video');
+        showThemedAlert('Upload Failed', err?.message || 'Failed to upload video. Please check your network connection.');
       }
     } catch (err) {
       console.error('Pick video failed', err);
@@ -401,63 +401,22 @@ export default function MessageThreadScreen() {
         setHighlightedId(null);
       }, 1500);
     } else {
-      Alert.alert('Message not found', 'The replied-to message is no longer in this conversation window.');
+      showThemedAlert('Message Not Found', 'The replied-to message is no longer in this conversation window.');
     }
   }, [messages]);
 
   const handleLongPressBubble = (msg: ChatMessage) => {
-    const isPinned = pinnedMessage && pinnedMessage.id === msg.id;
-    Alert.alert(
-      'Message Options',
-      'Choose an action',
-      [
-        {
-          text: '❤️ React with Emoji',
-          onPress: () => {
-            setPickerMessage(msg);
-            setPickerVisible(true);
-          }
-        },
-        {
-          text: isPinned ? '📌 Unpin Message' : '📌 Pin Message',
-          onPress: async () => {
-            try {
-              if (isPinned) {
-                await unpinMessage(conversationId);
-                setPinnedMessage(null);
-              } else {
-                await pinMessage(conversationId, msg.id);
-                setPinnedMessage({
-                  id: msg.id,
-                  text: msg.text,
-                  senderId: msg.senderId,
-                  createdAt: msg.createdAt
-                });
-              }
-            } catch (err: any) {
-              Alert.alert('Error', err?.message || 'Failed to update pin');
-            }
-          }
-        },
-        {
-          text: 'Reply',
-          onPress: () => setReplyingTo(msg)
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        }
-      ],
-      { cancelable: true }
-    );
+    setActiveOptionMessage(msg);
+    setMessageOptionsVisible(true);
   };
 
   const handleSelectEmoji = async (emoji: string) => {
-    if (!pickerMessage) return;
+    if (!activeOptionMessage) return;
+    const msgId = activeOptionMessage.id;
     try {
-      await addReaction(conversationId, pickerMessage.id, emoji);
+      await addReaction(conversationId, msgId, emoji);
       setMessages(prev => prev.map(m => {
-        if (m.id === pickerMessage.id) {
+        if (m.id === msgId) {
           const newReactions = (m.reactions || []).filter(r => r.userId !== myId);
           newReactions.push({ userId: myId, emoji });
           return { ...m, reactions: newReactions };
@@ -465,7 +424,28 @@ export default function MessageThreadScreen() {
         return m;
       }));
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to react');
+      showThemedAlert('Error', err?.message || 'Failed to react');
+    }
+  };
+
+  const handlePinAction = async () => {
+    if (!activeOptionMessage) return;
+    const isPinned = pinnedMessage && pinnedMessage.id === activeOptionMessage.id;
+    try {
+      if (isPinned) {
+        await unpinMessage(conversationId);
+        setPinnedMessage(null);
+      } else {
+        await pinMessage(conversationId, activeOptionMessage.id);
+        setPinnedMessage({
+          id: activeOptionMessage.id,
+          text: activeOptionMessage.text,
+          senderId: activeOptionMessage.senderId,
+          createdAt: activeOptionMessage.createdAt
+        });
+      }
+    } catch (err: any) {
+      showThemedAlert('Error', err?.message || 'Failed to update pinned state');
     }
   };
 
@@ -598,8 +578,7 @@ export default function MessageThreadScreen() {
           onChangeText={handleDraftChange}
           onSend={handleSend}
           sending={sending}
-          onPickImage={handlePickImage}
-          onPickVideo={handlePickVideo}
+          onPressAttachment={() => setShareMediaVisible(true)}
         />
       </KeyboardAvoidingView>
 
@@ -610,10 +589,29 @@ export default function MessageThreadScreen() {
         onClose={() => setViewerVisible(false)}
       />
 
-      <EmojiPicker
-        visible={pickerVisible}
-        onSelect={handleSelectEmoji}
-        onClose={() => setPickerVisible(false)}
+      <ShareMediaModal
+        visible={shareMediaVisible}
+        onPickPhoto={handlePickImage}
+        onPickVideo={handlePickVideo}
+        onClose={() => setShareMediaVisible(false)}
+      />
+
+      <MessageOptionsModal
+        visible={messageOptionsVisible}
+        message={activeOptionMessage}
+        isPinned={pinnedMessage?.id === activeOptionMessage?.id}
+        onReact={handleSelectEmoji}
+        onReply={() => setReplyingTo(activeOptionMessage)}
+        onPin={handlePinAction}
+        onClose={() => setMessageOptionsVisible(false)}
+      />
+
+      <ThemedAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        buttons={alertButtons}
+        onClose={() => setAlertVisible(false)}
       />
     </ThemedView>
   );

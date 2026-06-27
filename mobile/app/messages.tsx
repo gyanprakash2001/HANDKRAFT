@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View, Pressable, FlatList, RefreshControl, ActivityIndicator, Animated } from 'react-native';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { StyleSheet, View, Pressable, FlatList, RefreshControl, ActivityIndicator, Animated, ScrollView, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -108,13 +108,33 @@ function ConversationRow({
   );
 }
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 export default function MessagesScreen() {
   const router = useRouter();
+  const scrollViewRef = useRef<ScrollView>(null);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeSection, setActiveSection] = useState<MessageSection>('seller_inbox');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleTabPress = (section: MessageSection) => {
+    setActiveSection(section);
+    Haptics.selectionAsync().catch(() => {});
+    const targetX = section === 'seller_inbox' ? 0 : SCREEN_WIDTH;
+    scrollViewRef.current?.scrollTo({ x: targetX, y: 0, animated: true });
+  };
+
+  const handleScrollEnd = (e: any) => {
+    const offsetX = e.nativeEvent.contentOffset.x;
+    const pageIndex = Math.round(offsetX / SCREEN_WIDTH);
+    const newSection: MessageSection = pageIndex === 0 ? 'seller_inbox' : 'buyer_orders';
+    if (newSection !== activeSection) {
+      setActiveSection(newSection);
+      Haptics.selectionAsync().catch(() => {});
+    }
+  };
 
   const formatTimestamp = (value?: string) => {
     if (!value) return '';
@@ -197,7 +217,7 @@ export default function MessagesScreen() {
             activeSection === 'seller_inbox' && styles.segmentButtonActive,
             pressed && styles.segmentButtonPressed,
           ]}
-          onPress={() => setActiveSection('seller_inbox')}>
+          onPress={() => handleTabPress('seller_inbox')}>
           <Ionicons name="construct-outline" size={14} color={activeSection === 'seller_inbox' ? '#082612' : '#9fb3cf'} />
           <ThemedText style={[styles.segmentText, activeSection === 'seller_inbox' && styles.segmentTextActive]}>
             Customer Requests
@@ -217,7 +237,7 @@ export default function MessagesScreen() {
             activeSection === 'buyer_orders' && styles.segmentButtonActive,
             pressed && styles.segmentButtonPressed,
           ]}
-          onPress={() => setActiveSection('buyer_orders')}>
+          onPress={() => handleTabPress('buyer_orders')}>
           <Ionicons name="bag-handle-outline" size={14} color={activeSection === 'buyer_orders' ? '#082612' : '#9fb3cf'} />
           <ThemedText style={[styles.segmentText, activeSection === 'buyer_orders' && styles.segmentTextActive]}>
             Custom Orders
@@ -232,58 +252,121 @@ export default function MessagesScreen() {
         </Pressable>
       </View>
 
-      <FlatList
-        data={visibleConversations}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadConversations(true)} tintColor="#fff" />}
-        renderItem={({ item, index }) => (
-          <ConversationRow
-            item={item}
-            index={index}
-            formatTimestamp={formatTimestamp}
-            onPress={() =>
-              router.push({
-                pathname: '/messages/[id]',
-                params: {
-                  id: item.id,
-                  sellerName: item.otherUser?.name || 'Seller chat',
-                  productTitle: item.product?.title || '',
-                },
-              })
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={handleScrollEnd}
+        contentContainerStyle={{ width: SCREEN_WIDTH * 2 }}
+        style={{ flex: 1 }}
+      >
+        <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
+          <FlatList
+            data={sectionedConversations.sellerInbox}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadConversations(true)} tintColor="#fff" />}
+            renderItem={({ item, index }) => (
+              <ConversationRow
+                item={item}
+                index={index}
+                formatTimestamp={formatTimestamp}
+                onPress={() =>
+                  router.push({
+                    pathname: '/messages/[id]',
+                    params: {
+                      id: item.id,
+                      sellerName: item.otherUser?.name || 'Seller chat',
+                      productTitle: item.product?.title || '',
+                    },
+                  })
+                }
+              />
+            )}
+            ListEmptyComponent={
+              loading ? (
+                <View style={styles.loadingState}>
+                  <ActivityIndicator size="small" color="#9df0a2" />
+                  <ThemedText style={styles.loadingText}>Loading conversations...</ThemedText>
+                  <View style={styles.skeletonCard} />
+                  <View style={styles.skeletonCard} />
+                  <View style={styles.skeletonCard} />
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={30} color="#9df0a2" />
+                  </View>
+                  <ThemedText style={styles.placeholderTitle}>No chats yet</ThemedText>
+                  <ThemedText style={styles.placeholderText}>
+                    {error || 'Customization requests from customers will appear here.'}
+                  </ThemedText>
+                  {error ? (
+                    <Pressable style={({ pressed }) => [styles.retryBtn, pressed && styles.retryBtnPressed]} onPress={() => loadConversations(true)}>
+                      <Ionicons name="refresh" size={14} color="#0b111b" />
+                      <ThemedText style={styles.retryBtnText}>Retry</ThemedText>
+                    </Pressable>
+                  ) : null}
+                </View>
+              )
             }
           />
-        )}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.loadingState}>
-              <ActivityIndicator size="small" color="#9df0a2" />
-              <ThemedText style={styles.loadingText}>Loading conversations...</ThemedText>
-              <View style={styles.skeletonCard} />
-              <View style={styles.skeletonCard} />
-              <View style={styles.skeletonCard} />
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconWrap}>
-                <Ionicons name="chatbubble-ellipses-outline" size={30} color="#9df0a2" />
-              </View>
-              <ThemedText style={styles.placeholderTitle}>No chats yet</ThemedText>
-              <ThemedText style={styles.placeholderText}>
-                {error || (activeSection === 'seller_inbox'
-                  ? 'Customization requests from customers will appear here.'
-                  : 'Chats related to your custom purchases will appear here.')}
-              </ThemedText>
-              {error ? (
-                <Pressable style={({ pressed }) => [styles.retryBtn, pressed && styles.retryBtnPressed]} onPress={() => loadConversations(true)}>
-                  <Ionicons name="refresh" size={14} color="#0b111b" />
-                  <ThemedText style={styles.retryBtnText}>Retry</ThemedText>
-                </Pressable>
-              ) : null}
-            </View>
-          )
-        }
-      />
+        </View>
+
+        <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
+          <FlatList
+            data={sectionedConversations.buyerOrders}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadConversations(true)} tintColor="#fff" />}
+            renderItem={({ item, index }) => (
+              <ConversationRow
+                item={item}
+                index={index}
+                formatTimestamp={formatTimestamp}
+                onPress={() =>
+                  router.push({
+                    pathname: '/messages/[id]',
+                    params: {
+                      id: item.id,
+                      sellerName: item.otherUser?.name || 'Seller chat',
+                      productTitle: item.product?.title || '',
+                    },
+                  })
+                }
+              />
+            )}
+            ListEmptyComponent={
+              loading ? (
+                <View style={styles.loadingState}>
+                  <ActivityIndicator size="small" color="#9df0a2" />
+                  <ThemedText style={styles.loadingText}>Loading conversations...</ThemedText>
+                  <View style={styles.skeletonCard} />
+                  <View style={styles.skeletonCard} />
+                  <View style={styles.skeletonCard} />
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={30} color="#9df0a2" />
+                  </View>
+                  <ThemedText style={styles.placeholderTitle}>No chats yet</ThemedText>
+                  <ThemedText style={styles.placeholderText}>
+                    {error || 'Chats related to your custom purchases will appear here.'}
+                  </ThemedText>
+                  {error ? (
+                    <Pressable style={({ pressed }) => [styles.retryBtn, pressed && styles.retryBtnPressed]} onPress={() => loadConversations(true)}>
+                      <Ionicons name="refresh" size={14} color="#0b111b" />
+                      <ThemedText style={styles.retryBtnText}>Retry</ThemedText>
+                    </Pressable>
+                  ) : null}
+                </View>
+              )
+            }
+          />
+        </View>
+      </ScrollView>
     </ThemedView>
   );
 }

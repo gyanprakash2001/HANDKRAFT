@@ -8,41 +8,17 @@ export default function MessageComposer({
   onChangeText,
   onSend,
   sending,
-  onPickImage,
-  onPickVideo,
+  onPressAttachment,
 }: {
   value: string;
   onChangeText: (t: string) => void;
   onSend: () => void;
   sending?: boolean;
-  onPickImage?: () => void;
-  onPickVideo?: () => void;
+  onPressAttachment?: () => void;
 }) {
-  const handleAttachmentPress = () => {
-    Alert.alert(
-      'Share Media',
-      'Choose a media type to share',
-      [
-        {
-          text: '📷 Photo',
-          onPress: () => onPickImage?.(),
-        },
-        {
-          text: '🎥 Video',
-          onPress: () => onPickVideo?.(),
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
   return (
     <View style={styles.wrap}>
-      <Pressable style={styles.leftIcon} onPress={handleAttachmentPress}>
+      <Pressable style={styles.leftIcon} onPress={onPressAttachment}>
         <Ionicons name="attach-outline" size={24} color="#9fb3c9" />
       </Pressable>
       <TextInput
